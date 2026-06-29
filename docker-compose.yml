@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: opencard
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-opencard}
+      POSTGRES_DB: opencard
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opencard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://opencard:${DB_PASSWORD:-opencard}@db:5432/opencard?schema=public"
+      BASE_URL: ${BASE_URL:-http://localhost:3000}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-changeme-admin-token}
+      SCIM_TOKEN: ${SCIM_TOKEN:-changeme-scim-token}
+      SESSION_SECRET: ${SESSION_SECRET:-changeme-session-secret}
+      UPLOAD_DIR: /app/uploads
+      # Employee self-service SSO (Azure AD / Entra). Leave blank to disable SSO.
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      # Local testing only: "1" lets employees sign in by typing an email (no IdP).
+      SELF_SERVICE_DEV_LOGIN: ${SELF_SERVICE_DEV_LOGIN:-0}
+      PORT: "3000"
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - uploads_data:/app/uploads
+    # On first boot, apply schema + seed, then start.
+    command: sh -c "npx prisma db push --skip-generate && node dist/seed.js || true; node dist/server.js"
+
+volumes:
+  db_data:
+  uploads_data:

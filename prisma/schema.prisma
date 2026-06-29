@@ -1,0 +1,223 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Top-level tenant: your company / this deployment.
+model Org {
+  id        String   @id @default(cuid())
+  name      String
+  brands    Brand[]
+  createdAt DateTime @default(now())
+}
+
+// A brand under the org — owns its default design + logo.
+model Brand {
+  id           String     @id @default(cuid())
+  org          Org        @relation(fields: [orgId], references: [id])
+  orgId        String
+  name         String
+  logoUrl      String?
+  primaryColor String     @default("#1f6f43")
+  textColor    String     @default("#111827")
+  bgColor      String     @default("#ffffff")
+  font         String     @default("system")
+  layout       String     @default("classic") // classic | banner | minimal | wave
+  defaultDomain String?
+  // Show the QR code on the public card page (the qr.png endpoint stays available
+  // regardless, for printing on physical NFC/PVC cards).
+  showQr       Boolean    @default(true)
+  // Brand-wide self-service policy: which card fields employees may edit at /me.
+  selfEditFields Json     @default("[\"photo\",\"bio\",\"phones\",\"emails\",\"socials\"]")
+  locations    Location[]
+  templates    Template[]
+  createdAt    DateTime   @default(now())
+}
+
+// A store/site under a brand. Can override logo + design.
+model Location {
+  id           String   @id @default(cuid())
+  brand        Brand    @relation(fields: [brandId], references: [id])
+  brandId      String
+  name         String
+  code         String?  // store number / external code used for AD mapping
+  logoUrl      String?  // override brand logo
+  primaryColor String?  // override brand color
+  layout       String?  // override brand layout
+  address      Json?    // default address shown on this store's cards
+  users        User[]
+  cards        Card[]
+  createdAt    DateTime @default(now())
+
+  @@unique([brandId, code])
+}
+
+// Reusable design preset, scoped to a brand.
+model Template {
+  id           String  @id @default(cuid())
+  brand        Brand   @relation(fields: [brandId], references: [id])
+  brandId      String
+  name         String
+  layout       String  @default("classic")
+  primaryColor String  @default("#1f6f43")
+  textColor    String  @default("#111827")
+  bgColor      String  @default("#ffffff")
+  font         String  @default("system")
+  isDefault    Boolean @default(false)
+  cards        Card[]
+  createdAt    DateTime @default(now())
+}
+
+// An employee, attached to a location. Synced from AD/Azure AD or created by admin.
+model User {
+  id          String   @id @default(cuid())
+  location    Location @relation(fields: [locationId], references: [id])
+  locationId  String
+  email       String   @unique
+  displayName String
+  externalId  String?  @unique // SCIM externalId / AD objectId
+  scimId      String?  @unique
+  active      Boolean  @default(true)
+  card        Card?
+  createdAt   DateTime @default(now())
+}
+
+model Card {
+  id          String    @id @default(cuid())
+  location    Location  @relation(fields: [locationId], references: [id])
+  locationId  String
+  user        User?     @relation(fields: [userId], references: [id])
+  userId      String?   @unique
+  template    Template? @relation(fields: [templateId], references: [id])
+  templateId  String?
+
+  slug        String    @unique // public URL: /c/:slug
+
+  prefix      String?
+  firstName   String
+  lastName    String
+  pronouns    String?
+  title       String?
+  department  String?
+  company     String?
+  bio         String?
+  photoUrl    String?
+
+  // Flexible multi-value fields stored as JSON arrays (see ARCHITECTURE.md).
+  phones      Json      @default("[]")
+  emails      Json      @default("[]")
+  websites    Json      @default("[]")
+  socials     Json      @default("[]")
+  address     Json?
+
+  // Per-card overrides (most specific in the inheritance chain).
+  layout       String?
+  primaryColor String?
+  logoUrl      String?
+  showQr       Boolean?  // null = inherit brand setting
+
+  // Self-service: the employee who owns this card (matched to their SSO email),
+  // and an optional per-card override of the brand's allowed-fields policy (null = inherit).
+  ownerEmail     String?
+  selfEditFields Json?
+
+  active      Boolean   @default(true)
+  events      AnalyticsEvent[]
+  leads       Lead[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([ownerEmail])
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  cardId    String
+  type      String   // view | click | vcard | qr | connect
+  meta      String?
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([cardId, type])
+}
+
+model Lead {
+  id        String   @id @default(cuid())
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  cardId    String
+  name      String
+  email     String?
+  phone     String?
+  company   String?
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([cardId])
+}
+
+// An admin account with a role. Self-service (card owners) are NOT stored here;
+// anyone without an AdminUser record is a plain self-service user.
+model AdminUser {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  name         String?
+  role         String       // super_admin | general_admin | brand_admin | location_admin
+  passwordHash String? // scrypt hash; null = SSO-only account
+  mfaSecret    String? // base32 TOTP secret
+  mfaEnabled   Boolean      @default(false)
+  active       Boolean      @default(true)
+  scopes       AdminScope[]
+  createdAt    DateTime     @default(now())
+}
+
+// Scope rows for brand_admin / location_admin (an admin may have several).
+model AdminScope {
+  id          String    @id @default(cuid())
+  admin       AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  adminUserId String
+  brandId     String?
+  locationId  String?
+
+  @@index([adminUserId])
+}
+
+// Issuable bearer key for the REST API. Only the SHA-256 hash is stored.
+model ApiKey {
+  id         String    @id @default(cuid())
+  name       String
+  prefix     String // first chars of the key, for display
+  keyHash    String    @unique
+  lastUsedAt DateTime?
+  revoked    Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+}
+
+// Outbound webhook subscription.
+model WebhookEndpoint {
+  id         String            @id @default(cuid())
+  url        String
+  secret     String // HMAC signing secret
+  events     Json              @default("[\"lead.captured\"]")
+  active     Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+  deliveries WebhookDelivery[]
+}
+
+model WebhookDelivery {
+  id         String          @id @default(cuid())
+  endpoint   WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  endpointId String
+  event      String
+  success    Boolean
+  statusCode Int?
+  error      String?
+  createdAt  DateTime        @default(now())
+
+  @@index([endpointId, createdAt])
+}
