@@ -6,6 +6,7 @@ design, cards auto-provision from Azure AD, and everything runs in Docker on you
 own infrastructure. No per-seat SaaS fees.
 
 See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the design and feature overview.
+See **[docs/ROADMAP.md](./docs/ROADMAP.md)** for the dealership-first SaaS roadmap.
 
 ## What it does
 
@@ -187,5 +188,4 @@ docker-compose.yml     app + postgres
 
 ## Roadmap
 
-Apple/Google Wallet passes · LDAP on-prem sync container · CRM export of leads ·
-self-serve employee editing · per-card custom domains · richer template designer.
+The current roadmap is tracked in **[docs/ROADMAP.md](./docs/ROADMAP.md)**.
