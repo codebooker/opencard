@@ -60,16 +60,16 @@ Goal: make the current codebase safe enough to evolve into SaaS.
 - Keep SAML disabled until configured.
 - Keep repo layout aligned with GitHub root.
 
-### Next Hardening Items
+- CSRF protection (Origin/Referer guard) on admin and self-service POST routes.
+- Request rate limiting for login, SCIM, public lead capture, and API auth.
+- Global security headers (CSP, nosniff, frame, referrer, permissions, HSTS).
+- Structured request logging.
+- Error-handling middleware with safe production responses.
+- Basic automated tests (auth/sessions, TOTP/passwords, rate limit, CSRF, parsing, vCard).
+- Replaced deprecated `multer` 1.x with the maintained `multer` 2.x.
+- Database migrations (`prisma migrate deploy`, baseline-aware) instead of `db push` for production.
 
-- Add CSRF protection for admin and self-service POST routes.
-- Add request rate limiting for login, SCIM, public lead capture, and API key auth.
-- Add global security headers.
-- Add structured request logging.
-- Add error handling middleware with safe production responses.
-- Add basic automated tests around auth, RBAC, uploads, and public card routes.
-- Replace deprecated `multer` 1.x with a maintained upload path.
-- Add database migrations instead of relying on `prisma db push` for production.
+**Phase 0 complete.** Next up: Phase 1 (true multi-tenancy).
 
 ## Phase 1: True SaaS Multi-Tenancy
 
