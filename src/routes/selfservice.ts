@@ -2,10 +2,12 @@ import { Router } from "express";
 import crypto from "crypto";
 import { prisma } from "../db";
 import { config } from "../config";
+import { clearCookieOptions, cookieOptions } from "../cookies";
 import { upload, uploadedUrl } from "../upload";
 import { clean, parseLabeled, parseSocials } from "../parse";
 import { emitEvent, cardPayload } from "../webhooks";
 import { DEFAULT_SELF_FIELDS } from "../views/widgets";
+import { emailFromSamlProfile, getEnabledSaml } from "../saml";
 import {
   signEmail,
   verifyEmail,
@@ -36,16 +38,20 @@ function allowedFields(card: any): string[] {
 }
 
 // ---- sign in ----
-selfRouter.get("/login", (req, res) => {
+selfRouter.get("/login", async (req, res) => {
   if (oidcEnabled()) {
     const state = crypto.randomBytes(12).toString("hex");
-    res.cookie("oc_state", state, { httpOnly: true, sameSite: "lax" });
-    return res.redirect(authorizeUrl(state));
+    const nonce = crypto.randomBytes(16).toString("hex");
+    res.cookie("oc_state", state, cookieOptions(10 * 60 * 1000));
+    res.cookie("oc_nonce", nonce, cookieOptions(10 * 60 * 1000));
+    return res.redirect(authorizeUrl(state, nonce));
   }
   if (config.devLogin) return res.send(V.devLoginPage());
+  const saml = await getEnabledSaml();
+  if (saml) return res.send(V.samlLoginPage());
   return res.send(
     V.notConfiguredPage(
-      "Self-service sign-in isn't configured yet. Ask your admin to enable Azure AD SSO (AZURE_* env vars)."
+      "Self-service sign-in isn't configured yet. Ask your admin to enable SAML SSO or Azure AD SSO."
     )
   );
 });
@@ -54,18 +60,46 @@ selfRouter.get("/auth/callback", async (req, res) => {
   const code = String(req.query.code || "");
   const state = String(req.query.state || "");
   if (!code || !state || state !== req.cookies?.oc_state) return res.status(400).send("Invalid sign-in state.");
-  res.clearCookie("oc_state");
-  const email = await exchangeCode(code);
+  const nonce = String(req.cookies?.oc_nonce || "");
+  res.clearCookie("oc_state", clearCookieOptions());
+  res.clearCookie("oc_nonce", clearCookieOptions());
+  if (!nonce) return res.status(400).send("Invalid sign-in state.");
+  const email = await exchangeCode(code, nonce);
   if (!email) return res.status(401).send("Sign-in failed.");
-  res.cookie(COOKIE, signEmail(email), { httpOnly: true, sameSite: "lax" });
+  res.cookie(COOKIE, signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
   res.redirect(await postLoginDest(email));
+});
+
+selfRouter.get("/saml/login", async (_req, res) => {
+  const enabled = await getEnabledSaml();
+  if (!enabled) return res.status(404).send("SAML sign-in is not enabled.");
+  const url = await enabled.saml.getAuthorizeUrlAsync("", undefined, {});
+  res.redirect(url);
+});
+
+selfRouter.post("/saml/acs", async (req, res) => {
+  const enabled = await getEnabledSaml();
+  if (!enabled) return res.status(404).send("SAML sign-in is not enabled.");
+  try {
+    const result = await enabled.saml.validatePostResponseAsync({
+      SAMLResponse: String(req.body?.SAMLResponse || ""),
+      RelayState: String(req.body?.RelayState || ""),
+    });
+    if (!result.profile) return res.status(401).send("SAML sign-in failed.");
+    const email = emailFromSamlProfile(result.profile);
+    if (!email) return res.status(401).send("SAML response did not include an email address.");
+    res.cookie(COOKIE, signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
+    res.redirect(await postLoginDest(email));
+  } catch {
+    res.status(401).send("SAML sign-in failed.");
+  }
 });
 
 selfRouter.post("/devlogin", async (req, res) => {
   if (!config.devLogin) return res.status(404).send("Not found");
   const email = String(req.body?.email || "").toLowerCase().trim();
   if (!email) return res.redirect("/me/login");
-  res.cookie(COOKIE, signEmail(email), { httpOnly: true, sameSite: "lax" });
+  res.cookie(COOKIE, signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
   res.redirect(await postLoginDest(email));
 });
 
@@ -76,7 +110,7 @@ async function postLoginDest(email: string): Promise<string> {
 }
 
 selfRouter.get("/logout", (_req, res) => {
-  res.clearCookie(COOKIE);
+  res.clearCookie(COOKIE, clearCookieOptions());
   res.redirect("/me/login");
 });
 

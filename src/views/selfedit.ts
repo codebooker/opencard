@@ -35,6 +35,17 @@ export function devLoginPage(): string {
   );
 }
 
+export function samlLoginPage(): string {
+  return shell(
+    "Sign in",
+    `<div class="stat" style="max-width:420px">
+      <h2>Work account sign in</h2>
+      <p class="muted">Use your organization's SAML identity provider to continue.</p>
+      <p style="margin-top:14px"><a class="btn" href="/me/saml/login">Sign in with SAML</a></p>
+    </div>`
+  );
+}
+
 export function noCardPage(email: string): string {
   return shell(
     "No card",

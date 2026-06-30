@@ -21,11 +21,11 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://opencard:${DB_PASSWORD:-opencard}@db:5432/opencard?schema=public"
+      DATABASE_URL: "postgresql://opencard:${DB_PASSWORD:?Set DB_PASSWORD in .env}@db:5432/opencard?schema=public"
       BASE_URL: ${BASE_URL:-http://localhost:3000}
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-changeme-admin-token}
-      SCIM_TOKEN: ${SCIM_TOKEN:-changeme-scim-token}
-      SESSION_SECRET: ${SESSION_SECRET:-changeme-session-secret}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in .env}
+      SCIM_TOKEN: ${SCIM_TOKEN:?Set SCIM_TOKEN in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
       UPLOAD_DIR: /app/uploads
       # Employee self-service SSO (Azure AD / Entra). Leave blank to disable SSO.
       AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
@@ -39,7 +39,7 @@ services:
     volumes:
       - uploads_data:/app/uploads
     # On first boot, apply schema + seed, then start.
-    command: sh -c "npx prisma db push --skip-generate && node dist/seed.js || true; node dist/server.js"
+    command: sh -c "npx prisma db push --skip-generate && node dist/seed.js && node dist/server.js"
 
 volumes:
   db_data:

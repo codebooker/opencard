@@ -1,6 +1,18 @@
 import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
+const dealershipTerminology = {
+  brandSingular: "Brand",
+  brandPlural: "Brands",
+  locationSingular: "Rooftop",
+  locationPlural: "Rooftops",
+  locationCodeLabel: "Rooftop code",
+  cardSingular: "Card",
+  cardPlural: "Cards",
+  leadSingular: "Customer lead",
+  leadPlural: "Customer leads",
+};
+
 async function main() {
   // Idempotent backfill so self-service works on pre-existing demo data too.
   const demoOwners: [string, string][] = [
@@ -30,11 +42,17 @@ async function main() {
   if (mwDt) await ensureAdmin("storeadmin@maplewood.ca", "location_admin", { locationId: mwDt.id });
 
   if (await prisma.org.findFirst()) {
+    await prisma.org.updateMany({
+      where: { vertical: "general" },
+      data: { vertical: "dealership", terminology: dealershipTerminology },
+    });
     console.log("Seed: org already exists, skipping (owner emails + demo admins backfilled).");
     return;
   }
 
-  const org = await prisma.org.create({ data: { name: "Your Company, Inc." } });
+  const org = await prisma.org.create({
+    data: { name: "Demo Dealer Group", vertical: "dealership", terminology: dealershipTerminology },
+  });
 
   // ---- Brand 1: Maplewood Real Estate (green, classic) ----
   const maplewood = await prisma.brand.create({

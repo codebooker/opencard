@@ -19,6 +19,16 @@ See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the design and feature overview
 - **Azure AD / Entra auto-provisioning** via a SCIM 2.0 endpoint — add an employee
   to the directory and a card is created automatically in the right store.
 
+## SaaS direction: dealership-first, general underneath
+
+OpenCard is moving toward a dealership-first SaaS wedge while keeping the core
+data model vertical-neutral. Internally the app still uses generic concepts like
+`Org`, `Brand`, `Location`, `Card`, and `Lead`. Each org can carry terminology
+that changes how those concepts are presented in the UI. For the dealership
+vertical, locations display as **rooftops**, lead capture can be positioned as
+customer lead capture, and the same structure can later support franchises,
+real estate brokerages, insurance agencies, and other multi-location teams.
+
 ## Quick start (Docker)
 
 ```bash
@@ -103,6 +113,15 @@ air-gapped). For production, put the `/admin` routes behind Azure AD OIDC:
 set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` and front the app
 with your identity-aware proxy, or extend `src/middleware/auth.ts` with an OIDC
 flow (`openid-client`). The token path remains as a break-glass fallback.
+
+## Optional SAML sign-in
+
+SAML is disabled by default. A super admin can turn it on at
+`/admin/integrations` after entering the IdP SSO URL, optional IdP issuer, and
+IdP signing certificate. The page shows the service provider Entity ID and
+Assertion Consumer Service URL to paste into the IdP. When enabled, `/me/login`
+offers SAML sign-in and maps the returned email address to either an admin
+account or the employee's card owner email.
 
 ## REST API
 

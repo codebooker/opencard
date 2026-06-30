@@ -1,6 +1,7 @@
 import { esc, page } from "./html";
 import { Address } from "../types";
 import { AdminPrincipal, ROLE_LABELS } from "../rbac";
+import { GENERAL_TERMINOLOGY, Terminology, lower } from "../terminology";
 import {
   photoField,
   labeledRowsField,
@@ -58,19 +59,23 @@ type BrandWithLocations = {
   locations: LocationLite[];
 };
 
-export function dashboard(brands: BrandWithLocations[], p: AdminPrincipal): string {
+export function dashboard(
+  brands: BrandWithLocations[],
+  p: AdminPrincipal,
+  t: Terminology = GENERAL_TERMINOLOGY
+): string {
   const canManage = (brandId: string) =>
     p.global || (p.role === "brand_admin" && p.brandIds.includes(brandId));
   const topActions = `
     ${p.super ? `<a class="btn secondary" href="/admin/admins">Admins</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/integrations">Integrations</a>` : ""}
-    ${p.global ? `<a class="btn" href="/admin/brands/new">+ New brand</a>` : ""}`;
+    ${p.global ? `<a class="btn" href="/admin/brands/new">+ New ${lower(t.brandSingular)}</a>` : ""}`;
   const body = `
   <p class="muted">Signed in as ${esc(p.name)} · <strong>${esc(ROLE_LABELS[p.role])}</strong></p>
-  <div class="topbar"><h2>Brands &amp; stores</h2><div>${topActions}</div></div>
+  <div class="topbar"><h2>${esc(t.brandPlural)} &amp; ${esc(lower(t.locationPlural))}</h2><div>${topActions}</div></div>
   ${
     brands.length === 0
-      ? `<p class="muted">No brands in your scope yet.</p>`
+      ? `<p class="muted">No ${esc(lower(t.brandPlural))} in your scope yet.</p>`
       : brands
           .map(
             (b) => `
@@ -87,14 +92,14 @@ export function dashboard(brands: BrandWithLocations[], p: AdminPrincipal): stri
           ${
             canManage(b.id)
               ? `<a class="btn secondary" href="/admin/templates?brandId=${esc(b.id)}">Templates</a>
-          <a class="btn secondary" href="/admin/brands/${esc(b.id)}/edit">Edit brand</a>
-          <a class="btn" href="/admin/locations/new?brandId=${esc(b.id)}">+ Store</a>`
+          <a class="btn secondary" href="/admin/brands/${esc(b.id)}/edit">Edit ${esc(lower(t.brandSingular))}</a>
+          <a class="btn" href="/admin/locations/new?brandId=${esc(b.id)}">+ ${esc(t.locationSingular)}</a>`
               : ""
           }
         </div>
       </div>
       <table style="margin-top:10px">
-        <tr><th>Store</th><th>Code</th><th>Cards</th><th></th></tr>
+        <tr><th>${esc(t.locationSingular)}</th><th>Code</th><th>${esc(t.cardPlural)}</th><th></th></tr>
         ${
           b.locations.length
             ? b.locations
@@ -104,12 +109,12 @@ export function dashboard(brands: BrandWithLocations[], p: AdminPrincipal): stri
             <td class="muted">${esc(l.code || "—")}</td>
             <td>${l._count?.cards ?? 0}</td>
             <td>
-              <a href="/admin/cards?locationId=${esc(l.id)}">Cards</a> ·
+              <a href="/admin/cards?locationId=${esc(l.id)}">${esc(t.cardPlural)}</a> ·
               <a href="/admin/locations/${esc(l.id)}/edit">Edit</a>
             </td></tr>`
                 )
                 .join("")
-            : `<tr><td colspan="4" class="muted">No stores yet.</td></tr>`
+            : `<tr><td colspan="4" class="muted">No ${esc(lower(t.locationPlural))} yet.</td></tr>`
         }
       </table>
     </div>`
@@ -121,11 +126,15 @@ export function dashboard(brands: BrandWithLocations[], p: AdminPrincipal): stri
 
 const LAYOUTS = ["classic", "banner", "minimal", "wave"];
 
-export function brandForm(brand?: any, stats?: { locations: number; cards: number }): string {
+export function brandForm(
+  brand?: any,
+  stats?: { locations: number; cards: number },
+  t: Terminology = GENERAL_TERMINOLOGY
+): string {
   const b = brand || {};
   const action = brand ? `/admin/brands/${brand.id}` : "/admin/brands";
   const body = `
-  <h2>${brand ? "Edit" : "New"} brand</h2>
+  <h2>${brand ? "Edit" : "New"} ${esc(lower(t.brandSingular))}</h2>
   <form class="editor" method="POST" action="${action}" enctype="multipart/form-data">
     <label>Brand name</label><input name="name" value="${esc(b.name)}" required />
     <label>Logo</label>
@@ -133,7 +142,7 @@ export function brandForm(brand?: any, stats?: { locations: number; cards: numbe
     <input type="file" name="logoFile" accept="image/*" />
     <label>…or paste a logo URL</label><input name="logoUrl" value="${esc(b.logoUrl)}" placeholder="https://.../logo.png" />
     <h3>Design</h3>
-    <p class="muted">Pick a layout, colors and font — the preview updates live. Cards inherit this unless a store, template, or the card overrides it.</p>
+    <p class="muted">Pick a layout, colors and font — the preview updates live. ${esc(t.cardPlural)} inherit this unless a ${esc(lower(t.locationSingular))}, template, or the ${esc(lower(t.cardSingular))} overrides it.</p>
     ${designControls({
       layout: b.layout,
       primaryColor: b.primaryColor,
@@ -160,7 +169,7 @@ export function brandForm(brand?: any, stats?: { locations: number; cards: numbe
       ? `<div class="danger-zone">
     <h3>Danger zone — delete brand</h3>
     <p class="muted">Permanently deletes <strong>${esc(b.name)}</strong> and everything under it:
-    <strong>${stats?.locations ?? 0}</strong> store(s) and <strong>${stats?.cards ?? 0}</strong> card(s),
+    <strong>${stats?.locations ?? 0}</strong> ${esc(lower(t.locationPlural))} and <strong>${stats?.cards ?? 0}</strong> ${esc(lower(t.cardPlural))},
     including their analytics and captured leads. This cannot be undone.</p>
     <form method="POST" action="/admin/brands/${esc(b.id)}/delete" onsubmit="return confirmBrandDelete(this)">
       <label>To confirm, type the brand name exactly as shown: <strong>${esc(b.name)}</strong></label>
@@ -172,7 +181,7 @@ export function brandForm(brand?: any, stats?: { locations: number; cards: numbe
   function confirmBrandDelete(f){
     var expected = ${JSON.stringify(b.name || "")};
     if (f.confirmName.value !== expected){ alert('The name you typed does not match exactly. Please type: ' + expected); return false; }
-    if (!confirm('Are you ABSOLUTELY sure? This permanently deletes the brand "' + expected + '", all of its stores, and all of its cards. This cannot be undone.')) return false;
+    if (!confirm('Are you ABSOLUTELY sure? This permanently deletes the ${lower(t.brandSingular)} "' + expected + '", all of its ${lower(t.locationPlural)}, and all of its ${lower(t.cardPlural)}. This cannot be undone.')) return false;
     if (!confirm('Final confirmation: this is irreversible. Delete ' + expected + ' now?')) return false;
     return true;
   }
@@ -183,17 +192,21 @@ export function brandForm(brand?: any, stats?: { locations: number; cards: numbe
   return shell("Brand", body);
 }
 
-export function locationForm(brandId: string, location?: any): string {
+export function locationForm(
+  brandId: string,
+  location?: any,
+  t: Terminology = GENERAL_TERMINOLOGY
+): string {
   const l = location || {};
   const addr = (l.address as Address) || {};
   const action = location ? `/admin/locations/${location.id}` : "/admin/locations";
   const body = `
-  <h2>${location ? "Edit" : "New"} store</h2>
+  <h2>${location ? "Edit" : "New"} ${esc(lower(t.locationSingular))}</h2>
   <form class="editor" method="POST" action="${action}" enctype="multipart/form-data">
     <input type="hidden" name="brandId" value="${esc(brandId)}" />
-    <label>Store name</label><input name="name" value="${esc(l.name)}" required />
-    <label>Store code (for AD mapping)</label><input name="code" value="${esc(l.code)}" placeholder="e.g. STORE-014" />
-    <p class="muted">Leave the overrides blank to inherit from the brand.</p>
+    <label>${esc(t.locationSingular)} name</label><input name="name" value="${esc(l.name)}" required />
+    <label>${esc(t.locationCodeLabel)} (for directory mapping)</label><input name="code" value="${esc(l.code)}" placeholder="e.g. STORE-014" />
+    <p class="muted">Leave the overrides blank to inherit from the ${esc(lower(t.brandSingular))}.</p>
     <label>Logo override</label>
     ${l.logoUrl ? `<p class="muted">Current: <img src="${esc(l.logoUrl)}" style="height:34px;vertical-align:middle" /></p>` : ""}
     <input type="file" name="logoFile" accept="image/*" />
@@ -205,7 +218,7 @@ export function locationForm(brandId: string, location?: any): string {
     <select name="layout"><option value="">(inherit)</option>${LAYOUTS.map(
       (x) => `<option ${l.layout === x ? "selected" : ""}>${x}</option>`
     ).join("")}</select>
-    <h3>Store address (shown on cards by default)</h3>
+    <h3>${esc(t.locationSingular)} address (shown on ${esc(lower(t.cardPlural))} by default)</h3>
     <label>Address line 1</label><input name="addr_line1" value="${esc(addr.line1)}" />
     <div class="grid2">
       <div><label>City</label><input name="addr_city" value="${esc(addr.city)}" /></div>
@@ -215,17 +228,22 @@ export function locationForm(brandId: string, location?: any): string {
       <div><label>Postal code</label><input name="addr_postal" value="${esc(addr.postal)}" /></div>
       <div><label>Country</label><input name="addr_country" value="${esc(addr.country)}" /></div>
     </div>
-    <p style="margin-top:16px"><button class="btn" type="submit">Save store</button>
+    <p style="margin-top:16px"><button class="btn" type="submit">Save ${esc(lower(t.locationSingular))}</button>
     <a class="btn secondary" href="/admin">Cancel</a></p>
   </form>`;
-  return shell("Store", body);
+  return shell(t.locationSingular, body);
 }
 
-export function cardList(locationName: string, locationId: string, cards: any[]): string {
+export function cardList(
+  locationName: string,
+  locationId: string,
+  cards: any[],
+  t: Terminology = GENERAL_TERMINOLOGY
+): string {
   const body = `
   <div class="topbar">
-    <h2>Cards — ${esc(locationName)}</h2>
-    <a class="btn" href="/admin/cards/new?locationId=${esc(locationId)}">+ New card</a>
+    <h2>${esc(t.cardPlural)} — ${esc(locationName)}</h2>
+    <a class="btn" href="/admin/cards/new?locationId=${esc(locationId)}">+ New ${esc(lower(t.cardSingular))}</a>
   </div>
   <table>
     <tr><th>Name</th><th>Title</th><th>Public link</th><th>Status</th><th></th></tr>
@@ -245,11 +263,11 @@ export function cardList(locationName: string, locationId: string, cards: any[])
       </td></tr>`
             )
             .join("")
-        : `<tr><td colspan="5" class="muted">No cards in this store yet.</td></tr>`
+        : `<tr><td colspan="5" class="muted">No ${esc(lower(t.cardPlural))} in this ${esc(lower(t.locationSingular))} yet.</td></tr>`
     }
   </table>
   <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;
-  return shell("Cards", body);
+  return shell(t.cardPlural, body);
 }
 
 export function cardForm(opts: {
@@ -257,7 +275,9 @@ export function cardForm(opts: {
   locationId: string;
   templates: any[];
   brandSelfFields?: string[];
+  terminology?: Terminology;
 }): string {
+  const t = opts.terminology || GENERAL_TERMINOLOGY;
   const c = opts.card || {};
   const cardOverride = Array.isArray(c.selfEditFields) ? (c.selfEditFields as string[]) : null;
   const inheritSelf = !cardOverride;
@@ -265,7 +285,7 @@ export function cardForm(opts: {
   const action = opts.card ? `/admin/cards/${opts.card.id}` : "/admin/cards";
   const addr = (c.address as Address) || {};
   const body = `
-  <h2>${opts.card ? "Edit" : "New"} card</h2>
+  <h2>${opts.card ? "Edit" : "New"} ${esc(lower(t.cardSingular))}</h2>
   <form class="editor" method="POST" action="${action}" enctype="multipart/form-data">
     <input type="hidden" name="locationId" value="${esc(opts.locationId)}" />
     <div class="grid2">
@@ -291,7 +311,7 @@ export function cardForm(opts: {
     ${labeledRowsField({ name: "websites", title: "Websites", placeholder: "https://...", options: WEB_LABELS, items: c.websites })}
     ${socialsField(c.socials)}
 
-    <h3>Card address (blank = use store address)</h3>
+    <h3>${esc(t.cardSingular)} address (blank = use ${esc(lower(t.locationSingular))} address)</h3>
     <label>Line 1</label><input name="addr_line1" value="${esc(addr.line1)}" />
     <div class="grid2">
       <div><label>City</label><input name="addr_city" value="${esc(addr.city)}" /></div>
@@ -303,11 +323,11 @@ export function cardForm(opts: {
     </div>
 
     <h3>Design</h3>
-    <p class="muted">Pick a template, or leave on the brand/store default. No hex codes needed.</p>
+    <p class="muted">Pick a template, or leave on the ${esc(lower(t.brandSingular))}/${esc(lower(t.locationSingular))} default. No hex codes needed.</p>
     <div class="tpl-pick">
       <label class="${!c.templateId ? "sel" : ""}">
         <input type="radio" name="templateId" value="" ${!c.templateId ? "checked" : ""} />
-        <div class="tpl-mini" style="display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:12px;text-align:center">Brand /<br>store default</div>
+        <div class="tpl-mini" style="display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:12px;text-align:center">${esc(t.brandSingular)} /<br>${esc(lower(t.locationSingular))} default</div>
         <div class="tpl-cap">Inherit</div>
       </label>
       ${opts.templates
@@ -344,7 +364,7 @@ export function cardForm(opts: {
     ${selfFieldChecks(effectiveSelf, { name: "selfEditFields", includeInherit: true, inherit: inheritSelf })}
 
     <p style="margin-top:16px">
-      <button class="btn" type="submit">Save card</button>
+      <button class="btn" type="submit">Save ${esc(lower(t.cardSingular))}</button>
       ${opts.card ? `<a class="btn secondary" href="/c/${esc(opts.card.slug)}" target="_blank">Preview</a>` : ""}
       <a class="btn secondary" href="/admin/cards?locationId=${esc(opts.locationId)}">Cancel</a>
     </p>
@@ -352,12 +372,12 @@ export function cardForm(opts: {
   ${
     opts.card
       ? `<form method="POST" action="/admin/cards/${esc(opts.card.id)}/delete" style="margin-top:10px"
-           onsubmit="return confirm('Delete this card?')">
-           <button class="btn danger" type="submit">Delete card</button></form>`
+           onsubmit="return confirm('Delete this ${esc(lower(t.cardSingular))}?')">
+           <button class="btn danger" type="submit">Delete ${esc(lower(t.cardSingular))}</button></form>`
       : ""
   }
   ${editorScripts()}`;
-  return shell("Card editor", body);
+  return shell(`${t.cardSingular} editor`, body);
 }
 
 const pq = (s: any) => encodeURIComponent(s || "");
@@ -526,6 +546,9 @@ export function integrationsView(data: {
   events: readonly string[];
   newKey?: string | null;
   baseUrl: string;
+  saml: any;
+  samlIssuer: string;
+  samlAcsUrl: string;
 }): string {
   const keyRows = data.keys.length
     ? data.keys
@@ -570,6 +593,7 @@ export function integrationsView(data: {
   const eventChecks = data.events
     .map((ev) => `<label class="chk"><input type="checkbox" name="events" value="${esc(ev)}" ${ev === "lead.captured" ? "checked" : ""} /> ${esc(ev)}</label>`)
     .join("");
+  const saml = data.saml || {};
 
   const body = `
   <h2>Integrations</h2>
@@ -593,6 +617,34 @@ export function integrationsView(data: {
     <label>Create API key — name</label>
     <input name="name" placeholder="e.g. Zapier, CRM sync" required />
     <p style="margin-top:10px"><button class="btn" type="submit">Create key</button></p>
+  </form>
+
+  <h3 style="margin-top:28px">SAML sign-in</h3>
+  <div class="stat" style="margin-bottom:12px">
+    <p style="margin:0 0 8px">Status: ${
+      saml.enabled
+        ? `<span class="pill on">enabled</span>`
+        : `<span class="pill off">disabled</span>`
+    }</p>
+    <p class="muted" style="margin:0">SAML is off by default. Enable it only after the IdP SSO URL and signing certificate are configured.</p>
+    <p class="muted">Service provider entity ID: <code>${esc(data.samlIssuer)}</code></p>
+    <p class="muted">Assertion Consumer Service URL: <code>${esc(data.samlAcsUrl)}</code></p>
+  </div>
+  <form class="editor" method="POST" action="/admin/saml-config" style="margin-top:12px;max-width:760px">
+    <label class="chk"><input type="checkbox" name="enabled" value="1" ${
+      saml.enabled ? "checked" : ""
+    } /> Enable SAML sign-in</label>
+    <label>Service provider entity ID</label>
+    <input name="issuer" value="${esc(saml.issuer || data.samlIssuer)}" />
+    <label>IdP SSO URL</label>
+    <input name="entryPoint" type="url" value="${esc(saml.entryPoint || "")}" placeholder="https://idp.example.com/sso/saml" />
+    <label>IdP issuer <span class="muted">(optional, but recommended)</span></label>
+    <input name="idpIssuer" value="${esc(saml.idpIssuer || "")}" placeholder="https://idp.example.com/entity-id" />
+    <label>IdP signing certificate</label>
+    <textarea name="idpCert" rows="8" placeholder="-----BEGIN CERTIFICATE-----...">${esc(
+      saml.idpCert || ""
+    )}</textarea>
+    <p style="margin-top:10px"><button class="btn" type="submit">Save SAML settings</button></p>
   </form>
 
   <h3 style="margin-top:28px">Webhooks</h3>

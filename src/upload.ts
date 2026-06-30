@@ -9,7 +9,7 @@ import crypto from "crypto";
 export const uploadDir = process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads");
 fs.mkdirSync(uploadDir, { recursive: true });
 
-const ALLOWED_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".avif"]);
+const ALLOWED_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"]);
 
 // Renderable image mime types -> a safe file extension. We validate by MIME type
 // (what the browser actually sends) rather than the filename, so logos with an
@@ -19,7 +19,6 @@ const EXT_FOR_MIME: Record<string, string> = {
   "image/jpeg": ".jpg",
   "image/webp": ".webp",
   "image/gif": ".gif",
-  "image/svg+xml": ".svg",
   "image/avif": ".avif",
 };
 
@@ -38,7 +37,7 @@ export const upload = multer({
   fileFilter: (_req, file, cb) => {
     if (EXT_FOR_MIME[file.mimetype]) return cb(null, true);
     // Reject with an error (surfaced to the user) instead of silently dropping.
-    cb(new Error("Unsupported image type. Use PNG, JPG, WEBP, GIF, SVG, or AVIF."));
+    cb(new Error("Unsupported image type. Use PNG, JPG, WEBP, GIF, or AVIF."));
   },
 });
 

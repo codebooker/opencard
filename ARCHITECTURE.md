@@ -47,6 +47,12 @@ The company runs **multiple brands**, and each brand has **multiple locations
 (stores)**. Each brand has its own design and logo, and each location can
 override the logo and design again. So the hierarchy is:
 
+For SaaS, those model names stay intentionally generic. A vertical can change
+the vocabulary shown to admins without changing the database shape. The first
+target vertical is car dealerships, where a `Location` is presented as a
+**rooftop** and the same model can later fit franchises, brokerages, agencies,
+and other multi-location teams.
+
 ```
 Org (your company / the deployment)
  └─ Brand            ← own logo, colors, fonts, default layout

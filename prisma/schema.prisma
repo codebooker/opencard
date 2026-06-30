@@ -9,10 +9,12 @@ datasource db {
 
 // Top-level tenant: your company / this deployment.
 model Org {
-  id        String   @id @default(cuid())
-  name      String
-  brands    Brand[]
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  name        String
+  vertical    String   @default("general")
+  terminology Json     @default("{\"brandSingular\":\"Brand\",\"brandPlural\":\"Brands\",\"locationSingular\":\"Location\",\"locationPlural\":\"Locations\",\"locationCodeLabel\":\"Location code\",\"cardSingular\":\"Card\",\"cardPlural\":\"Cards\",\"leadSingular\":\"Lead\",\"leadPlural\":\"Leads\"}")
+  brands      Brand[]
+  createdAt   DateTime @default(now())
 }
 
 // A brand under the org — owns its default design + logo.
@@ -196,6 +198,19 @@ model ApiKey {
   lastUsedAt DateTime?
   revoked    Boolean   @default(false)
   createdAt  DateTime  @default(now())
+}
+
+// Optional employee/admin SSO using SAML 2.0. Disabled until a super admin turns
+// it on from Admin -> Integrations.
+model SamlConfig {
+  id         String   @id @default("default")
+  enabled    Boolean  @default(false)
+  issuer     String?
+  entryPoint String?
+  idpIssuer  String?
+  idpCert    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 // Outbound webhook subscription.

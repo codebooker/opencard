@@ -23,7 +23,17 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));
 
 // Uploaded logos/photos (persistent volume in Docker).
-app.use("/uploads", express.static(uploadDir, { maxAge: "7d" }));
+app.use(
+  "/uploads",
+  express.static(uploadDir, {
+    maxAge: "7d",
+    setHeaders: (res) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+      res.setHeader("Content-Security-Policy", "default-src 'none'; img-src 'self' data:");
+    },
+  })
+);
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 app.get("/", (_req, res) => res.redirect("/admin"));

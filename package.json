@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@node-saml/node-saml": "^5.1.0",
     "@prisma/client": "^5.22.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.5",
