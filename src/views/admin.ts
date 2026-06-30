@@ -67,6 +67,7 @@ export function dashboard(
   const canManage = (brandId: string) =>
     p.global || (p.role === "brand_admin" && p.brandIds.includes(brandId));
   const topActions = `
+    <a class="btn secondary" href="/admin/security">Security</a>
     ${p.super ? `<a class="btn secondary" href="/admin/admins">Admins</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/integrations">Integrations</a>` : ""}
     ${p.global ? `<a class="btn" href="/admin/brands/new">+ New ${lower(t.brandSingular)}</a>` : ""}`;
@@ -480,7 +481,7 @@ export function adminForm(opts: { admin?: any; brands: any[]; locations: any[] }
   const scopes = a.scopes || [];
   const brandSet = new Set(scopes.filter((s: any) => s.brandId).map((s: any) => s.brandId));
   const locSet = new Set(scopes.filter((s: any) => s.locationId).map((s: any) => s.locationId));
-  const roles = ["super_admin", "general_admin", "brand_admin", "location_admin"] as const;
+  const roles = ["org_owner", "org_admin", "brand_admin", "location_admin"] as const;
   const body = `
   <h2>${opts.admin ? "Edit" : "New"} admin</h2>
   <form class="editor" method="POST" action="${action}" style="max-width:640px">

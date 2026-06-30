@@ -30,6 +30,7 @@ model Org {
   apiKeys           ApiKey[]
   webhookEndpoints  WebhookEndpoint[]
   webhookDeliveries WebhookDelivery[]
+  adminUsers        AdminUser[]
   createdAt   DateTime @default(now())
 }
 
@@ -204,14 +205,19 @@ model Lead {
 model AdminUser {
   id           String       @id @default(cuid())
   email        String       @unique
+  // The org this admin belongs to. NULL = platform-level admin (spans all orgs).
+  org          Org?         @relation(fields: [orgId], references: [id])
+  orgId        String?
   name         String?
-  role         String       // super_admin | general_admin | brand_admin | location_admin
+  role         String       // platform_owner | org_owner | super_admin | general_admin | brand_admin | location_admin
   passwordHash String? // scrypt hash; null = SSO-only account
   mfaSecret    String? // base32 TOTP secret
   mfaEnabled   Boolean      @default(false)
   active       Boolean      @default(true)
   scopes       AdminScope[]
   createdAt    DateTime     @default(now())
+
+  @@index([orgId])
 }
 
 // Scope rows for brand_admin / location_admin (an admin may have several).

@@ -164,9 +164,24 @@ technical groundwork.)
    - **Slug scoping decision:** public card slugs stay *globally* unique for now
      (no host to disambiguate). When host-based routing lands, make slugs
      org-scoped so two customers can both use e.g. `john-smith`.
-4. **Onboarding + per-org role hierarchy** (below), plus `AdminUser`/`SamlConfig`
-   org-scoping, the admin/rbac RLS cutover, and per-route isolation integration
-   tests.
+4. **Onboarding + per-org role hierarchy.** *(in progress)*
+   - `AdminUser.orgId` added; admins are per-org and rbac is org-aware so an admin
+     can never see or manage another org's data. **(done)**
+   - Role hierarchy: platform_owner (cross-org) / org_owner / org_admin /
+     brand_admin / location_admin (legacy super_admin + general_admin retained).
+     **(done)**
+   - Self-service signup at `/signup` creates an org + org_owner + first brand +
+     rooftop; gated by `SIGNUPS_ENABLED` (on in dev, off in prod by default).
+     **(done)**
+   - Auth: MFA is now optional (password-first; enrol/disable under
+     Admin -> Security); the ADMIN_TOKEN stays as break-glass platform access.
+     Redesigned login page. **(done)**
+   - Pure authorization + host-addressing logic unit-tested. DB-backed
+     cross-tenant integration tests run in CI (the local `npm test` has no DB).
+     **(remaining)**
+   - `SamlConfig` org-scoping and the admin/rbac DB-RLS cutover move to Phase 3
+     (per-org SSO) — admin is internal and now strictly app-level org-scoped,
+     while the externally-reachable surfaces already enforce DB-RLS.
 
 ### Tenant Resolution
 

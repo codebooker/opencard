@@ -25,27 +25,34 @@ async function main() {
   }
 
   // Demo admin accounts (SSO-only; sign in via dev-login to test each role).
+  // All scoped to the given org so isolation behaves like a real tenant.
   async function ensureAdmin(
+    orgId: string,
     email: string,
     role: string,
     scope?: { brandId?: string; locationId?: string }
   ) {
     if (await prisma.adminUser.findUnique({ where: { email } })) return;
     await prisma.adminUser.create({
-      data: { email, role, name: email.split("@")[0], scopes: scope ? { create: [scope] } : undefined },
+      data: { email, role, orgId, name: email.split("@")[0], scopes: scope ? { create: [scope] } : undefined },
     });
   }
-  const mw = await prisma.brand.findFirst({ where: { name: "Maplewood Real Estate" } });
-  const mwDt = await prisma.location.findFirst({ where: { code: "MW-DT" } });
-  await ensureAdmin("general@yourco.com", "general_admin");
-  if (mw) await ensureAdmin("brandadmin@maplewood.ca", "brand_admin", { brandId: mw.id });
-  if (mwDt) await ensureAdmin("storeadmin@maplewood.ca", "location_admin", { locationId: mwDt.id });
+  async function seedDemoAdmins(orgId: string) {
+    const mw = await prisma.brand.findFirst({ where: { name: "Maplewood Real Estate" } });
+    const mwDt = await prisma.location.findFirst({ where: { code: "MW-DT" } });
+    await ensureAdmin(orgId, "owner@yourco.com", "org_owner");
+    await ensureAdmin(orgId, "general@yourco.com", "org_admin");
+    if (mw) await ensureAdmin(orgId, "brandadmin@maplewood.ca", "brand_admin", { brandId: mw.id });
+    if (mwDt) await ensureAdmin(orgId, "storeadmin@maplewood.ca", "location_admin", { locationId: mwDt.id });
+  }
 
-  if (await prisma.org.findFirst()) {
+  const existingOrg = await prisma.org.findFirst({ orderBy: { createdAt: "asc" } });
+  if (existingOrg) {
     await prisma.org.updateMany({
       where: { vertical: "general" },
       data: { vertical: "dealership", terminology: dealershipTerminology },
     });
+    await seedDemoAdmins(existingOrg.id);
     console.log("Seed: org already exists, skipping (owner emails + demo admins backfilled).");
     return;
   }
@@ -163,6 +170,8 @@ async function main() {
       ],
     },
   });
+
+  await seedDemoAdmins(org.id);
 
   console.log("Seed complete: 1 org, 2 brands, 3 stores, 3 cards.");
   console.log("  Maplewood: /c/john-smith (green), /c/james-chen (north store, blue accent)");

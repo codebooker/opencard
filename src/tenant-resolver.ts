@@ -1,6 +1,9 @@
 import { Request } from "express";
 import { prisma } from "./db";
 import { defaultOrgId } from "./tenant";
+import { parseHost, requestHost } from "./host";
+
+export { requestHost };
 
 // Tenant (Org) resolution for a request.
 //
@@ -18,32 +21,14 @@ import { defaultOrgId } from "./tenant";
 // (API key -> key.orgId, etc.) rather than the host, so those callers pass the
 // org they already know straight to runWithOrg.
 
-// Bare hostname (no port) for the request, honoring the proxy's Host header.
-export function requestHost(req: Request): string {
-  const raw = (req.headers.host || "").toString();
-  return raw.split(":")[0].trim().toLowerCase();
-}
-
 // Resolve an org from a hostname via custom domain or platform subdomain.
 // Returns null when nothing matches (or when host-based routing isn't enabled).
 export async function orgIdForHost(host: string): Promise<string | null> {
-  if (!host) return null;
-
-  // Exact custom-domain match first.
-  const byDomain = await prisma.org.findFirst({ where: { customDomain: host }, select: { id: true } });
-  if (byDomain) return byDomain.id;
-
-  // Then a subdomain label under the configured platform domain.
-  const platform = (process.env.PLATFORM_DOMAIN || "").toLowerCase().replace(/^\.+/, "");
-  if (platform && host.endsWith(`.${platform}`)) {
-    const label = host.slice(0, host.length - platform.length - 1);
-    // Ignore reserved / non-tenant labels.
-    if (label && !["www", "app", "admin", "api"].includes(label) && !label.includes(".")) {
-      const bySub = await prisma.org.findFirst({ where: { subdomain: label }, select: { id: true } });
-      if (bySub) return bySub.id;
-    }
-  }
-  return null;
+  const parsed = parseHost(host, process.env.PLATFORM_DOMAIN || "");
+  if (!parsed) return null;
+  const where = parsed.kind === "custom" ? { customDomain: parsed.host } : { subdomain: parsed.label };
+  const org = await prisma.org.findFirst({ where, select: { id: true } });
+  return org?.id ?? null;
 }
 
 // Resolve the org for a public/host-addressed request, falling back to the

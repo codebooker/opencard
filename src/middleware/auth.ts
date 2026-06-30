@@ -26,25 +26,36 @@ export function forbidden(res: Response, msg = "You don't have permission to do 
   return res.status(403).send(page({ title: "Forbidden", body: `<main class="card"><section class="ident"><h1>403</h1><p class="company">${esc(msg)}</p></section><a class="cta" href="/admin">Back to admin</a></main>` }));
 }
 
-export function loginPage(error?: string): string {
+export function loginPage(error?: string, info?: string): string {
   return page({
     title: "Admin sign in",
-    body: `<div class="login">
-      <h1>OpenCard admin</h1>
-      ${error ? `<p style="color:#b91c1c">${esc(error)}</p>` : ""}
-      <form method="POST" action="/admin/login">
-        <label>Email</label><input name="email" type="email" autocomplete="username" autofocus />
-        <label>Password</label><input name="password" type="password" autocomplete="current-password" />
-        <p style="margin-top:12px"><button class="btn" type="submit">Sign in</button></p>
-      </form>
-      <p class="muted" style="text-align:center">— or —</p>
-      <p><a class="btn secondary" href="/me/login" style="display:block;text-align:center">Sign in with your work account (SSO)</a></p>
-      <details style="margin-top:14px"><summary class="muted">Super admin token (break-glass)</summary>
-        <form method="POST" action="/admin/login/token" style="margin-top:8px">
-          <input name="token" type="password" placeholder="ADMIN_TOKEN" />
-          <p style="margin-top:8px"><button class="btn secondary" type="submit">Use token</button></p>
+    body: `<div class="auth">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <span class="auth-logo">OC</span>
+          <h1>OpenCard</h1>
+          <p class="auth-sub">Sign in to your admin workspace</p>
+        </div>
+        ${info ? `<p class="auth-banner">${esc(info)}</p>` : ""}
+        ${error ? `<p class="auth-error">${esc(error)}</p>` : ""}
+        <form method="POST" action="/admin/login" class="auth-form">
+          <label>Email</label>
+          <input name="email" type="email" autocomplete="username" placeholder="you@company.com" autofocus />
+          <label>Password</label>
+          <input name="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+          <button class="btn auth-submit" type="submit">Sign in</button>
         </form>
-      </details>
+        <div class="auth-divider"><span>or</span></div>
+        <a class="btn secondary auth-sso" href="/me/login">Sign in with SSO</a>
+        <p class="auth-foot">New here? <a href="/signup">Create an account</a></p>
+        <details class="auth-breakglass">
+          <summary>Break-glass token</summary>
+          <form method="POST" action="/admin/login/token" style="margin-top:8px">
+            <input name="token" type="password" placeholder="ADMIN_TOKEN" />
+            <button class="btn secondary" type="submit" style="margin-top:8px">Use token</button>
+          </form>
+        </details>
+      </div>
     </div>`,
   });
 }

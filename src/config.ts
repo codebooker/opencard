@@ -42,4 +42,8 @@ export const config = {
   },
   // Local testing only: lets employees "sign in" by typing an email (no IdP). Off in prod.
   devLogin: process.env.SELF_SERVICE_DEV_LOGIN === "1",
+  // Public self-service signup (creates a new org + owner). On in dev by default,
+  // off in production unless SIGNUPS_ENABLED=1, so a deployed instance doesn't
+  // accept random org creation before you're ready to open the doors.
+  signupsEnabled: process.env.SIGNUPS_ENABLED === "1" || !isProduction,
 };

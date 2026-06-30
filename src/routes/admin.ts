@@ -22,7 +22,9 @@ import * as V from "../views/admin";
 export const adminRouter = Router();
 
 // ---------- auth ----------
-adminRouter.get("/login", (_req, res) => res.send(loginPage()));
+adminRouter.get("/login", (req, res) =>
+  res.send(loginPage(undefined, req.query.welcome ? "Account created. Sign in to continue." : undefined))
+);
 
 // Super-admin break-glass token login.
 adminRouter.post("/login/token", (req, res) => {
@@ -33,7 +35,9 @@ adminRouter.post("/login/token", (req, res) => {
   res.status(401).send(loginPage("Invalid token."));
 });
 
-// Email + password (step 1). MFA is mandatory.
+// Email + password. MFA is optional: if the account has it enabled we ask for a
+// code, otherwise we sign in directly. Admins can turn MFA on later under
+// Admin -> Security.
 adminRouter.post("/login", async (req, res) => {
   const email = String(req.body?.email || "").toLowerCase().trim();
   const password = String(req.body?.password || "");
@@ -41,13 +45,12 @@ adminRouter.post("/login", async (req, res) => {
   if (!au || !au.active || !verifyPassword(password, au.passwordHash)) {
     return res.status(401).send(loginPage("Invalid email or password."));
   }
-  res.cookie("oc_pwauth", signEmail(email), cookieOptions(5 * 60 * 1000));
-  if (au.mfaEnabled && au.mfaSecret) return res.send(mfaPage());
-  // first time: enroll MFA now
-  const secret = au.mfaSecret || generateTotpSecret();
-  await prisma.adminUser.update({ where: { id: au.id }, data: { mfaSecret: secret } });
-  const uri = totpUri(secret, email);
-  return res.send(enrollPage(uri, secret, await qrDataUrl(uri, "#111827")));
+  if (au.mfaEnabled && au.mfaSecret) {
+    res.cookie("oc_pwauth", signEmail(email), cookieOptions(5 * 60 * 1000));
+    return res.send(mfaPage());
+  }
+  res.cookie("oc_emp", signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
+  return res.redirect("/admin");
 });
 
 adminRouter.post("/login/mfa", async (req, res) => {
@@ -57,22 +60,6 @@ adminRouter.post("/login/mfa", async (req, res) => {
   if (!au || !au.mfaSecret || !verifyTotp(au.mfaSecret, String(req.body?.code || ""))) {
     return res.status(401).send(mfaPage("Incorrect code, try again."));
   }
-  res.clearCookie("oc_pwauth", clearCookieOptions());
-  res.cookie("oc_emp", signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
-  res.redirect("/admin");
-});
-
-adminRouter.post("/login/enroll", async (req, res) => {
-  const email = verifyEmail(req.cookies?.oc_pwauth);
-  if (!email) return res.redirect("/admin/login");
-  const au = await prisma.adminUser.findUnique({ where: { email } });
-  if (!au || !au.mfaSecret || !verifyTotp(au.mfaSecret, String(req.body?.code || ""))) {
-    const uri = totpUri(au?.mfaSecret || "", email);
-    return res
-      .status(401)
-      .send(enrollPage(uri, au?.mfaSecret || "", await qrDataUrl(uri, "#111827"), "Incorrect code, try again."));
-  }
-  await prisma.adminUser.update({ where: { id: au.id }, data: { mfaEnabled: true } });
   res.clearCookie("oc_pwauth", clearCookieOptions());
   res.cookie("oc_emp", signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
   res.redirect("/admin");
@@ -154,6 +141,76 @@ adminRouter.get("/", async (req, res) => {
   res.send(V.dashboard(brands as any, p, t));
 });
 
+// ---------- security (per-account two-factor) ----------
+function securityShell(inner: string): string {
+  return page({
+    title: "Security",
+    body: `<main class="card" style="max-width:560px"><section class="ident"><h1>Security</h1></section>${inner}<p style="margin-top:18px"><a class="btn secondary" href="/admin">Back to admin</a></p></main>`,
+  });
+}
+
+adminRouter.get("/security", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.email) {
+    return res.send(
+      securityShell(
+        `<p class="company">You're signed in with the break-glass token, which has no stored account. Two-factor applies to email/password admin accounts.</p>`
+      )
+    );
+  }
+  const au = await prisma.adminUser.findUnique({ where: { email: p.email } });
+  const on = !!au?.mfaEnabled;
+  const note = req.query.mfa === "on" ? `<p style="color:#15803d">Two-factor is now enabled.</p>` : req.query.mfa === "off" ? `<p style="color:#6b7280">Two-factor disabled.</p>` : "";
+  const action = on
+    ? `<p class="company">Two-factor authentication is <strong>on</strong> for ${esc(p.email)}.</p>
+       <form method="POST" action="/admin/security/mfa/disable"><button class="btn danger" type="submit">Turn off two-factor</button></form>`
+    : `<p class="company">Two-factor authentication is <strong>off</strong>. Add an authenticator app for an extra layer of protection.</p>
+       <form method="POST" action="/admin/security/mfa/start"><button class="btn" type="submit">Set up two-factor</button></form>`;
+  res.send(securityShell(note + action));
+});
+
+function mfaSetupView(uri: string, secret: string, qr: string, error?: string): string {
+  return securityShell(
+    `${error ? `<p style="color:#b91c1c">${esc(error)}</p>` : ""}
+     <p class="company">Scan this with your authenticator app, then enter a code to confirm.</p>
+     <p style="text-align:center"><img src="${esc(qr)}" alt="QR code" width="200" height="200" /></p>
+     <p class="muted" style="text-align:center;word-break:break-all">Or enter the key manually: <code>${esc(secret)}</code></p>
+     <form method="POST" action="/admin/security/mfa/enable">
+       <label>Confirmation code</label>
+       <input name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456" autofocus />
+       <p style="margin-top:12px"><button class="btn" type="submit">Confirm &amp; enable</button></p>
+     </form>`
+  );
+}
+
+adminRouter.post("/security/mfa/start", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.email) return forbidden(res);
+  const secret = generateTotpSecret();
+  await prisma.adminUser.update({ where: { email: p.email }, data: { mfaSecret: secret, mfaEnabled: false } });
+  const uri = totpUri(secret, p.email);
+  res.send(mfaSetupView(uri, secret, await qrDataUrl(uri, "#111827")));
+});
+
+adminRouter.post("/security/mfa/enable", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.email) return forbidden(res);
+  const au = await prisma.adminUser.findUnique({ where: { email: p.email } });
+  if (!au?.mfaSecret || !verifyTotp(au.mfaSecret, String(req.body?.code || ""))) {
+    const uri = totpUri(au?.mfaSecret || "", p.email);
+    return res.status(401).send(mfaSetupView(uri, au?.mfaSecret || "", await qrDataUrl(uri, "#111827"), "Incorrect code, try again."));
+  }
+  await prisma.adminUser.update({ where: { email: p.email }, data: { mfaEnabled: true } });
+  res.redirect("/admin/security?mfa=on");
+});
+
+adminRouter.post("/security/mfa/disable", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.email) return forbidden(res);
+  await prisma.adminUser.update({ where: { email: p.email }, data: { mfaEnabled: false, mfaSecret: null } });
+  res.redirect("/admin/security?mfa=off");
+});
+
 // ---------- brands ----------
 adminRouter.get("/brands/new", async (req, res) => {
   if (!RBAC.canCreateBrand(reqAdmin(req))) return forbidden(res);
@@ -174,13 +231,12 @@ adminRouter.get("/brands/:id/edit", async (req, res) => {
   res.send(V.brandForm(brand, stats, t));
 });
 adminRouter.post("/brands", upload.single("logoFile"), async (req, res) => {
-  if (!RBAC.canCreateBrand(reqAdmin(req))) return forbidden(res);
-  const org = await prisma.org.findFirst();
-  if (!org) return res.status(500).send("No org. Run the seed.");
+  const p = reqAdmin(req);
+  if (!RBAC.canCreateBrand(p)) return forbidden(res);
   const b = req.body;
   await prisma.brand.create({
     data: {
-      orgId: org.id,
+      orgId: p.orgId,
       name: b.name,
       logoUrl: uploadedUrl(req, "logoFile") || clean(b.logoUrl),
       primaryColor: b.primaryColor || "#1f6f43",
@@ -580,10 +636,13 @@ adminRouter.get("/leads.csv", async (req, res) => {
 });
 
 // ---------- integrations: API keys + webhooks ----------
-async function renderIntegrations(res: any, newKey: string | null = null) {
+// API keys and webhooks are per-org; only platform owners see across orgs.
+async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: string | null = null) {
+  const orgFilter = p.platform ? {} : { orgId: p.orgId };
   const [keys, endpoints, saml] = await Promise.all([
-    prisma.apiKey.findMany({ orderBy: { createdAt: "desc" } }),
+    prisma.apiKey.findMany({ where: orgFilter, orderBy: { createdAt: "desc" } }),
     prisma.webhookEndpoint.findMany({
+      where: orgFilter,
       orderBy: { createdAt: "desc" },
       include: { deliveries: { orderBy: { createdAt: "desc" }, take: 1 } },
     }),
@@ -604,40 +663,51 @@ async function renderIntegrations(res: any, newKey: string | null = null) {
 }
 
 adminRouter.get("/integrations", (req, res) => {
-  if (!RBAC.canManageIntegrations(reqAdmin(req))) return forbidden(res);
-  return renderIntegrations(res);
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  return renderIntegrations(res, p);
 });
 
 adminRouter.post("/api-keys", async (req, res) => {
-  if (!RBAC.canManageIntegrations(reqAdmin(req))) return forbidden(res);
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
   const name = clean(req.body?.name) || "API key";
   const { raw, hash, prefix } = generateApiKey();
-  await prisma.apiKey.create({ data: { name, keyHash: hash, prefix, orgId: await defaultOrgId() } });
+  await prisma.apiKey.create({ data: { name, keyHash: hash, prefix, orgId: p.orgId } });
   // Render directly (not a redirect) so the raw key never lands in a URL/log.
-  await renderIntegrations(res, raw);
+  await renderIntegrations(res, p, raw);
 });
 
 adminRouter.post("/api-keys/:id/revoke", async (req, res) => {
-  if (!RBAC.canManageIntegrations(reqAdmin(req))) return forbidden(res);
-  await prisma.apiKey.update({ where: { id: req.params.id }, data: { revoked: true } });
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  // updateMany scoped by org so an admin can't revoke another org's key.
+  await prisma.apiKey.updateMany({
+    where: p.platform ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
+    data: { revoked: true },
+  });
   res.redirect("/admin/integrations");
 });
 
 adminRouter.post("/webhooks", async (req, res) => {
-  if (!RBAC.canManageIntegrations(reqAdmin(req))) return forbidden(res);
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
   const url = clean(req.body?.url);
   if (!url) return res.redirect("/admin/integrations");
   const events = asArray(req.body?.events).filter((e) => (WEBHOOK_EVENTS as readonly string[]).includes(e));
   const secret = "whsec_" + crypto.randomBytes(24).toString("hex");
   await prisma.webhookEndpoint.create({
-    data: { url, secret, events: events.length ? events : ["lead.captured"], orgId: await defaultOrgId() },
+    data: { url, secret, events: events.length ? events : ["lead.captured"], orgId: p.orgId },
   });
   res.redirect("/admin/integrations");
 });
 
 adminRouter.post("/webhooks/:id/delete", async (req, res) => {
-  if (!RBAC.canManageIntegrations(reqAdmin(req))) return forbidden(res);
-  await prisma.webhookEndpoint.delete({ where: { id: req.params.id } });
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  await prisma.webhookEndpoint.deleteMany({
+    where: p.platform ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
+  });
   res.redirect("/admin/integrations");
 });
 
@@ -659,27 +729,47 @@ adminRouter.post("/saml-config", async (req, res) => {
   res.redirect("/admin/integrations");
 });
 
-// ---------- admin accounts (super admin only) ----------
+// ---------- admin accounts (org owner / platform only) ----------
+// Admins are per-org: an org owner only sees/manages admins in their own org and
+// can only scope them to their own org's brands/rooftops. Platform owners span all.
+
+// Confirm the target admin is one this principal may manage; returns it or null.
+async function manageableAdmin(p: RBAC.AdminPrincipal, id: string) {
+  const admin = await prisma.adminUser.findUnique({ where: { id }, include: { scopes: true } });
+  if (!admin) return null;
+  if (!p.platform && admin.orgId !== p.orgId) return null;
+  return admin;
+}
+
 adminRouter.get("/admins", async (req, res) => {
-  if (!RBAC.canManageAdmins(reqAdmin(req))) return forbidden(res);
-  const admins = await prisma.adminUser.findMany({ orderBy: { createdAt: "asc" }, include: { scopes: true } });
+  const p = reqAdmin(req);
+  if (!RBAC.canManageAdmins(p)) return forbidden(res);
+  const admins = await prisma.adminUser.findMany({
+    where: p.platform ? {} : { orgId: p.orgId },
+    orderBy: { createdAt: "asc" },
+    include: { scopes: true },
+  });
   res.send(V.adminsView(admins));
 });
 adminRouter.get("/admins/new", async (req, res) => {
-  if (!RBAC.canManageAdmins(reqAdmin(req))) return forbidden(res);
+  const p = reqAdmin(req);
+  if (!RBAC.canManageAdmins(p)) return forbidden(res);
+  const orgFilter = p.platform ? {} : { orgId: p.orgId };
   const [brands, locations] = await Promise.all([
-    prisma.brand.findMany({ orderBy: { name: "asc" } }),
-    prisma.location.findMany({ orderBy: { name: "asc" }, include: { brand: true } }),
+    prisma.brand.findMany({ where: orgFilter, orderBy: { name: "asc" } }),
+    prisma.location.findMany({ where: orgFilter, orderBy: { name: "asc" }, include: { brand: true } }),
   ]);
   res.send(V.adminForm({ brands, locations }));
 });
 adminRouter.get("/admins/:id/edit", async (req, res) => {
-  if (!RBAC.canManageAdmins(reqAdmin(req))) return forbidden(res);
-  const admin = await prisma.adminUser.findUnique({ where: { id: req.params.id }, include: { scopes: true } });
+  const p = reqAdmin(req);
+  if (!RBAC.canManageAdmins(p)) return forbidden(res);
+  const admin = await manageableAdmin(p, req.params.id);
   if (!admin) return res.status(404).send("Not found");
+  const orgFilter = p.platform ? {} : { orgId: p.orgId };
   const [brands, locations] = await Promise.all([
-    prisma.brand.findMany({ orderBy: { name: "asc" } }),
-    prisma.location.findMany({ orderBy: { name: "asc" }, include: { brand: true } }),
+    prisma.brand.findMany({ where: orgFilter, orderBy: { name: "asc" } }),
+    prisma.location.findMany({ where: orgFilter, orderBy: { name: "asc" }, include: { brand: true } }),
   ]);
   res.send(V.adminForm({ admin, brands, locations }));
 });
@@ -691,15 +781,23 @@ function scopeRowsFromBody(b: any): { brandId?: string; locationId?: string }[] 
   return rows;
 }
 
+// Non-platform admins can only assign org-level roles, never platform_owner.
+function safeRole(p: RBAC.AdminPrincipal, role: string): string {
+  if (!p.platform && (role === "platform_owner" || role === "super_admin")) return "org_admin";
+  return role;
+}
+
 adminRouter.post("/admins", async (req, res) => {
-  if (!RBAC.canManageAdmins(reqAdmin(req))) return forbidden(res);
+  const p = reqAdmin(req);
+  if (!RBAC.canManageAdmins(p)) return forbidden(res);
   const b = req.body;
   const email = String(b.email || "").toLowerCase().trim();
   if (!email || !b.role) return res.redirect("/admin/admins/new");
   const data: any = {
     email,
     name: clean(b.name),
-    role: b.role,
+    role: safeRole(p, b.role),
+    orgId: p.orgId,
     scopes: { create: scopeRowsFromBody(b) },
   };
   if (b.password) data.passwordHash = hashPassword(String(b.password));
@@ -708,18 +806,21 @@ adminRouter.post("/admins", async (req, res) => {
 });
 
 adminRouter.post("/admins/:id", async (req, res) => {
-  if (!RBAC.canManageAdmins(reqAdmin(req))) return forbidden(res);
+  const p = reqAdmin(req);
+  if (!RBAC.canManageAdmins(p)) return forbidden(res);
+  const target = await manageableAdmin(p, req.params.id);
+  if (!target) return res.status(404).send("Not found");
   const b = req.body;
-  const data: any = { name: clean(b.name), role: b.role, active: !!b.active };
+  const data: any = { name: clean(b.name), role: safeRole(p, b.role), active: !!b.active };
   if (b.password) data.passwordHash = hashPassword(String(b.password));
   if (b.resetMfa) {
     data.mfaEnabled = false;
     data.mfaSecret = null;
   }
   await prisma.$transaction([
-    prisma.adminScope.deleteMany({ where: { adminUserId: req.params.id } }),
+    prisma.adminScope.deleteMany({ where: { adminUserId: target.id } }),
     prisma.adminUser.update({
-      where: { id: req.params.id },
+      where: { id: target.id },
       data: { ...data, scopes: { create: scopeRowsFromBody(b) } },
     }),
   ]);
@@ -727,8 +828,11 @@ adminRouter.post("/admins/:id", async (req, res) => {
 });
 
 adminRouter.post("/admins/:id/delete", async (req, res) => {
-  if (!RBAC.canManageAdmins(reqAdmin(req))) return forbidden(res);
-  await prisma.adminUser.delete({ where: { id: req.params.id } });
+  const p = reqAdmin(req);
+  if (!RBAC.canManageAdmins(p)) return forbidden(res);
+  const target = await manageableAdmin(p, req.params.id);
+  if (!target) return res.status(404).send("Not found");
+  await prisma.adminUser.delete({ where: { id: target.id } });
   res.redirect("/admin/admins");
 });
 

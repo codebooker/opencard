@@ -6,6 +6,7 @@ import { cardsRouter } from "./routes/cards";
 import { adminRouter } from "./routes/admin";
 import { scimRouter } from "./routes/scim";
 import { selfRouter } from "./routes/selfservice";
+import { signupRouter } from "./routes/signup";
 import { apiRouter } from "./routes/api";
 import { previewRouter } from "./routes/preview";
 import { uploadDir } from "./upload";
@@ -45,6 +46,8 @@ const leadLimiter = rateLimit({
 });
 app.use("/admin/login", loginLimiter);
 app.use("/me/devlogin", loginLimiter);
+// Signup creates resources; keep it tightly throttled.
+app.use("/signup", rateLimit({ name: "signup", windowMs: 60 * 60_000, max: 10, methods: ["POST"] }));
 
 // Static assets (styles.css). Works in dev (src/public) and prod (dist/public).
 app.use(express.static(path.join(__dirname, "public")));
@@ -68,6 +71,7 @@ app.get("/", (_req, res) => res.redirect("/admin"));
 app.use("/scim/v2", scimLimiter, scimRouter);
 app.use("/api/v1", apiLimiter, apiRouter);
 app.use("/preview", previewRouter);
+app.use("/signup", signupRouter);
 app.use("/admin", adminRouter);
 app.use("/me", selfRouter);
 app.use("/c", leadLimiter, cardsRouter);
