@@ -12,7 +12,8 @@
     "prisma:migrate": "prisma migrate deploy",
     "prisma:push": "prisma db push",
     "seed": "ts-node prisma/seed.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsc src/*.test.ts --rootDir src --outDir .test-build --module commonjs --target ES2021 --esModuleInterop --skipLibCheck --resolveJsonModule --noCheck && node --test \".test-build/**/*.test.js\""
   },
   "dependencies": {
     "@node-saml/node-saml": "^5.1.0",
@@ -20,7 +21,7 @@
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
-    "multer": "^1.4.5-lts.1",
+    "multer": "^2.0.0",
     "prisma": "^5.22.0",
     "qrcode": "^1.5.4"
   },

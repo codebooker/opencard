@@ -14,5 +14,5 @@
     "declaration": false
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "prisma/seed.ts"]
+  "exclude": ["node_modules", "dist", ".test-build", "prisma/seed.ts", "src/**/*.test.ts"]
 }

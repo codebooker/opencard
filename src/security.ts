@@ -77,6 +77,11 @@ function hotp(secret: string, counter: number): string {
   return (code % 1_000_000).toString().padStart(6, "0");
 }
 
+// The current 6-digit TOTP code for a secret (used by tests and enrollment checks).
+export function currentTotp(secret: string): string {
+  return hotp(secret, Math.floor(Date.now() / 1000 / 30));
+}
+
 // Verify a 6-digit code, allowing ±1 time-step for clock drift.
 export function verifyTotp(secret: string, code: string): boolean {
   const c = (code || "").replace(/\s/g, "");

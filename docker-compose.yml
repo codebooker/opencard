@@ -38,8 +38,14 @@ services:
       - "${PORT:-3000}:3000"
     volumes:
       - uploads_data:/app/uploads
-    # On first boot, apply schema + seed, then start.
-    command: sh -c "npx prisma db push --skip-generate && node dist/seed.js && node dist/server.js"
+    # Apply committed migrations, then seed (idempotent), then start.
+    # The `||` fallback baselines a database created before migrations were adopted
+    # (tables already exist): mark the initial migration applied, then continue.
+    command: >
+      sh -c "set -e;
+             npx prisma migrate deploy || { npx prisma migrate resolve --applied 0_init && npx prisma migrate deploy; };
+             node dist/seed.js || true;
+             exec node dist/server.js"
 
 volumes:
   db_data:

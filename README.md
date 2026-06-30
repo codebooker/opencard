@@ -51,13 +51,26 @@ on `http://localhost:3000`.
 ```bash
 npm install
 # point DATABASE_URL at a local Postgres in .env
-npx prisma db push       # create tables
+npx prisma migrate dev   # apply migrations (creates tables)
 npm run seed             # optional demo data
 npm run dev              # http://localhost:3000
 ```
 
 `npm run build` compiles to `dist/`; `npm start` runs the compiled server.
-`npm run typecheck` type-checks without emitting.
+`npm run typecheck` type-checks without emitting. `npm test` runs the unit tests.
+
+## Database migrations
+
+Schema changes are versioned with Prisma Migrate (committed under
+`prisma/migrations/`), not `prisma db push`.
+
+- **Production / Docker:** the container runs `prisma migrate deploy` on boot to
+  apply any pending migrations. A database created before migrations were adopted
+  is baselined automatically (the initial migration is marked applied, since its
+  tables already exist).
+- **Changing the schema:** edit `prisma/schema.prisma`, then run
+  `npx prisma migrate dev --name <change>` to generate a new migration. Commit the
+  generated folder under `prisma/migrations/`.
 
 ## Managing brands, stores, and cards
 
