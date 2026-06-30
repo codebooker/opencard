@@ -75,11 +75,56 @@ Goal: make the current codebase safe enough to evolve into SaaS.
 
 Goal: turn one-company-per-deployment into a real multi-tenant SaaS foundation.
 
+### Tenant Isolation Strategy (decided)
+
+We use **pooled multi-tenancy by default** — shared application and shared database
+with strong logical isolation — rather than spinning up separate containers or
+databases per customer. Reasoning:
+
+- ISO 27001 certifies an information security management system (controls, risk
+  assessment, access control, logging, encryption), not physical isolation
+  between tenants. Logical isolation is an accepted control.
+- Container-per-tenant multiplies operational risk (every migration, patch, and
+  deploy fans out across N stacks; version skew makes consistent patching harder)
+  and scales cost per customer instead of per load.
+- The real isolation risk in shared multi-tenancy is an application bug that
+  forgets a tenant filter. The right mitigation is defense-in-depth at the data
+  layer, not separate containers.
+
+Defense-in-depth, in layers:
+
+1. **Application-level scoping** — every query and write is scoped by `orgId`
+   (done in increment 1).
+2. **Database-enforced Row-Level Security (RLS)** — Postgres policies keyed on
+   `orgId` so the database itself refuses cross-tenant rows even if a query
+   forgets its filter. The runtime app connects as a **least-privilege,
+   non-superuser role** (`opencard_app`, `NOSUPERUSER NOBYPASSRLS`); migrations
+   and seed run as the privileged owner, which bypasses RLS.
+3. **Promote-to-isolated tier (future)** — keep the `orgId` boundary clean enough
+   that an individual enterprise tenant can later be promoted to a dedicated
+   database (or dedicated stack) when a customer has a contractual or
+   data-residency requirement. This is an opt-in premium tier, not the default.
+
+### Security & Compliance Groundwork (ISO 27001 path)
+
+Start the management-system controls early, while the system is small:
+
+- Least-privilege database roles (runtime app role separate from owner). **(in progress)**
+- Centralized audit logging (who accessed/changed which tenant's data, when).
+- Encryption in transit and at rest; documented secrets management.
+- Automated backups with a *tested* restore procedure.
+- Dependency/vulnerability scanning in CI.
+- Documented change management (git + reviewed migrations already provide this).
+- A lightweight asset inventory and risk register.
+
+(Full SOC 2 / ISO 27001 control work is tracked in Phase 9; this is the early
+technical groundwork.)
+
 ### Data Model
 
-- Add strong tenant scoping to all tenant-owned models.
-- Ensure `Org` is the top-level customer account, not just demo metadata.
-- Add `orgId` to all data that must be tenant isolated:
+- Add strong tenant scoping to all tenant-owned models. **(done)**
+- Ensure `Org` is the top-level customer account, not just demo metadata. **(done)**
+- Add `orgId` to all data that must be tenant isolated: **(done)**
   - `Location`
   - `Template`
   - `User`
@@ -90,8 +135,23 @@ Goal: turn one-company-per-deployment into a real multi-tenant SaaS foundation.
   - `WebhookEndpoint`
   - `WebhookDelivery`
   - future integrations and billing records
-- Keep `Brand` under `Org`, but avoid inferring tenant only through joins for security-critical writes.
+- Keep `Brand` under `Org`, but avoid inferring tenant only through joins for security-critical writes. **(done)**
+- Enforce isolation at the database with Postgres RLS, not only in application code. **(in progress)**
 - Add tenant isolation tests for every route family.
+
+### Increment Plan
+
+1. **Tenant data model + app-level scoping.** `orgId` on every tenant-owned
+   model, resolved from authoritative parents on writes, and every REST
+   read/write scoped by the authenticated org. **(done)**
+2. **Database-enforced RLS.** RLS policies on all tenant tables, a least-privilege
+   runtime role, and a `runWithOrg` helper that sets the tenant context per
+   transaction. API routes run under the enforced role first. **(in progress)**
+3. **Tenant resolution middleware + remaining routes under RLS.** Resolve org by
+   subdomain / custom domain / slug / API key / SCIM token, then move admin,
+   public-card, self-service, and SCIM routes onto the tenant context too.
+4. **Onboarding + per-org role hierarchy** (below), plus `AdminUser`/`SamlConfig`
+   org-scoping and per-route isolation integration tests.
 
 ### Tenant Resolution
 

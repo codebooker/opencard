@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
-import { prisma } from "../db";
+import { runWithOrg } from "../db";
 import { requireApi, apiOrgId } from "../apiauth";
 import { uniqueSlug } from "../slug";
 import { emitEvent, cardPayload } from "../webhooks";
@@ -61,75 +61,97 @@ function storeJson(l: any) {
   };
 }
 
+// Every handler runs inside runWithOrg(orgId, ...): the queries execute as the
+// least-privilege role with `app.current_org_id` set, so Postgres RLS enforces
+// tenant isolation at the database. The explicit `orgId`/`findFirst` filters are
+// kept as a second, application-level layer of defense.
+
 // ---- brands ----
 apiRouter.get("/brands", async (req, res) => {
-  const brands = await prisma.brand.findMany({ where: { orgId: apiOrgId(req) }, orderBy: { name: "asc" } });
+  const org = apiOrgId(req);
+  const brands = await runWithOrg(org, (db) =>
+    db.brand.findMany({ where: { orgId: org }, orderBy: { name: "asc" } })
+  );
   res.json({ data: brands.map(brandJson) });
 });
 apiRouter.get("/brands/:id", async (req, res) => {
-  const b = await prisma.brand.findFirst({ where: { id: req.params.id, orgId: apiOrgId(req) } });
+  const org = apiOrgId(req);
+  const b = await runWithOrg(org, (db) => db.brand.findFirst({ where: { id: req.params.id, orgId: org } }));
   if (!b) return res.status(404).json({ error: "not_found" });
   res.json({ data: brandJson(b) });
 });
 apiRouter.post("/brands", async (req, res) => {
   const b = req.body || {};
   if (!b.name) return res.status(422).json({ error: "name_required" });
-  const brand = await prisma.brand.create({
-    data: {
-      orgId: apiOrgId(req),
-      name: String(b.name),
-      logoUrl: str(b.logoUrl),
-      primaryColor: b.primaryColor || "#1f6f43",
-      layout: b.layout || "classic",
-    },
-  });
+  const org = apiOrgId(req);
+  const brand = await runWithOrg(org, (db) =>
+    db.brand.create({
+      data: {
+        orgId: org,
+        name: String(b.name),
+        logoUrl: str(b.logoUrl),
+        primaryColor: b.primaryColor || "#1f6f43",
+        layout: b.layout || "classic",
+      },
+    })
+  );
   res.status(201).json({ data: brandJson(brand) });
 });
 
 // ---- stores (locations) ----
 apiRouter.get("/stores", async (req, res) => {
-  const where: any = { orgId: apiOrgId(req) };
+  const org = apiOrgId(req);
+  const where: any = { orgId: org };
   if (req.query.brandId) where.brandId = String(req.query.brandId);
-  const stores = await prisma.location.findMany({ where, orderBy: { name: "asc" } });
+  const stores = await runWithOrg(org, (db) => db.location.findMany({ where, orderBy: { name: "asc" } }));
   res.json({ data: stores.map(storeJson) });
 });
 apiRouter.get("/stores/:id", async (req, res) => {
-  const l = await prisma.location.findFirst({ where: { id: req.params.id, orgId: apiOrgId(req) } });
+  const org = apiOrgId(req);
+  const l = await runWithOrg(org, (db) => db.location.findFirst({ where: { id: req.params.id, orgId: org } }));
   if (!l) return res.status(404).json({ error: "not_found" });
   res.json({ data: storeJson(l) });
 });
 apiRouter.post("/stores", async (req, res) => {
   const b = req.body || {};
   if (!b.brandId || !b.name) return res.status(422).json({ error: "brandId_and_name_required" });
-  // The brand must belong to the caller's org (prevents cross-tenant writes).
-  const brand = await prisma.brand.findFirst({ where: { id: String(b.brandId), orgId: apiOrgId(req) } });
-  if (!brand) return res.status(422).json({ error: "brand_not_found" });
-  const store = await prisma.location.create({
-    data: {
-      brandId: brand.id,
-      orgId: brand.orgId,
-      name: String(b.name),
-      code: str(b.code),
-      logoUrl: str(b.logoUrl),
-      primaryColor: str(b.primaryColor),
-      layout: str(b.layout),
-      address: b.address ?? undefined,
-    },
+  const org = apiOrgId(req);
+  const store = await runWithOrg(org, async (db) => {
+    // The brand must belong to the caller's org (RLS also blocks cross-tenant rows).
+    const brand = await db.brand.findFirst({ where: { id: String(b.brandId), orgId: org } });
+    if (!brand) return null;
+    return db.location.create({
+      data: {
+        brandId: brand.id,
+        orgId: brand.orgId,
+        name: String(b.name),
+        code: str(b.code),
+        logoUrl: str(b.logoUrl),
+        primaryColor: str(b.primaryColor),
+        layout: str(b.layout),
+        address: b.address ?? undefined,
+      },
+    });
   });
+  if (!store) return res.status(422).json({ error: "brand_not_found" });
   res.status(201).json({ data: storeJson(store) });
 });
 
 // ---- cards ----
 apiRouter.get("/cards", async (req, res) => {
-  const where: any = { orgId: apiOrgId(req) };
+  const org = apiOrgId(req);
+  const where: any = { orgId: org };
   if (req.query.locationId) where.locationId = String(req.query.locationId);
   if (req.query.ownerEmail) where.ownerEmail = { equals: String(req.query.ownerEmail), mode: "insensitive" };
   if (req.query.brandId) where.location = { brandId: String(req.query.brandId) };
-  const cards = await prisma.card.findMany({ where, orderBy: { lastName: "asc" }, take: 500 });
+  const cards = await runWithOrg(org, (db) =>
+    db.card.findMany({ where, orderBy: { lastName: "asc" }, take: 500 })
+  );
   res.json({ data: cards.map(cardPayload) });
 });
 apiRouter.get("/cards/:id", async (req, res) => {
-  const card = await prisma.card.findFirst({ where: { id: req.params.id, orgId: apiOrgId(req) } });
+  const org = apiOrgId(req);
+  const card = await runWithOrg(org, (db) => db.card.findFirst({ where: { id: req.params.id, orgId: org } }));
   if (!card) return res.status(404).json({ error: "not_found" });
   res.json({ data: cardPayload(card) });
 });
@@ -138,52 +160,71 @@ apiRouter.post("/cards", async (req, res) => {
   if (!b.locationId || !b.firstName || !b.lastName) {
     return res.status(422).json({ error: "locationId_firstName_lastName_required" });
   }
-  const loc = await prisma.location.findFirst({ where: { id: String(b.locationId), orgId: apiOrgId(req) } });
-  if (!loc) return res.status(422).json({ error: "location_not_found" });
+  const org = apiOrgId(req);
   const slug = await uniqueSlug(String(b.firstName), String(b.lastName));
-  const card = await prisma.card.create({
-    data: { locationId: String(b.locationId), orgId: loc.orgId, slug, ...cardWriteData(b, { create: true }) },
+  const card = await runWithOrg(org, async (db) => {
+    const loc = await db.location.findFirst({ where: { id: String(b.locationId), orgId: org } });
+    if (!loc) return null;
+    return db.card.create({
+      data: { locationId: loc.id, orgId: loc.orgId, slug, ...cardWriteData(b, { create: true }) },
+    });
   });
+  if (!card) return res.status(422).json({ error: "location_not_found" });
   emitEvent("card.created", cardPayload(card));
   res.status(201).json({ data: cardPayload(card) });
 });
 apiRouter.patch("/cards/:id", async (req, res) => {
-  const exists = await prisma.card.findFirst({ where: { id: req.params.id, orgId: apiOrgId(req) } });
-  if (!exists) return res.status(404).json({ error: "not_found" });
-  const card = await prisma.card.update({ where: { id: req.params.id }, data: cardWriteData(req.body || {}) });
+  const org = apiOrgId(req);
+  const card = await runWithOrg(org, async (db) => {
+    const exists = await db.card.findFirst({ where: { id: req.params.id, orgId: org } });
+    if (!exists) return null;
+    return db.card.update({ where: { id: req.params.id }, data: cardWriteData(req.body || {}) });
+  });
+  if (!card) return res.status(404).json({ error: "not_found" });
   emitEvent("card.updated", cardPayload(card));
   res.json({ data: cardPayload(card) });
 });
 apiRouter.delete("/cards/:id", async (req, res) => {
-  const card = await prisma.card.findFirst({ where: { id: req.params.id, orgId: apiOrgId(req) } });
+  const org = apiOrgId(req);
+  const card = await runWithOrg(org, async (db) => {
+    const found = await db.card.findFirst({ where: { id: req.params.id, orgId: org } });
+    if (!found) return null;
+    await db.card.delete({ where: { id: req.params.id } });
+    return found;
+  });
   if (!card) return res.status(404).json({ error: "not_found" });
-  await prisma.card.delete({ where: { id: req.params.id } });
   emitEvent("card.deleted", { id: card.id, slug: card.slug });
   res.json({ data: { id: card.id, deleted: true } });
 });
 
 // ---- leads ----
 apiRouter.get("/leads", async (req, res) => {
-  const where: any = { orgId: apiOrgId(req) };
+  const org = apiOrgId(req);
+  const where: any = { orgId: org };
   if (req.query.cardId) where.cardId = String(req.query.cardId);
   if (req.query.since) {
     const d = new Date(String(req.query.since));
     if (!isNaN(d.getTime())) where.createdAt = { gte: d };
   }
-  const leads = await prisma.lead.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    take: 500,
-    include: { card: { select: { id: true, slug: true, firstName: true, lastName: true } } },
-  });
+  const leads = await runWithOrg(org, (db) =>
+    db.lead.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: 500,
+      include: { card: { select: { id: true, slug: true, firstName: true, lastName: true } } },
+    })
+  );
   res.json({ data: leads });
 });
 
 // ---- analytics ----
 apiRouter.get("/analytics", async (req, res) => {
-  const where: any = { orgId: apiOrgId(req) };
+  const org = apiOrgId(req);
+  const where: any = { orgId: org };
   if (req.query.cardId) where.cardId = String(req.query.cardId);
-  const grouped = await prisma.analyticsEvent.groupBy({ by: ["type"], where, _count: { _all: true } });
+  const grouped = await runWithOrg(org, (db) =>
+    db.analyticsEvent.groupBy({ by: ["type"], where, _count: { _all: true } })
+  );
   const totals: Record<string, number> = {};
   grouped.forEach((g) => (totals[g.type] = g._count._all));
   res.json({ data: { totals } });

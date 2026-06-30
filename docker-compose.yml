@@ -22,6 +22,11 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: "postgresql://opencard:${DB_PASSWORD:?Set DB_PASSWORD in .env}@db:5432/opencard?schema=public"
+      # Password for the least-privilege runtime role (opencard_app) used to
+      # enforce Postgres RLS. When unset, the app falls back to the owner
+      # connection and RLS is inert (app-level scoping still applies).
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-}
+      POSTGRES_DB: opencard
       BASE_URL: ${BASE_URL:-http://localhost:3000}
       ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in .env}
       SCIM_TOKEN: ${SCIM_TOKEN:?Set SCIM_TOKEN in .env}
@@ -44,6 +49,7 @@ services:
     command: >
       sh -c "set -e;
              npx prisma migrate deploy || { npx prisma migrate resolve --applied 0_init && npx prisma migrate deploy; };
+             node dist/db-bootstrap.js;
              node dist/seed.js || true;
              exec node dist/server.js"
 
