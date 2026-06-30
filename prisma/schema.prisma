@@ -12,6 +12,13 @@ model Org {
   id          String   @id @default(cuid())
   name        String
   vertical    String   @default("general")
+  // Tenant addressing. `subdomain` is the label under the platform domain
+  // (e.g. "acme" -> acme.opencard.id); `customDomain` is a fully-qualified host
+  // the customer points at us (e.g. cards.acmecorp.com). Both are optional and
+  // unique. The host-based tenant resolver uses them; until DNS/TLS routing is
+  // live these are simply unused metadata.
+  subdomain    String? @unique
+  customDomain String? @unique
   terminology Json     @default("{\"brandSingular\":\"Brand\",\"brandPlural\":\"Brands\",\"locationSingular\":\"Location\",\"locationPlural\":\"Locations\",\"locationCodeLabel\":\"Location code\",\"cardSingular\":\"Card\",\"cardPlural\":\"Cards\",\"leadSingular\":\"Lead\",\"leadPlural\":\"Leads\"}")
   brands            Brand[]
   locations         Location[]

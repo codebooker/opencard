@@ -1,5 +1,6 @@
 import { Router, Request } from "express";
-import { prisma } from "../db";
+import { prisma, runWithOrg } from "../db";
+import { resolveOrgId } from "../tenant-resolver";
 import { config } from "../config";
 import { buildVCard } from "../vcard";
 import { qrPng, qrDataUrl } from "../qr";
@@ -13,9 +14,14 @@ function clientIp(req: Request): string {
   return (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "";
 }
 
-async function loadCard(slug: string) {
+// Public read. Scoped to the org resolved from the request host so that, once
+// custom domains / subdomains are live, a host only ever serves its own org's
+// cards. With a single org (and no host mapping) this resolves to the default
+// org, so behavior is unchanged today. Uses the owner client: card pages are
+// public, and the slug→org lookup must work before any tenant context exists.
+async function loadCard(slug: string, orgId: string) {
   return prisma.card.findFirst({
-    where: { slug, active: true },
+    where: { slug, active: true, orgId },
     include: { location: { include: { brand: true } }, template: true },
   });
 }
@@ -26,12 +32,14 @@ function cardPrimary(card: { primaryColor: string | null; location: { primaryCol
 
 // Public card page
 cardsRouter.get("/:slug", async (req, res) => {
-  const card = await loadCard(req.params.slug);
+  const card = await loadCard(req.params.slug, await resolveOrgId(req));
   if (!card) return res.status(404).send(page({ title: "Not found", body: "<main class='card'><p>Card not found.</p></main>" }));
 
-  await prisma.analyticsEvent.create({
-    data: { cardId: card.id, orgId: card.orgId, type: "view", ip: clientIp(req), userAgent: req.headers["user-agent"] || "" },
-  });
+  await runWithOrg(card.orgId, (db) =>
+    db.analyticsEvent.create({
+      data: { cardId: card.id, orgId: card.orgId, type: "view", ip: clientIp(req), userAgent: req.headers["user-agent"] || "" },
+    })
+  );
 
   // Non-destructive preview overrides (do NOT change saved data):
   //   /c/:slug?layout=wave&photo=<url>&logo=<url>
@@ -51,9 +59,11 @@ cardsRouter.get("/:slug", async (req, res) => {
 
 // vCard download (Add to Contacts)
 cardsRouter.get("/:slug/vcard", async (req, res) => {
-  const card = await loadCard(req.params.slug);
+  const card = await loadCard(req.params.slug, await resolveOrgId(req));
   if (!card) return res.status(404).send("Not found");
-  await prisma.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "vcard", ip: clientIp(req) } });
+  await runWithOrg(card.orgId, (db) =>
+    db.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "vcard", ip: clientIp(req) } })
+  );
   const vcf = buildVCard(card);
   res.setHeader("Content-Type", "text/vcard; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="${card.slug}.vcf"`);
@@ -62,7 +72,7 @@ cardsRouter.get("/:slug/vcard", async (req, res) => {
 
 // QR PNG (for printing on badges, signatures, etc.)
 cardsRouter.get("/:slug/qr.png", async (req, res) => {
-  const card = await loadCard(req.params.slug);
+  const card = await loadCard(req.params.slug, await resolveOrgId(req));
   if (!card) return res.status(404).send("Not found");
   const primary = cardPrimary(card);
   const buf = await qrPng(`${config.baseUrl}/c/${card.slug}`, primary);
@@ -86,30 +96,35 @@ cardsRouter.post("/:slug/event", async (req, res) => {
   } catch {
     /* ignore malformed beacons */
   }
-  await prisma.analyticsEvent.create({
-    data: { cardId: card.id, orgId: card.orgId, type, meta, ip: clientIp(req), userAgent: req.headers["user-agent"] || "" },
-  });
+  await runWithOrg(card.orgId, (db) =>
+    db.analyticsEvent.create({
+      data: { cardId: card.id, orgId: card.orgId, type, meta, ip: clientIp(req), userAgent: req.headers["user-agent"] || "" },
+    })
+  );
   res.status(204).end();
 });
 
 // Two-way contact sharing — capture a lead
 cardsRouter.post("/:slug/connect", async (req, res) => {
-  const card = await loadCard(req.params.slug);
+  const card = await loadCard(req.params.slug, await resolveOrgId(req));
   if (!card) return res.status(404).send("Not found");
   const { name, email, phone, company, note } = req.body || {};
   if (!name) return res.status(400).send("Name required");
-  const lead = await prisma.lead.create({
-    data: {
-      cardId: card.id,
-      orgId: card.orgId,
-      name: String(name).slice(0, 200),
-      email: email ? String(email).slice(0, 200) : null,
-      phone: phone ? String(phone).slice(0, 60) : null,
-      company: company ? String(company).slice(0, 200) : null,
-      note: note ? String(note).slice(0, 1000) : null,
-    },
+  const lead = await runWithOrg(card.orgId, async (db) => {
+    const created = await db.lead.create({
+      data: {
+        cardId: card.id,
+        orgId: card.orgId,
+        name: String(name).slice(0, 200),
+        email: email ? String(email).slice(0, 200) : null,
+        phone: phone ? String(phone).slice(0, 60) : null,
+        company: company ? String(company).slice(0, 200) : null,
+        note: note ? String(note).slice(0, 1000) : null,
+      },
+    });
+    await db.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "connect", ip: clientIp(req) } });
+    return created;
   });
-  await prisma.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "connect", ip: clientIp(req) } });
   emitEvent("lead.captured", leadPayload(lead, card));
   res.send(
     page({

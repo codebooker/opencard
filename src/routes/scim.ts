@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { prisma } from "../db";
+import { prisma, runWithOrg } from "../db";
 import { config } from "../config";
 import { uniqueSlug } from "../slug";
 import { orgIdForLocation } from "../tenant";
@@ -146,49 +146,64 @@ scimRouter.post("/Users", async (req, res) => {
   const lastName = scim.name?.familyName || scim.displayName?.split(" ").slice(1).join(" ") || "";
   const slug = await uniqueSlug(firstName, lastName);
 
-  const user = await prisma.user.create({
-    data: {
-      locationId,
-      orgId,
-      email,
-      displayName: scim.displayName || `${firstName} ${lastName}`.trim(),
-      externalId: scim.externalId || null,
-      active: scim.active !== false,
-      card: {
-        create: {
-          locationId,
-          orgId,
-          slug,
-          firstName,
-          lastName,
-          title: scim.title || null,
-          department: ent.department || null,
-          ownerEmail: email,
-          emails: [{ label: "Work", value: email }],
-          phones: phonesFromScim(scim),
-          active: scim.active !== false,
+  const user = await runWithOrg(orgId, (db) =>
+    db.user.create({
+      data: {
+        locationId,
+        orgId,
+        email,
+        displayName: scim.displayName || `${firstName} ${lastName}`.trim(),
+        externalId: scim.externalId || null,
+        active: scim.active !== false,
+        card: {
+          create: {
+            locationId,
+            orgId,
+            slug,
+            firstName,
+            lastName,
+            title: scim.title || null,
+            department: ent.department || null,
+            ownerEmail: email,
+            emails: [{ label: "Work", value: email }],
+            phones: phonesFromScim(scim),
+            active: scim.active !== false,
+          },
         },
       },
-    },
-    include: { card: true },
-  });
+      include: { card: true },
+    })
+  );
 
   if (user.card) emitEvent("card.created", cardPayload(user.card));
   res.status(201).json(scimUserResponse(user, user.card, req));
 });
 
+// The org that owns a provisioned user, so the mutation can run under RLS.
+async function userOrgId(id: string): Promise<string | null> {
+  const u = await prisma.user.findUnique({ where: { id }, select: { orgId: true } });
+  return u?.orgId ?? null;
+}
+function scimNotFound(res: Response) {
+  return res.status(404).json({ schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"], status: "404" });
+}
+
 // ---- replace ----
 scimRouter.put("/Users/:id", async (req, res) => {
   const scim = req.body || {};
-  const user = await prisma.user.update({
-    where: { id: req.params.id },
-    data: {
-      displayName: scim.displayName || undefined,
-      active: scim.active !== false,
-      card: { update: { active: scim.active !== false, title: scim.title || undefined } },
-    },
-    include: { card: true },
-  });
+  const orgId = await userOrgId(req.params.id);
+  if (!orgId) return scimNotFound(res);
+  const user = await runWithOrg(orgId, (db) =>
+    db.user.update({
+      where: { id: req.params.id },
+      data: {
+        displayName: scim.displayName || undefined,
+        active: scim.active !== false,
+        card: { update: { active: scim.active !== false, title: scim.title || undefined } },
+      },
+      include: { card: true },
+    })
+  );
   res.json(scimUserResponse(user, user.card, req));
 });
 
@@ -201,22 +216,30 @@ scimRouter.patch("/Users/:id", async (req, res) => {
       active = typeof op.value === "object" ? op.value.active : op.value === true || op.value === "True";
     }
   }
-  const user = await prisma.user.update({
-    where: { id: req.params.id },
-    data: {
-      active: active ?? undefined,
-      card: active === undefined ? undefined : { update: { active } },
-    },
-    include: { card: true },
-  });
+  const orgId = await userOrgId(req.params.id);
+  if (!orgId) return scimNotFound(res);
+  const user = await runWithOrg(orgId, (db) =>
+    db.user.update({
+      where: { id: req.params.id },
+      data: {
+        active: active ?? undefined,
+        card: active === undefined ? undefined : { update: { active } },
+      },
+      include: { card: true },
+    })
+  );
   res.json(scimUserResponse(user, user.card, req));
 });
 
 // ---- delete (deactivate) ----
 scimRouter.delete("/Users/:id", async (req, res) => {
-  await prisma.user.update({
-    where: { id: req.params.id },
-    data: { active: false, card: { update: { active: false } } },
-  });
+  const orgId = await userOrgId(req.params.id);
+  if (!orgId) return res.status(204).end();
+  await runWithOrg(orgId, (db) =>
+    db.user.update({
+      where: { id: req.params.id },
+      data: { active: false, card: { update: { active: false } } },
+    })
+  );
   res.status(204).end();
 });

@@ -147,11 +147,26 @@ technical groundwork.)
 2. **Database-enforced RLS.** RLS policies on all tenant tables, a least-privilege
    runtime role, and a `runWithOrg` helper that sets the tenant context per
    transaction. API routes run under the enforced role first. **(in progress)**
-3. **Tenant resolution middleware + remaining routes under RLS.** Resolve org by
-   subdomain / custom domain / slug / API key / SCIM token, then move admin,
-   public-card, self-service, and SCIM routes onto the tenant context too.
+3. **Tenant resolution seam + remaining routes under RLS.** *(in progress)*
+   - A single `resolveOrgId(req)` seam with host-based strategy (custom domain /
+     platform subdomain) ready but inert, falling back to the single default
+     org. `Org.subdomain` / `Org.customDomain` fields added now. **(done)**
+   - Public-card, self-service, and SCIM **write** paths moved onto the
+     RLS-enforced client via `runWithOrg`. **(done)**
+   - Admin + `rbac` cutover is deferred to increment 4 (it is intertwined with
+     org-scoping `AdminUser` and the per-org role hierarchy; doing it together
+     avoids churning the large admin surface twice).
+   - **Deferred until there's a deploy target / first customer:** actually
+     serving `acme.opencard.id` subdomains and `cards.acmecorp.com` custom
+     domains — wildcard DNS, automatic TLS, and hostname routing at the proxy.
+     None of this can be exercised on localhost; the code seam is ready so
+     enabling it later is additive (populate the fields, point DNS, done).
+   - **Slug scoping decision:** public card slugs stay *globally* unique for now
+     (no host to disambiguate). When host-based routing lands, make slugs
+     org-scoped so two customers can both use e.g. `john-smith`.
 4. **Onboarding + per-org role hierarchy** (below), plus `AdminUser`/`SamlConfig`
-   org-scoping and per-route isolation integration tests.
+   org-scoping, the admin/rbac RLS cutover, and per-route isolation integration
+   tests.
 
 ### Tenant Resolution
 

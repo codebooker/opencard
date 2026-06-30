@@ -1,6 +1,6 @@
 import { Router } from "express";
 import crypto from "crypto";
-import { prisma } from "../db";
+import { prisma, runWithOrg } from "../db";
 import { config } from "../config";
 import { clearCookieOptions, cookieOptions } from "../cookies";
 import { upload, uploadedUrl } from "../upload";
@@ -153,7 +153,9 @@ selfRouter.post("/", selfUploads, async (req, res) => {
   if (allowed.has("websites")) data.websites = parseLabeled(b.websites);
   if (allowed.has("socials")) data.socials = parseSocials(b.socials);
 
-  const updated = await prisma.card.update({ where: { id: card.id }, data });
+  // Employees only ever touch their own card; the update runs under RLS so the
+  // database also guarantees it can't write outside the card's org.
+  const updated = await runWithOrg(card.orgId, (db) => db.card.update({ where: { id: card.id }, data }));
   emitEvent("card.updated", cardPayload(updated));
   res.redirect("/me?saved=1");
 });
