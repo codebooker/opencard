@@ -67,6 +67,7 @@ async function main() {
   const mwDowntown = await prisma.location.create({
     data: {
       brandId: maplewood.id,
+      orgId: org.id,
       name: "Downtown Office",
       code: "MW-DT",
       address: { line1: "100 King St", city: "Toronto", region: "ON", postal: "M5H 1A1", country: "Canada" },
@@ -75,6 +76,7 @@ async function main() {
   const mwNorth = await prisma.location.create({
     data: {
       brandId: maplewood.id,
+      orgId: org.id,
       name: "North Branch",
       code: "MW-N",
       primaryColor: "#2563eb", // this store uses a blue accent instead of green
@@ -85,6 +87,7 @@ async function main() {
   await prisma.card.create({
     data: {
       locationId: mwDowntown.id,
+      orgId: org.id,
       slug: "john-smith",
       ownerEmail: "john.smith@maplewoodrealestate.ca",
       prefix: "Mr.",
@@ -103,6 +106,7 @@ async function main() {
   await prisma.card.create({
     data: {
       locationId: mwNorth.id,
+      orgId: org.id,
       slug: "james-chen",
       ownerEmail: "james.chen@maplewoodrealestate.ca",
       prefix: "Mr.",
@@ -131,6 +135,7 @@ async function main() {
   const briskHQ = await prisma.location.create({
     data: {
       brandId: brisk.id,
+      orgId: org.id,
       name: "HQ Showroom",
       code: "BM-HQ",
       address: { line1: "1 Speedway Blvd", city: "Austin", region: "TX", postal: "78701", country: "USA" },
@@ -139,6 +144,7 @@ async function main() {
   await prisma.card.create({
     data: {
       locationId: briskHQ.id,
+      orgId: org.id,
       slug: "max-mcgonagall",
       ownerEmail: "max.m@briskmotors.com",
       firstName: "Max",

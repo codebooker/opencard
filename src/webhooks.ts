@@ -27,7 +27,7 @@ export function emitEvent(event: WebhookEvent, data: unknown): void {
 }
 
 async function deliver(
-  ep: { id: string; url: string; secret: string },
+  ep: { id: string; orgId: string; url: string; secret: string },
   event: string,
   data: unknown,
   attempt: number
@@ -46,10 +46,10 @@ async function deliver(
       body,
       signal: AbortSignal.timeout(8000),
     });
-    await logDelivery(ep.id, event, resp.ok, resp.status, resp.ok ? null : `HTTP ${resp.status}`);
+    await logDelivery(ep, event, resp.ok, resp.status, resp.ok ? null : `HTTP ${resp.status}`);
     if (!resp.ok && attempt < 3) scheduleRetry(ep, event, data, attempt);
   } catch (e: any) {
-    await logDelivery(ep.id, event, false, null, String(e?.message || e).slice(0, 300));
+    await logDelivery(ep, event, false, null, String(e?.message || e).slice(0, 300));
     if (attempt < 3) scheduleRetry(ep, event, data, attempt);
   }
 }
@@ -59,7 +59,7 @@ function scheduleRetry(ep: any, event: string, data: unknown, attempt: number) {
 }
 
 async function logDelivery(
-  endpointId: string,
+  ep: { id: string; orgId: string },
   event: string,
   success: boolean,
   statusCode: number | null,
@@ -67,7 +67,7 @@ async function logDelivery(
 ): Promise<void> {
   try {
     await prisma.webhookDelivery.create({
-      data: { endpointId, event, success, statusCode: statusCode ?? null, error },
+      data: { endpointId: ep.id, orgId: ep.orgId, event, success, statusCode: statusCode ?? null, error },
     });
   } catch {
     /* ignore */

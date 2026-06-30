@@ -13,7 +13,16 @@ model Org {
   name        String
   vertical    String   @default("general")
   terminology Json     @default("{\"brandSingular\":\"Brand\",\"brandPlural\":\"Brands\",\"locationSingular\":\"Location\",\"locationPlural\":\"Locations\",\"locationCodeLabel\":\"Location code\",\"cardSingular\":\"Card\",\"cardPlural\":\"Cards\",\"leadSingular\":\"Lead\",\"leadPlural\":\"Leads\"}")
-  brands      Brand[]
+  brands            Brand[]
+  locations         Location[]
+  templates         Template[]
+  users             User[]
+  cards             Card[]
+  analyticsEvents   AnalyticsEvent[]
+  leads             Lead[]
+  apiKeys           ApiKey[]
+  webhookEndpoints  WebhookEndpoint[]
+  webhookDeliveries WebhookDelivery[]
   createdAt   DateTime @default(now())
 }
 
@@ -45,6 +54,8 @@ model Location {
   id           String   @id @default(cuid())
   brand        Brand    @relation(fields: [brandId], references: [id])
   brandId      String
+  org          Org      @relation(fields: [orgId], references: [id])
+  orgId        String
   name         String
   code         String?  // store number / external code used for AD mapping
   logoUrl      String?  // override brand logo
@@ -56,6 +67,7 @@ model Location {
   createdAt    DateTime @default(now())
 
   @@unique([brandId, code])
+  @@index([orgId])
 }
 
 // Reusable design preset, scoped to a brand.
@@ -63,6 +75,8 @@ model Template {
   id           String  @id @default(cuid())
   brand        Brand   @relation(fields: [brandId], references: [id])
   brandId      String
+  org          Org     @relation(fields: [orgId], references: [id])
+  orgId        String
   name         String
   layout       String  @default("classic")
   primaryColor String  @default("#1f6f43")
@@ -72,6 +86,8 @@ model Template {
   isDefault    Boolean @default(false)
   cards        Card[]
   createdAt    DateTime @default(now())
+
+  @@index([orgId])
 }
 
 // An employee, attached to a location. Synced from AD/Azure AD or created by admin.
@@ -79,6 +95,8 @@ model User {
   id          String   @id @default(cuid())
   location    Location @relation(fields: [locationId], references: [id])
   locationId  String
+  org         Org      @relation(fields: [orgId], references: [id])
+  orgId       String
   email       String   @unique
   displayName String
   externalId  String?  @unique // SCIM externalId / AD objectId
@@ -86,6 +104,8 @@ model User {
   active      Boolean  @default(true)
   card        Card?
   createdAt   DateTime @default(now())
+
+  @@index([orgId])
 }
 
 model Card {
@@ -96,6 +116,8 @@ model Card {
   userId      String?   @unique
   template    Template? @relation(fields: [templateId], references: [id])
   templateId  String?
+  org         Org       @relation(fields: [orgId], references: [id])
+  orgId       String
 
   slug        String    @unique // public URL: /c/:slug
 
@@ -134,12 +156,15 @@ model Card {
   updatedAt   DateTime  @updatedAt
 
   @@index([ownerEmail])
+  @@index([orgId])
 }
 
 model AnalyticsEvent {
   id        String   @id @default(cuid())
   card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
   cardId    String
+  org       Org      @relation(fields: [orgId], references: [id])
+  orgId     String
   type      String   // view | click | vcard | qr | connect
   meta      String?
   ip        String?
@@ -147,12 +172,15 @@ model AnalyticsEvent {
   createdAt DateTime @default(now())
 
   @@index([cardId, type])
+  @@index([orgId])
 }
 
 model Lead {
   id        String   @id @default(cuid())
   card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
   cardId    String
+  org       Org      @relation(fields: [orgId], references: [id])
+  orgId     String
   name      String
   email     String?
   phone     String?
@@ -161,6 +189,7 @@ model Lead {
   createdAt DateTime @default(now())
 
   @@index([cardId])
+  @@index([orgId])
 }
 
 // An admin account with a role. Self-service (card owners) are NOT stored here;
@@ -192,12 +221,16 @@ model AdminScope {
 // Issuable bearer key for the REST API. Only the SHA-256 hash is stored.
 model ApiKey {
   id         String    @id @default(cuid())
+  org        Org       @relation(fields: [orgId], references: [id])
+  orgId      String
   name       String
   prefix     String // first chars of the key, for display
   keyHash    String    @unique
   lastUsedAt DateTime?
   revoked    Boolean   @default(false)
   createdAt  DateTime  @default(now())
+
+  @@index([orgId])
 }
 
 // Optional employee/admin SSO using SAML 2.0. Disabled until a super admin turns
@@ -216,18 +249,24 @@ model SamlConfig {
 // Outbound webhook subscription.
 model WebhookEndpoint {
   id         String            @id @default(cuid())
+  org        Org               @relation(fields: [orgId], references: [id])
+  orgId      String
   url        String
   secret     String // HMAC signing secret
   events     Json              @default("[\"lead.captured\"]")
   active     Boolean           @default(true)
   createdAt  DateTime          @default(now())
   deliveries WebhookDelivery[]
+
+  @@index([orgId])
 }
 
 model WebhookDelivery {
   id         String          @id @default(cuid())
   endpoint   WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
   endpointId String
+  org        Org             @relation(fields: [orgId], references: [id])
+  orgId      String
   event      String
   success    Boolean
   statusCode Int?
@@ -235,4 +274,5 @@ model WebhookDelivery {
   createdAt  DateTime        @default(now())
 
   @@index([endpointId, createdAt])
+  @@index([orgId])
 }

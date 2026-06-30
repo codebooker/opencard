@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { prisma } from "../db";
 import { config } from "../config";
 import { uniqueSlug } from "../slug";
+import { orgIdForLocation } from "../tenant";
 import { emitEvent, cardPayload } from "../webhooks";
 
 // Minimal SCIM 2.0 Users endpoint for Azure AD / Entra automatic provisioning.
@@ -138,6 +139,7 @@ scimRouter.post("/Users", async (req, res) => {
   const locationId = await resolveLocationId(scim);
   if (!locationId)
     return res.status(400).json({ detail: "No location to assign user to. Create a brand+store first.", status: "400" });
+  const orgId = await orgIdForLocation(locationId);
 
   const ent = scim[ENTERPRISE] || {};
   const firstName = scim.name?.givenName || scim.displayName?.split(" ")[0] || email.split("@")[0];
@@ -147,6 +149,7 @@ scimRouter.post("/Users", async (req, res) => {
   const user = await prisma.user.create({
     data: {
       locationId,
+      orgId,
       email,
       displayName: scim.displayName || `${firstName} ${lastName}`.trim(),
       externalId: scim.externalId || null,
@@ -154,6 +157,7 @@ scimRouter.post("/Users", async (req, res) => {
       card: {
         create: {
           locationId,
+          orgId,
           slug,
           firstName,
           lastName,

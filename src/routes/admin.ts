@@ -15,6 +15,7 @@ import { signEmail, verifyEmail } from "../selfauth";
 import { hashPassword, verifyPassword, generateTotpSecret, totpUri, verifyTotp } from "../security";
 import { qrDataUrl } from "../qr";
 import { currentTerminology } from "../terminology";
+import { defaultOrgId, orgIdForBrand, orgIdForLocation } from "../tenant";
 import * as RBAC from "../rbac";
 import * as V from "../views/admin";
 
@@ -282,7 +283,7 @@ adminRouter.post("/templates", async (req, res) => {
   const b = req.body;
   if (!RBAC.canManageBrand(reqAdmin(req), b.brandId)) return forbidden(res);
   if (b.isDefault) await prisma.template.updateMany({ where: { brandId: b.brandId }, data: { isDefault: false } });
-  await prisma.template.create({ data: { brandId: b.brandId, ...templateData(b) } });
+  await prisma.template.create({ data: { brandId: b.brandId, orgId: await orgIdForBrand(b.brandId), ...templateData(b) } });
   res.redirect(`/admin/templates?brandId=${b.brandId}`);
 });
 adminRouter.post("/templates/:id", async (req, res) => {
@@ -323,6 +324,7 @@ adminRouter.post("/locations", upload.single("logoFile"), async (req, res) => {
   await prisma.location.create({
     data: {
       brandId: b.brandId,
+      orgId: await orgIdForBrand(b.brandId),
       name: b.name,
       code: clean(b.code),
       logoUrl: uploadedUrl(req, "logoFile") || clean(b.logoUrl),
@@ -460,7 +462,7 @@ adminRouter.post("/cards", cardUploads, async (req, res) => {
   const data = withCardUploads(req);
   data.templateId = await allowedTemplateId(clean(b.templateId), loc.brandId);
   const card = await prisma.card.create({
-    data: { locationId: b.locationId, slug, ...data },
+    data: { locationId: b.locationId, orgId: loc.orgId, slug, ...data },
   });
   emitEvent("card.created", cardPayload(card));
   res.redirect(`/admin/cards?locationId=${b.locationId}`);
@@ -610,7 +612,7 @@ adminRouter.post("/api-keys", async (req, res) => {
   if (!RBAC.canManageIntegrations(reqAdmin(req))) return forbidden(res);
   const name = clean(req.body?.name) || "API key";
   const { raw, hash, prefix } = generateApiKey();
-  await prisma.apiKey.create({ data: { name, keyHash: hash, prefix } });
+  await prisma.apiKey.create({ data: { name, keyHash: hash, prefix, orgId: await defaultOrgId() } });
   // Render directly (not a redirect) so the raw key never lands in a URL/log.
   await renderIntegrations(res, raw);
 });
@@ -628,7 +630,7 @@ adminRouter.post("/webhooks", async (req, res) => {
   const events = asArray(req.body?.events).filter((e) => (WEBHOOK_EVENTS as readonly string[]).includes(e));
   const secret = "whsec_" + crypto.randomBytes(24).toString("hex");
   await prisma.webhookEndpoint.create({
-    data: { url, secret, events: events.length ? events : ["lead.captured"] },
+    data: { url, secret, events: events.length ? events : ["lead.captured"], orgId: await defaultOrgId() },
   });
   res.redirect("/admin/integrations");
 });

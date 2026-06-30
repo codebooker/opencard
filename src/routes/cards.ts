@@ -30,7 +30,7 @@ cardsRouter.get("/:slug", async (req, res) => {
   if (!card) return res.status(404).send(page({ title: "Not found", body: "<main class='card'><p>Card not found.</p></main>" }));
 
   await prisma.analyticsEvent.create({
-    data: { cardId: card.id, type: "view", ip: clientIp(req), userAgent: req.headers["user-agent"] || "" },
+    data: { cardId: card.id, orgId: card.orgId, type: "view", ip: clientIp(req), userAgent: req.headers["user-agent"] || "" },
   });
 
   // Non-destructive preview overrides (do NOT change saved data):
@@ -53,7 +53,7 @@ cardsRouter.get("/:slug", async (req, res) => {
 cardsRouter.get("/:slug/vcard", async (req, res) => {
   const card = await loadCard(req.params.slug);
   if (!card) return res.status(404).send("Not found");
-  await prisma.analyticsEvent.create({ data: { cardId: card.id, type: "vcard", ip: clientIp(req) } });
+  await prisma.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "vcard", ip: clientIp(req) } });
   const vcf = buildVCard(card);
   res.setHeader("Content-Type", "text/vcard; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="${card.slug}.vcf"`);
@@ -87,7 +87,7 @@ cardsRouter.post("/:slug/event", async (req, res) => {
     /* ignore malformed beacons */
   }
   await prisma.analyticsEvent.create({
-    data: { cardId: card.id, type, meta, ip: clientIp(req), userAgent: req.headers["user-agent"] || "" },
+    data: { cardId: card.id, orgId: card.orgId, type, meta, ip: clientIp(req), userAgent: req.headers["user-agent"] || "" },
   });
   res.status(204).end();
 });
@@ -101,6 +101,7 @@ cardsRouter.post("/:slug/connect", async (req, res) => {
   const lead = await prisma.lead.create({
     data: {
       cardId: card.id,
+      orgId: card.orgId,
       name: String(name).slice(0, 200),
       email: email ? String(email).slice(0, 200) : null,
       phone: phone ? String(phone).slice(0, 60) : null,
@@ -108,7 +109,7 @@ cardsRouter.post("/:slug/connect", async (req, res) => {
       note: note ? String(note).slice(0, 1000) : null,
     },
   });
-  await prisma.analyticsEvent.create({ data: { cardId: card.id, type: "connect", ip: clientIp(req) } });
+  await prisma.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "connect", ip: clientIp(req) } });
   emitEvent("lead.captured", leadPayload(lead, card));
   res.send(
     page({
