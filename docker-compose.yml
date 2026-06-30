@@ -38,6 +38,8 @@ services:
       AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
       # Local testing only: "1" lets employees sign in by typing an email (no IdP).
       SELF_SERVICE_DEV_LOGIN: ${SELF_SERVICE_DEV_LOGIN:-0}
+      # "1" opens public self-service signup (/signup). Off by default in prod.
+      SIGNUPS_ENABLED: ${SIGNUPS_ENABLED:-0}
       PORT: "3000"
     ports:
       - "${PORT:-3000}:3000"
