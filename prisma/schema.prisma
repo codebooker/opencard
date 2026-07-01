@@ -98,6 +98,9 @@ model Location {
   salesUrl     String?  // sales inventory / contact CTA
   serviceUrl   String?  // schedule-service CTA
   timezone     String?  // IANA tz, e.g. America/New_York
+  // Lead routing: a rooftop lead inbox (BDC/sales) + campaign->email overrides.
+  leadEmail       String?
+  campaignRouting Json? // { "campaign-name": "email@dealer.com" }
   users        User[]
   cards        Card[]
   departments  Department[]
@@ -144,6 +147,7 @@ model Department {
   locationId String
   name       String
   ctas       Json     @default("[]") // [{ label, url }]
+  leadEmail  String? // department lead inbox
   cards      Card[]
   createdAt  DateTime @default(now())
 

@@ -10,6 +10,7 @@ import { uniqueSlug, uniqueAssetSlug } from "../slug";
 import { upload, uploadedUrl } from "../upload";
 import { emitEvent, cardPayload, WEBHOOK_EVENTS, replayDelivery, sendTestEvent } from "../webhooks";
 import { parseOemBrands, parseCtaLines } from "../dealership";
+import { parseCampaignRoutingLines } from "../routing";
 import { redirectTargetUrl, offboardCardUpdate, replacementCardData } from "../turnover";
 import { assetTypeLabel } from "../assets";
 import { generateApiKey } from "../apiauth";
@@ -570,6 +571,8 @@ function rooftopProfile(b: any) {
     salesUrl: clean(b.salesUrl),
     serviceUrl: clean(b.serviceUrl),
     timezone: clean(b.timezone),
+    leadEmail: clean(b.leadEmail),
+    campaignRouting: parseCampaignRoutingLines(b.campaignRouting),
   };
 }
 
@@ -645,17 +648,18 @@ adminRouter.post("/locations/:id/departments", async (req, res) => {
   if (!loc) return res.status(404).send("Not found");
   if (!RBAC.canManageBrand(reqAdmin(req), loc.brandId)) return forbidden(res);
   const ctas = parseCtaLines(req.body?.ctas);
+  const leadEmail = clean(req.body?.leadEmail);
   const deptId = clean(req.body?.departmentId);
   if (deptId) {
-    // update (name is fixed once created; only CTAs change), scoped to this rooftop
-    await prisma.department.updateMany({ where: { id: deptId, locationId: loc.id }, data: { ctas } });
+    // update (name is fixed once created), scoped to this rooftop
+    await prisma.department.updateMany({ where: { id: deptId, locationId: loc.id }, data: { ctas, leadEmail } });
   } else {
     const name = clean(req.body?.name);
     if (name) {
       await prisma.department.upsert({
         where: { locationId_name: { locationId: loc.id, name } },
-        create: { locationId: loc.id, orgId: loc.orgId, name, ctas },
-        update: { ctas },
+        create: { locationId: loc.id, orgId: loc.orgId, name, ctas, leadEmail },
+        update: { ctas, leadEmail },
       });
     }
   }

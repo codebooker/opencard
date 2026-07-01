@@ -26,6 +26,7 @@ import {
 import { HIDEABLE_FIELDS, SIGNATURE_TOKENS, ROLE_SUGGESTIONS, asStringArray } from "../roletemplate";
 import { ASSET_TYPES, ASSET_DEST_TYPES, assetTypeLabel } from "../assets";
 import { LEAD_FIELDS, DEFAULT_LEAD_FIELDS } from "../leadform";
+import { campaignRoutingToLines } from "../routing";
 
 // Shared lead-form config block for the template + brand editors.
 function leadFormConfig(opts: {
@@ -297,6 +298,15 @@ export function locationForm(
       (tz) => `<option ${l.timezone === tz ? "selected" : ""}>${esc(tz)}</option>`
     ).join("")}</select>
 
+    <h3>Lead routing</h3>
+    <p class="muted">Where leads from this ${esc(lower(t.locationSingular))} are emailed (in addition to the card owner).</p>
+    <label>Rooftop lead inbox <span class="muted">(BDC / sales desk)</span></label>
+    <input name="leadEmail" type="email" value="${esc(l.leadEmail)}" placeholder="leads@dealer.com" />
+    <label style="margin-top:8px">Campaign routing <span class="muted">(one per line: <code>campaign | email</code>)</span></label>
+    <textarea name="campaignRouting" rows="2" placeholder="summer | summer-team@dealer.com">${esc(
+      campaignRoutingToLines(l.campaignRouting)
+    )}</textarea>
+
     <p style="margin-top:16px"><button class="btn" type="submit">Save ${esc(lower(t.locationSingular))}</button>
     <a class="btn secondary" href="/admin">Cancel</a>
     ${location ? `<a class="btn secondary" href="/admin/locations/${esc(location.id)}/departments">Departments</a>` : ""}
@@ -319,6 +329,8 @@ export function departmentsView(data: { location: any; departments: any[] }): st
       <strong>${esc(d.name)}</strong>
       <label style="margin-top:8px">Call-to-action buttons <span class="muted">(one per line: <code>Label | https://url</code>)</span></label>
       <textarea name="ctas" rows="3" placeholder="Schedule service | acmeford.com/service">${esc(ctaLinesFromJson(d.ctas))}</textarea>
+      <label style="margin-top:8px">Department lead inbox <span class="muted">(emailed on leads from this department's cards)</span></label>
+      <input name="leadEmail" type="email" value="${esc(d.leadEmail)}" placeholder="service-leads@dealer.com" />
       <p style="margin-top:8px"><button class="btn" type="submit">Save</button>
       <button class="btn danger" type="submit" formaction="/admin/departments/${esc(d.id)}/delete"
         formnovalidate onclick="return confirm('Delete the ${esc(d.name)} department? Cards keep their other settings.')">Delete</button></p>
@@ -338,6 +350,8 @@ export function departmentsView(data: { location: any; departments: any[] }): st
     <datalist id="dept-suggest">${suggestions.map((d) => `<option value="${esc(d)}"></option>`).join("")}</datalist>
     <label style="margin-top:8px">Call-to-action buttons <span class="muted">(one per line: <code>Label | https://url</code>)</span></label>
     <textarea name="ctas" rows="3" placeholder="View inventory | acmeford.com/inventory"></textarea>
+    <label style="margin-top:8px">Department lead inbox <span class="muted">(optional)</span></label>
+    <input name="leadEmail" type="email" placeholder="service-leads@dealer.com" />
     <p style="margin-top:10px"><button class="btn" type="submit">Add department</button>
     <a class="btn secondary" href="/admin/locations/${esc(loc.id)}/edit">Back</a></p>
   </form>`;

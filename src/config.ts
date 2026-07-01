@@ -65,6 +65,16 @@ export const config = {
       enterprise: process.env.STRIPE_PRICE_ENTERPRISE || "",
     } as Record<string, string>,
   },
+  // Outbound email for lead notifications. Optional — when SMTP_HOST is unset,
+  // notifications are logged instead of sent (the routing still runs).
+  smtp: {
+    host: process.env.SMTP_HOST || "",
+    port: parseInt(process.env.SMTP_PORT || "587", 10),
+    user: process.env.SMTP_USER || "",
+    pass: process.env.SMTP_PASS || "",
+    from: process.env.SMTP_FROM || "OpenCard <no-reply@opencard.id>",
+  },
 };
 
 export const stripeEnabled = !!config.stripe.secretKey;
+export const mailEnabled = !!config.smtp.host;

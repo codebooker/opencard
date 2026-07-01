@@ -9,6 +9,7 @@ import { page, esc } from "../views/html";
 import { parseUtm } from "../attribution";
 import { assembleLead } from "../leadform";
 import { emitEvent, leadPayload } from "../webhooks";
+import { notifyLead } from "../notify";
 
 export const assetsRouter = Router();
 const hostOrg = (req: Request) => orgIdForHost(requestHost(req));

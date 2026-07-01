@@ -9,6 +9,7 @@ import { page, esc } from "../views/html";
 import { emitEvent, leadPayload } from "../webhooks";
 import { parseUtm } from "../attribution";
 import { assembleLead } from "../leadform";
+import { notifyLead } from "../notify";
 
 export const cardsRouter = Router();
 
@@ -130,6 +131,7 @@ cardsRouter.post("/:slug/connect", async (req, res) => {
     return created;
   });
   emitEvent("lead.captured", leadPayload(lead, { card }));
+  notifyLead(lead, { card });
   res.send(
     page({
       title: "Thanks!",
