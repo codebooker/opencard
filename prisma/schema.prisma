@@ -298,16 +298,22 @@ model WebhookEndpoint {
 }
 
 model WebhookDelivery {
-  id         String          @id @default(cuid())
-  endpoint   WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
-  endpointId String
-  org        Org             @relation(fields: [orgId], references: [id])
-  orgId      String
-  event      String
-  success    Boolean
-  statusCode Int?
-  error      String?
-  createdAt  DateTime        @default(now())
+  id              String          @id @default(cuid())
+  endpoint        WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  endpointId      String
+  org             Org             @relation(fields: [orgId], references: [id])
+  orgId           String
+  event           String
+  attempt         Int             @default(1) // 1 = first try; >1 = retry/replay
+  success         Boolean
+  statusCode      Int?
+  durationMs      Int? // request round-trip time
+  requestBody     String? // exact JSON payload sent (for inspection + replay)
+  signature       String? // the X-OpenCard-Signature we sent
+  responseHeaders Json? // response headers (truncated set)
+  responseBody    String? // response body (truncated)
+  error           String?
+  createdAt       DateTime        @default(now())
 
   @@index([endpointId, createdAt])
   @@index([orgId])

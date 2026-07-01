@@ -8,7 +8,7 @@ import { requireAdmin, reqAdmin, forbidden, loginPage, mfaPage, enrollPage } fro
 import { page, esc } from "../views/html";
 import { uniqueSlug } from "../slug";
 import { upload, uploadedUrl } from "../upload";
-import { emitEvent, cardPayload, WEBHOOK_EVENTS } from "../webhooks";
+import { emitEvent, cardPayload, WEBHOOK_EVENTS, replayDelivery, sendTestEvent } from "../webhooks";
 import { generateApiKey } from "../apiauth";
 import { sanitizeScopes } from "../api-scopes";
 import { generateScimToken } from "../scim-auth";
@@ -909,6 +909,44 @@ adminRouter.post("/webhooks/:id/delete", async (req, res) => {
     where: p.platform ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
   });
   res.redirect("/admin/integrations");
+});
+
+// Delivery inspector for one endpoint (org-scoped).
+adminRouter.get("/webhooks/:id", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  const endpoint = await prisma.webhookEndpoint.findFirst({
+    where: p.platform ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
+  });
+  if (!endpoint) return res.status(404).send("Webhook not found.");
+  const filter = req.query.filter === "failed" ? "failed" : "all";
+  const deliveries = await prisma.webhookDelivery.findMany({
+    where: { endpointId: endpoint.id, ...(filter === "failed" ? { success: false } : {}) },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+  const flash =
+    req.query.sent === "1" ? "Test event sent." : req.query.replayed === "1" ? "Delivery replayed." : null;
+  res.send(V.webhookDetailView({ endpoint, deliveries, filter, flash }));
+});
+
+adminRouter.post("/webhooks/:id/test", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  await sendTestEvent(req.params.id, p.orgId);
+  res.redirect(`/admin/webhooks/${req.params.id}?sent=1`);
+});
+
+adminRouter.post("/deliveries/:id/replay", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  const d = await prisma.webhookDelivery.findFirst({
+    where: p.platform ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
+    select: { endpointId: true, orgId: true },
+  });
+  if (!d) return res.status(404).send("Delivery not found.");
+  await replayDelivery(req.params.id, d.orgId);
+  res.redirect(`/admin/webhooks/${d.endpointId}?replayed=1`);
 });
 
 adminRouter.post("/scim-token/generate", async (req, res) => {

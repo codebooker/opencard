@@ -600,7 +600,8 @@ export function integrationsView(data: {
             : "—"
         }</td>
         <td><details><summary class="muted">secret</summary><code style="font-size:11px">${esc(e.secret)}</code></details></td>
-        <td><form method="POST" action="/admin/webhooks/${esc(e.id)}/delete" onsubmit="return confirm('Delete this webhook?')"><button class="btn danger" type="submit">Delete</button></form></td>
+        <td style="white-space:nowrap"><a class="btn secondary" href="/admin/webhooks/${esc(e.id)}">Inspect</a>
+        <form method="POST" action="/admin/webhooks/${esc(e.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this webhook?')"><button class="btn danger" type="submit">Delete</button></form></td>
       </tr>`;
         })
         .join("")
@@ -714,6 +715,95 @@ export function integrationsView(data: {
 
   <p style="margin-top:18px"><a class="btn secondary" href="/admin">← Back</a></p>`;
   return shell("Integrations", body);
+}
+
+function prettyJson(s: string | null | undefined): string {
+  if (!s) return "";
+  try {
+    return JSON.stringify(JSON.parse(s), null, 2);
+  } catch {
+    return s;
+  }
+}
+
+const PRE =
+  'style="white-space:pre-wrap;word-break:break-word;background:#f6f8fa;border:1px solid #e5e7eb;padding:10px;border-radius:6px;font-size:12px;max-height:280px;overflow:auto;margin:6px 0"';
+
+// Delivery inspector for a single webhook endpoint.
+export function webhookDetailView(data: {
+  endpoint: any;
+  deliveries: any[];
+  filter: "all" | "failed";
+  flash?: string | null;
+}): string {
+  const ep = data.endpoint;
+  const events = Array.isArray(ep.events) ? (ep.events as string[]) : [];
+  const statusPill = (d: any) =>
+    d.error && d.statusCode == null
+      ? `<span class="pill off">error</span>`
+      : d.success
+      ? `<span class="pill on">✓ ${d.statusCode}</span>`
+      : `<span class="pill off">✗ ${d.statusCode ?? ""}</span>`;
+
+  const rows = data.deliveries.length
+    ? data.deliveries
+        .map((d) => {
+          const when = new Date(d.createdAt).toISOString().slice(0, 19).replace("T", " ");
+          const respHeaders = d.responseHeaders ? JSON.stringify(d.responseHeaders, null, 2) : "";
+          return `<tr>
+        <td class="muted" style="white-space:nowrap">${esc(when)}</td>
+        <td><code>${esc(d.event)}</code></td>
+        <td>#${d.attempt ?? 1}</td>
+        <td>${statusPill(d)}</td>
+        <td class="muted">${d.durationMs != null ? d.durationMs + " ms" : "—"}</td>
+        <td><details><summary class="muted">inspect</summary>
+          <div style="padding:8px 0;max-width:640px">
+            <p style="margin:4px 0"><strong>Request</strong> — signature <code style="font-size:11px;word-break:break-all">${esc(
+              d.signature || ""
+            )}</code></p>
+            <pre ${PRE}>${esc(prettyJson(d.requestBody))}</pre>
+            <p style="margin:8px 0 4px"><strong>Response</strong> ${
+              d.statusCode != null ? `HTTP ${d.statusCode}` : ""
+            }${d.error ? ` — <span style="color:#b91c1c">${esc(d.error)}</span>` : ""}</p>
+            ${respHeaders ? `<pre ${PRE}>${esc(respHeaders)}</pre>` : ""}
+            ${d.responseBody ? `<pre ${PRE}>${esc(d.responseBody)}</pre>` : `<p class="muted">No response body.</p>`}
+            <form method="POST" action="/admin/deliveries/${esc(d.id)}/replay" style="margin-top:6px">
+              <button class="btn secondary" type="submit">Replay this payload</button>
+            </form>
+          </div>
+        </details></td>
+      </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="6" class="muted">No deliveries${data.filter === "failed" ? " matching this filter" : " yet"}.</td></tr>`;
+
+  const body = `
+  <h2>Webhook deliveries</h2>
+  ${data.flash ? `<div class="stat" style="border:1px solid #16a34a;background:#f0fdf4;margin-bottom:14px"><strong>${esc(data.flash)}</strong></div>` : ""}
+  <div class="stat" style="margin-bottom:14px">
+    <p style="margin:0 0 6px"><code>${esc(ep.url)}</code> ${
+    ep.active ? `<span class="pill on">active</span>` : `<span class="pill off">off</span>`
+  }</p>
+    <p class="muted" style="margin:0">Subscribed events: ${esc(events.join(", ") || "—")}</p>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <form method="POST" action="/admin/webhooks/${esc(ep.id)}/test" style="margin:0">
+      <button class="btn" type="submit">Send test event</button>
+    </form>
+    <span class="muted">Filter:</span>
+    <a class="btn secondary" href="/admin/webhooks/${esc(ep.id)}" ${
+    data.filter === "all" ? 'style="font-weight:700"' : ""
+  }>All</a>
+    <a class="btn secondary" href="/admin/webhooks/${esc(ep.id)}?filter=failed" ${
+    data.filter === "failed" ? 'style="font-weight:700"' : ""
+  }>Failures</a>
+  </div>
+  <table style="margin-top:14px">
+    <tr><th>Time (UTC)</th><th>Event</th><th>Attempt</th><th>Status</th><th>Duration</th><th>Details</th></tr>
+    ${rows}
+  </table>
+  <p style="margin-top:18px"><a class="btn secondary" href="/admin/integrations">← Integrations</a></p>`;
+  return shell("Webhook deliveries", body);
 }
 
 export function analyticsView(stats: {
