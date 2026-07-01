@@ -447,6 +447,7 @@ export function cardForm(opts: {
       <button class="btn" type="submit">Save ${esc(lower(t.cardSingular))}</button>
       ${opts.card ? `<a class="btn secondary" href="/c/${esc(opts.card.slug)}" target="_blank">Preview</a>` : ""}
       <a class="btn secondary" href="/admin/cards?locationId=${esc(opts.locationId)}">Cancel</a>
+      ${opts.card ? `<a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/turnover">Turn over</a>` : ""}
     </p>
   </form>
   ${
@@ -458,6 +459,49 @@ export function cardForm(opts: {
   }
   ${editorScripts()}`;
   return shell(`${t.cardSingular} editor`, body);
+}
+
+// Turnover / offboarding page for a single card.
+export function turnoverForm(opts: { card: any; rooftop: any; otherCards: any[]; leadCount: number }): string {
+  const c = opts.card;
+  const fullName = [c.firstName, c.lastName].filter(Boolean).join(" ") || "this employee";
+  const nameOf = (o: any) => [o.firstName, o.lastName].filter(Boolean).join(" ");
+  const redirectCardOpts = opts.otherCards
+    .map((o) => `<option value="card:${esc(o.slug)}">${esc(nameOf(o))}${o.title ? ` — ${esc(o.title)}` : ""}</option>`)
+    .join("");
+  const leadTargetOpts = opts.otherCards.map((o) => `<option value="${esc(o.id)}">${esc(nameOf(o))}</option>`).join("");
+  const body = `
+  <h2>Turn over — ${esc(fullName)}</h2>
+  <p class="muted">Offboarding disables the public card, revokes this person's self-service access, and preserves their analytics. Leads stay unless you transfer them.</p>
+  <form class="editor" method="POST" action="/admin/cards/${esc(c.id)}/turnover" style="max-width:640px">
+    <h3>Redirect the old card</h3>
+    <p class="muted">Where to send anyone scanning the printed NFC/QR card afterwards.</p>
+    <select name="redirect">
+      <option value="none">Don't redirect (show "not found")</option>
+      ${opts.rooftop?.website ? `<option value="rooftop">Rooftop website (${esc(opts.rooftop.website)})</option>` : ""}
+      ${redirectCardOpts ? `<optgroup label="Another card">${redirectCardOpts}</optgroup>` : ""}
+    </select>
+
+    <h3 style="margin-top:16px">Leads (${opts.leadCount})</h3>
+    <select name="transferLeads">
+      <option value="keep">Keep leads on this card</option>
+      ${leadTargetOpts ? `<optgroup label="Transfer to">${leadTargetOpts}</optgroup>` : ""}
+    </select>
+
+    <h3 style="margin-top:16px">Replacement <span class="muted">(optional)</span></h3>
+    <label class="chk"><input type="checkbox" name="createReplacement" value="1" /> Create a replacement card with this card's role, design, department and ${esc("rooftop")}</label>
+    <div class="grid2" style="margin-top:8px">
+      <div><label>First name</label><input name="newFirstName" /></div>
+      <div><label>Last name</label><input name="newLastName" /></div>
+    </div>
+    <label>New owner email (self-service)</label><input name="newOwnerEmail" type="email" placeholder="new.hire@dealer.com" />
+
+    <p style="margin-top:16px">
+      <button class="btn danger" type="submit" onclick="return confirm('Offboard ${esc(fullName)}? The public card will be disabled.')">Offboard employee</button>
+      <a class="btn secondary" href="/admin/cards/${esc(c.id)}/edit">Cancel</a>
+    </p>
+  </form>`;
+  return shell("Turn over", body);
 }
 
 const pq = (s: any) => encodeURIComponent(s || "");

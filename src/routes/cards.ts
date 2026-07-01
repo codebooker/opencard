@@ -34,8 +34,17 @@ function cardPrimary(card: { primaryColor: string | null; location: { primaryCol
 
 // Public card page
 cardsRouter.get("/:slug", async (req, res) => {
-  const card = await loadCard(req.params.slug, await hostOrg(req));
-  if (!card) return res.status(404).send(page({ title: "Not found", body: "<main class='card'><p>Card not found.</p></main>" }));
+  const orgId = await hostOrg(req);
+  const card = await loadCard(req.params.slug, orgId);
+  if (!card) {
+    // Turnover: a deactivated card can redirect scanned NFC/QR visitors onward.
+    const dead = await prisma.card.findFirst({
+      where: { slug: req.params.slug, active: false, ...(orgId ? { orgId } : {}) },
+      select: { redirectUrl: true },
+    });
+    if (dead?.redirectUrl) return res.redirect(302, dead.redirectUrl);
+    return res.status(404).send(page({ title: "Not found", body: "<main class='card'><p>Card not found.</p></main>" }));
+  }
 
   await runWithOrg(card.orgId, (db) =>
     db.analyticsEvent.create({

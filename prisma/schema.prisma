@@ -211,6 +211,10 @@ model Card {
   ownerEmail     String?
   selfEditFields Json?
 
+  // Turnover: when the card is deactivated, /c/:slug 302-redirects here (e.g. to a
+  // manager's card or the rooftop site) so scanned NFC/QR cards still land somewhere.
+  redirectUrl    String?
+
   active      Boolean   @default(true)
   events      AnalyticsEvent[]
   leads       Lead[]

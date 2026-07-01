@@ -10,6 +10,7 @@ import { uniqueSlug } from "../slug";
 import { upload, uploadedUrl } from "../upload";
 import { emitEvent, cardPayload, WEBHOOK_EVENTS, replayDelivery, sendTestEvent } from "../webhooks";
 import { parseOemBrands, parseCtaLines } from "../dealership";
+import { redirectTargetUrl, offboardCardUpdate, replacementCardData } from "../turnover";
 import { generateApiKey } from "../apiauth";
 import { sanitizeScopes } from "../api-scopes";
 import { generateScimToken } from "../scim-auth";
@@ -825,6 +826,79 @@ adminRouter.post("/cards/:id/delete", async (req, res) => {
   await prisma.card.delete({ where: { id: req.params.id } });
   if (card) emitEvent("card.deleted", { id: card.id, slug: card.slug });
   res.redirect(`/admin/cards?locationId=${card?.locationId || ""}`);
+});
+
+// ---------- turnover / offboarding ----------
+adminRouter.get("/cards/:id/turnover", async (req, res) => {
+  const card = await prisma.card.findUnique({ where: { id: req.params.id }, include: { location: true } });
+  if (!card) return res.status(404).send("Not found");
+  if (!(await RBAC.canAccessLocation(reqAdmin(req), card.locationId))) return forbidden(res);
+  const [otherCards, leadCount] = await Promise.all([
+    prisma.card.findMany({
+      where: { locationId: card.locationId, active: true, id: { not: card.id } },
+      select: { id: true, slug: true, firstName: true, lastName: true, title: true },
+      orderBy: { firstName: "asc" },
+    }),
+    prisma.lead.count({ where: { cardId: card.id } }),
+  ]);
+  res.send(V.turnoverForm({ card, rooftop: card.location, otherCards, leadCount }));
+});
+
+adminRouter.post("/cards/:id/turnover", async (req, res) => {
+  const b = req.body;
+  const card = await prisma.card.findUnique({ where: { id: req.params.id }, include: { location: true } });
+  if (!card) return res.status(404).send("Not found");
+  if (!(await RBAC.canAccessLocation(reqAdmin(req), card.locationId))) return forbidden(res);
+
+  // Redirect target: validate a card:<slug> choice against an active card in this rooftop.
+  let choice = clean(b.redirect) || "none";
+  if (choice.startsWith("card:")) {
+    const ok = await prisma.card.count({
+      where: { slug: choice.slice(5), locationId: card.locationId, active: true },
+    });
+    if (!ok) choice = "none";
+  }
+  const redirectUrl = redirectTargetUrl(choice, {
+    cardBaseUrl: config.cardUrl,
+    rooftopWebsite: card.location.website,
+  });
+
+  // Transfer leads to another card in the rooftop (validated), or keep them.
+  const transfer = clean(b.transferLeads);
+  if (transfer && transfer !== "keep") {
+    const target = await prisma.card.findFirst({
+      where: { id: transfer, locationId: card.locationId },
+      select: { id: true },
+    });
+    if (target) await prisma.lead.updateMany({ where: { cardId: card.id }, data: { cardId: target.id } });
+  }
+
+  // Offboard: disable the public card, revoke self-service, set the redirect.
+  await prisma.card.update({ where: { id: card.id }, data: offboardCardUpdate(redirectUrl) });
+
+  // Optional replacement: clone role/design/placement, assign the new hire.
+  if (b.createReplacement) {
+    const first = clean(b.newFirstName);
+    const last = clean(b.newLastName);
+    if (first || last) {
+      const data: any = replacementCardData(card);
+      if (data.selfEditFields == null) delete data.selfEditFields;
+      const slug = await uniqueSlug(first || "new", last || "hire");
+      const replacement = await prisma.card.create({
+        data: {
+          orgId: card.orgId,
+          slug,
+          firstName: first || "New",
+          lastName: last || "Hire",
+          ownerEmail: clean(b.newOwnerEmail),
+          ...data,
+        },
+      });
+      emitEvent("card.created", cardPayload(replacement));
+    }
+  }
+
+  res.redirect(`/admin/cards?locationId=${card.locationId}`);
 });
 
 // Card ids the principal may see (null = no restriction, i.e. global admin).
