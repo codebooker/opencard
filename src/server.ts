@@ -3,6 +3,7 @@ import cookieParser from "cookie-parser";
 import path from "path";
 import { config } from "./config";
 import { cardsRouter } from "./routes/cards";
+import { assetsRouter } from "./routes/assets";
 import { adminRouter } from "./routes/admin";
 import { scimRouter } from "./routes/scim";
 import { selfRouter } from "./routes/selfservice";
@@ -80,6 +81,7 @@ app.use("/signup", signupRouter);
 app.use("/admin", adminRouter);
 app.use("/me", selfRouter);
 app.use("/c", leadLimiter, cardsRouter);
+app.use("/a", assetsRouter);
 
 app.use(notFound);
 app.use(errorHandler);

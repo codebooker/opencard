@@ -48,6 +48,7 @@ model Org {
   adminUsers        AdminUser[]
   samlConfig        SamlConfig?
   departments       Department[]
+  assets            Asset[]
   createdAt   DateTime @default(now())
 }
 
@@ -97,10 +98,36 @@ model Location {
   users        User[]
   cards        Card[]
   departments  Department[]
+  assets       Asset[]
   createdAt    DateTime @default(now())
 
   @@unique([brandId, code])
   @@index([orgId])
+}
+
+// A dealership QR/NFC asset that isn't a person: a rooftop or department landing,
+// or a trackable QR on a desk, a vehicle window, the service lane, an event, or a
+// campaign. Public URL: /a/:slug. Scans are counted.
+model Asset {
+  id                String    @id @default(cuid())
+  org               Org       @relation(fields: [orgId], references: [id])
+  orgId             String
+  location          Location  @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  locationId        String
+  type              String // rooftop | department | desk | vehicle | service_lane | event | campaign
+  name              String
+  slug              String    @unique // public URL: /a/:slug
+  destinationType   String    @default("landing") // url | card | sales | service | landing
+  destinationUrl    String?
+  destinationCard   Card?     @relation("AssetDest", fields: [destinationCardId], references: [id], onDelete: SetNull)
+  destinationCardId String?
+  active            Boolean   @default(true)
+  scanCount         Int       @default(0)
+  lastScanAt        DateTime?
+  createdAt         DateTime  @default(now())
+
+  @@index([orgId])
+  @@index([locationId])
 }
 
 // A department within a rooftop (Sales/Service/Parts/Finance/BDC/Management or
@@ -178,6 +205,7 @@ model Card {
   templateId  String?
   dept        Department? @relation(fields: [departmentId], references: [id])
   departmentId String?
+  destAssets  Asset[]   @relation("AssetDest")
   org         Org       @relation(fields: [orgId], references: [id])
   orgId       String
 

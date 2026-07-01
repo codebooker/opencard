@@ -6,11 +6,12 @@ import { config } from "../config";
 import { clearCookieOptions, cookieOptions } from "../cookies";
 import { requireAdmin, reqAdmin, forbidden, loginPage, mfaPage, enrollPage } from "../middleware/auth";
 import { page, esc } from "../views/html";
-import { uniqueSlug } from "../slug";
+import { uniqueSlug, uniqueAssetSlug } from "../slug";
 import { upload, uploadedUrl } from "../upload";
 import { emitEvent, cardPayload, WEBHOOK_EVENTS, replayDelivery, sendTestEvent } from "../webhooks";
 import { parseOemBrands, parseCtaLines } from "../dealership";
 import { redirectTargetUrl, offboardCardUpdate, replacementCardData } from "../turnover";
+import { assetTypeLabel } from "../assets";
 import { generateApiKey } from "../apiauth";
 import { sanitizeScopes } from "../api-scopes";
 import { generateScimToken } from "../scim-auth";
@@ -664,6 +665,76 @@ adminRouter.post("/departments/:id/delete", async (req, res) => {
   if (!RBAC.canManageBrand(reqAdmin(req), dept.location.brandId)) return forbidden(res);
   await prisma.department.delete({ where: { id: dept.id } });
   res.redirect(`/admin/locations/${dept.location.id}/departments`);
+});
+
+// ---------- assets (per rooftop) ----------
+function assetDataFromBody(b: any) {
+  const validTypes = ["rooftop", "department", "desk", "vehicle", "service_lane", "event", "campaign"];
+  const validDest = ["url", "card", "sales", "service", "landing"];
+  const type = validTypes.includes(b.type) ? b.type : "campaign";
+  const destinationType = validDest.includes(b.destinationType) ? b.destinationType : "landing";
+  return {
+    type,
+    name: clean(b.name) || assetTypeLabel(type),
+    destinationType,
+    destinationUrl: destinationType === "url" ? clean(b.destinationUrl) : null,
+    // destinationCardId validated against the rooftop by the caller
+  };
+}
+
+adminRouter.get("/locations/:id/assets", async (req, res) => {
+  const loc = await locationForDept(req.params.id);
+  if (!loc) return res.status(404).send("Not found");
+  if (!RBAC.canManageBrand(reqAdmin(req), loc.brandId)) return forbidden(res);
+  const [assets, cards] = await Promise.all([
+    prisma.asset.findMany({ where: { locationId: loc.id }, orderBy: { createdAt: "desc" } }),
+    prisma.card.findMany({
+      where: { locationId: loc.id, active: true },
+      select: { id: true, firstName: true, lastName: true },
+      orderBy: { firstName: "asc" },
+    }),
+  ]);
+  res.send(V.assetsView({ location: loc, assets, cards, cardBaseUrl: config.cardUrl }));
+});
+
+adminRouter.post("/locations/:id/assets", async (req, res) => {
+  const loc = await locationForDept(req.params.id);
+  if (!loc) return res.status(404).send("Not found");
+  if (!RBAC.canManageBrand(reqAdmin(req), loc.brandId)) return forbidden(res);
+  const data = assetDataFromBody(req.body);
+  // Resolve + validate the destination card against this rooftop.
+  let destinationCardId: string | null = null;
+  if (data.destinationType === "card") {
+    const cid = clean(req.body?.destinationCardId);
+    if (cid) {
+      const ok = await prisma.card.count({ where: { id: cid, locationId: loc.id } });
+      if (ok) destinationCardId = cid;
+    }
+  }
+  const assetId = clean(req.body?.assetId);
+  if (assetId) {
+    await prisma.asset.updateMany({
+      where: { id: assetId, locationId: loc.id },
+      data: { ...data, destinationCardId },
+    });
+  } else {
+    const slug = await uniqueAssetSlug(data.name);
+    await prisma.asset.create({
+      data: { ...data, destinationCardId, orgId: loc.orgId, locationId: loc.id, slug },
+    });
+  }
+  res.redirect(`/admin/locations/${loc.id}/assets`);
+});
+
+adminRouter.post("/assets/:id/delete", async (req, res) => {
+  const asset = await prisma.asset.findUnique({
+    where: { id: req.params.id },
+    include: { location: { select: { id: true, brandId: true } } },
+  });
+  if (!asset) return res.status(404).send("Not found");
+  if (!RBAC.canManageBrand(reqAdmin(req), asset.location.brandId)) return forbidden(res);
+  await prisma.asset.delete({ where: { id: asset.id } });
+  res.redirect(`/admin/locations/${asset.location.id}/assets`);
 });
 
 // ---------- cards ----------

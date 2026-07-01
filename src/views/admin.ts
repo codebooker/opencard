@@ -24,6 +24,7 @@ import {
   ctaLinesFromJson,
 } from "../dealership";
 import { HIDEABLE_FIELDS, SIGNATURE_TOKENS, ROLE_SUGGESTIONS, asStringArray } from "../roletemplate";
+import { ASSET_TYPES, ASSET_DEST_TYPES, assetTypeLabel } from "../assets";
 
 // Render the self-service "allowed fields" checkboxes.
 function selfFieldChecks(allowed: string[], opts: { name: string; includeInherit?: boolean; inherit?: boolean } ): string {
@@ -260,7 +261,8 @@ export function locationForm(
 
     <p style="margin-top:16px"><button class="btn" type="submit">Save ${esc(lower(t.locationSingular))}</button>
     <a class="btn secondary" href="/admin">Cancel</a>
-    ${location ? `<a class="btn secondary" href="/admin/locations/${esc(location.id)}/departments">Departments</a>` : ""}</p>
+    ${location ? `<a class="btn secondary" href="/admin/locations/${esc(location.id)}/departments">Departments</a>` : ""}
+    ${location ? `<a class="btn secondary" href="/admin/locations/${esc(location.id)}/assets">Assets</a>` : ""}</p>
   </form>`;
   return shell(t.locationSingular, body);
 }
@@ -302,6 +304,75 @@ export function departmentsView(data: { location: any; departments: any[] }): st
     <a class="btn secondary" href="/admin/locations/${esc(loc.id)}/edit">Back</a></p>
   </form>`;
   return shell("Departments", body);
+}
+
+// Manage dealership QR/NFC assets within a rooftop.
+export function assetsView(data: { location: any; assets: any[]; cards: any[]; cardBaseUrl: string }): string {
+  const loc = data.location;
+  const base = (data.cardBaseUrl || "").replace(/\/+$/, "");
+  const typeOpts = (sel: string) =>
+    ASSET_TYPES.map(([v, l]) => `<option value="${esc(v)}" ${sel === v ? "selected" : ""}>${esc(l)}</option>`).join("");
+  const destTypeOpts = (sel: string) =>
+    ASSET_DEST_TYPES.map(([v, l]) => `<option value="${esc(v)}" ${sel === v ? "selected" : ""}>${esc(l)}</option>`).join("");
+  const cardOpts = (sel: string) =>
+    `<option value="">—</option>` +
+    data.cards
+      .map((c) => `<option value="${esc(c.id)}" ${sel === c.id ? "selected" : ""}>${esc([c.firstName, c.lastName].join(" "))}</option>`)
+      .join("");
+
+  const destFields = (a: any) => `
+    <label style="margin-top:8px">Destination</label>
+    <select name="destinationType">${destTypeOpts(a.destinationType || "landing")}</select>
+    <div class="grid2" style="margin-top:6px">
+      <div><label class="muted">URL <span class="muted">(for "Redirect to a URL")</span></label><input name="destinationUrl" value="${esc(
+        a.destinationUrl
+      )}" placeholder="acmeford.com/summer" /></div>
+      <div><label class="muted">Card <span class="muted">(for "Redirect to a person's card")</span></label><select name="destinationCardId">${cardOpts(
+        a.destinationCardId || ""
+      )}</select></div>
+    </div>`;
+
+  const rows = data.assets.length
+    ? data.assets
+        .map((a) => {
+          const url = `${base}/a/${a.slug}`;
+          return `<form class="editor" method="POST" action="/admin/locations/${esc(loc.id)}/assets"
+        style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:12px">
+        <input type="hidden" name="assetId" value="${esc(a.id)}" />
+        <div class="grid2">
+          <div><label>Type</label><select name="type">${typeOpts(a.type)}</select></div>
+          <div><label>Name</label><input name="name" value="${esc(a.name)}" required /></div>
+        </div>
+        ${destFields(a)}
+        <p class="muted" style="margin-top:8px">Public: <a href="${esc(url)}" target="_blank">${esc(
+          url
+        )}</a> · <a href="${esc(url)}/qr.png" target="_blank">QR</a> · ${a.scanCount} scan${
+            a.scanCount === 1 ? "" : "s"
+          } · <span class="pill ${a.active ? "on" : "off"}">${a.active ? "active" : "off"}</span></p>
+        <p style="margin-top:8px"><button class="btn" type="submit">Save</button>
+        <button class="btn danger" type="submit" formaction="/admin/assets/${esc(
+          a.id
+        )}/delete" formnovalidate onclick="return confirm('Delete this asset?')">Delete</button></p>
+      </form>`;
+        })
+        .join("")
+    : `<p class="muted">No assets yet.</p>`;
+
+  const body = `
+  <h2>Assets — ${esc(loc.name)}</h2>
+  <p class="muted">QR/NFC codes that aren't people: rooftop &amp; department landings, and trackable desk / vehicle / service-lane / event / campaign codes. Scans are counted.</p>
+  ${rows}
+  <h3 style="margin-top:20px">Add an asset</h3>
+  <form class="editor" method="POST" action="/admin/locations/${esc(loc.id)}/assets" style="max-width:620px">
+    <div class="grid2">
+      <div><label>Type</label><select name="type">${typeOpts("campaign")}</select></div>
+      <div><label>Name</label><input name="name" placeholder="e.g. Summer Sales Event" required /></div>
+    </div>
+    ${destFields({ destinationType: "landing", destinationUrl: "", destinationCardId: "" })}
+    <p style="margin-top:10px"><button class="btn" type="submit">Add asset</button>
+    <a class="btn secondary" href="/admin/locations/${esc(loc.id)}/edit">Back</a></p>
+  </form>`;
+  return shell("Assets", body);
 }
 
 export function cardList(
