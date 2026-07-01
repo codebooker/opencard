@@ -3,3 +3,8 @@ dist
 .test-build
 .env
 *.log
+
+# Deploy secrets / local config (never commit)
+deploy/.env
+deploy/certs/
+deploy/deploy.config

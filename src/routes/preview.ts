@@ -66,7 +66,7 @@ previewRouter.get("/card", async (req, res) => {
     template: null,
   };
 
-  const qr = await qrDataUrl(`${config.baseUrl}/c/preview`, primary);
+  const qr = await qrDataUrl(`${config.cardUrl}/c/preview`, primary);
   res.setHeader("Cache-Control", "no-store");
-  res.send(renderCardPage(sample, qr, config.baseUrl));
+  res.send(renderCardPage(sample, qr, config.cardUrl));
 });

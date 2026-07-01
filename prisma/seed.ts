@@ -14,6 +14,22 @@ const dealershipTerminology = {
 };
 
 async function main() {
+  // Demo/dev data (brands, cards, sample admins) is only seeded when SEED_DEMO=1.
+  // Production gets a single clean bootstrap org so the platform can function
+  // (defaultOrgId, admin-token login) while real customers self-sign-up.
+  const seedDemo = process.env.SEED_DEMO === "1";
+
+  if (!seedDemo) {
+    const existing = await prisma.org.findFirst();
+    if (!existing) {
+      await prisma.org.create({ data: { name: "OpenCard", vertical: "general" } });
+      console.log("Seed: created clean bootstrap org (SEED_DEMO not set).");
+    } else {
+      console.log("Seed: org exists, nothing to do (SEED_DEMO not set).");
+    }
+    return;
+  }
+
   // Idempotent backfill so self-service works on pre-existing demo data too.
   const demoOwners: [string, string][] = [
     ["john-smith", "john.smith@maplewoodrealestate.ca"],

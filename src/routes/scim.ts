@@ -85,7 +85,7 @@ function scimUserResponse(user: any, card: any, req: Request) {
     meta: {
       resourceType: "User",
       location: `${config.baseUrl}/scim/v2/Users/${user.id}`,
-      cardUrl: card ? `${config.baseUrl}/c/${card.slug}` : undefined,
+      cardUrl: card ? `${config.cardUrl}/c/${card.slug}` : undefined,
     },
   };
 }

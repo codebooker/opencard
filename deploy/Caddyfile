@@ -1,0 +1,33 @@
+# OpenCard reverse proxy.
+#
+# TLS uses a Cloudflare Origin Certificate (see deploy/README.md) placed at
+# deploy/certs/origin.pem + origin.key, covering:
+#   opencard.id, *.opencard.id, tapshare.cards, *.tapshare.cards
+# Set Cloudflare SSL/TLS mode to "Full (strict)". Caddy serves those certs and
+# does NOT run ACME (Cloudflare terminates TLS at its edge).
+#
+# The real Host header is preserved so the app can resolve the tenant from the
+# subdomain (e.g. acme.opencard.id).
+
+(common) {
+	tls /certs/origin.pem /certs/origin.key
+	encode gzip
+	header -Server
+	reverse_proxy web:3000
+}
+
+# App + admin, and per-tenant subdomains.
+opencard.id, www.opencard.id {
+	import common
+}
+*.opencard.id {
+	import common
+}
+
+# Public card-sharing pages.
+tapshare.cards, www.tapshare.cards {
+	import common
+}
+*.tapshare.cards {
+	import common
+}

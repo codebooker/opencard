@@ -3,7 +3,12 @@ dotenv.config();
 
 const NODE_ENV = process.env.NODE_ENV || "development";
 const isProduction = NODE_ENV === "production";
-const baseUrl = (process.env.BASE_URL || "http://localhost:3000").replace(/\/$/, "");
+// The app/admin origin (e.g. https://opencard.id). APP_URL is preferred; BASE_URL
+// is kept for back-compat / single-domain dev.
+const baseUrl = (process.env.APP_URL || process.env.BASE_URL || "http://localhost:3000").replace(/\/$/, "");
+// The public card-sharing origin (e.g. https://tapshare.cards). Defaults to the
+// app origin when not split.
+const cardUrl = (process.env.CARD_URL || baseUrl).replace(/\/$/, "");
 
 const badSecrets = new Set([
   "changeme-admin-token",
@@ -30,6 +35,7 @@ export const config = {
   isProduction,
   port: parseInt(process.env.PORT || "3000", 10),
   baseUrl,
+  cardUrl,
   secureCookies: baseUrl.startsWith("https://"),
   adminToken: secret("ADMIN_TOKEN", "dev-admin-token-9f3a04a640e84d2c9df0"),
   scimToken: secret("SCIM_TOKEN", "dev-scim-token-c02c9c55a8434e04a53f"),

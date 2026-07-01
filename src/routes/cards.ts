@@ -1,6 +1,6 @@
 import { Router, Request } from "express";
 import { prisma, runWithOrg } from "../db";
-import { resolveOrgId } from "../tenant-resolver";
+import { orgIdForHost, requestHost } from "../tenant-resolver";
 import { config } from "../config";
 import { buildVCard } from "../vcard";
 import { qrPng, qrDataUrl } from "../qr";
@@ -14,17 +14,19 @@ function clientIp(req: Request): string {
   return (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "";
 }
 
-// Public read. Scoped to the org resolved from the request host so that, once
-// custom domains / subdomains are live, a host only ever serves its own org's
-// cards. With a single org (and no host mapping) this resolves to the default
-// org, so behavior is unchanged today. Uses the owner client: card pages are
-// public, and the slug→org lookup must work before any tenant context exists.
-async function loadCard(slug: string, orgId: string) {
+// Public read. When the request host maps to a specific tenant (a subdomain
+// under the platform domain, or a custom domain), we scope to that org so the
+// host only serves its own cards. On the shared card domain (tapshare.cards) or
+// an unmapped host, orgId is null and we serve any card by its globally-unique
+// slug. Uses the owner client: card pages are public and the lookup must work
+// before any tenant context exists.
+async function loadCard(slug: string, orgId: string | null) {
   return prisma.card.findFirst({
-    where: { slug, active: true, orgId },
+    where: { slug, active: true, ...(orgId ? { orgId } : {}) },
     include: { location: { include: { brand: true } }, template: true },
   });
 }
+const hostOrg = (req: Request) => orgIdForHost(requestHost(req));
 
 function cardPrimary(card: { primaryColor: string | null; location: { primaryColor: string | null; brand: { primaryColor: string } } }) {
   return card.primaryColor || card.location.primaryColor || card.location.brand.primaryColor;
@@ -32,7 +34,7 @@ function cardPrimary(card: { primaryColor: string | null; location: { primaryCol
 
 // Public card page
 cardsRouter.get("/:slug", async (req, res) => {
-  const card = await loadCard(req.params.slug, await resolveOrgId(req));
+  const card = await loadCard(req.params.slug, await hostOrg(req));
   if (!card) return res.status(404).send(page({ title: "Not found", body: "<main class='card'><p>Card not found.</p></main>" }));
 
   await runWithOrg(card.orgId, (db) =>
@@ -53,13 +55,13 @@ cardsRouter.get("/:slug", async (req, res) => {
   if (/^https:\/\//.test(previewLogo)) (card as any).logoUrl = previewLogo;
 
   const primary = cardPrimary(card);
-  const qr = await qrDataUrl(`${config.baseUrl}/c/${card.slug}`, primary);
-  res.send(renderCardPage(card, qr, config.baseUrl));
+  const qr = await qrDataUrl(`${config.cardUrl}/c/${card.slug}`, primary);
+  res.send(renderCardPage(card, qr, config.cardUrl));
 });
 
 // vCard download (Add to Contacts)
 cardsRouter.get("/:slug/vcard", async (req, res) => {
-  const card = await loadCard(req.params.slug, await resolveOrgId(req));
+  const card = await loadCard(req.params.slug, await hostOrg(req));
   if (!card) return res.status(404).send("Not found");
   await runWithOrg(card.orgId, (db) =>
     db.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "vcard", ip: clientIp(req) } })
@@ -72,10 +74,10 @@ cardsRouter.get("/:slug/vcard", async (req, res) => {
 
 // QR PNG (for printing on badges, signatures, etc.)
 cardsRouter.get("/:slug/qr.png", async (req, res) => {
-  const card = await loadCard(req.params.slug, await resolveOrgId(req));
+  const card = await loadCard(req.params.slug, await hostOrg(req));
   if (!card) return res.status(404).send("Not found");
   const primary = cardPrimary(card);
-  const buf = await qrPng(`${config.baseUrl}/c/${card.slug}`, primary);
+  const buf = await qrPng(`${config.cardUrl}/c/${card.slug}`, primary);
   res.setHeader("Content-Type", "image/png");
   res.send(buf);
 });
@@ -106,7 +108,7 @@ cardsRouter.post("/:slug/event", async (req, res) => {
 
 // Two-way contact sharing — capture a lead
 cardsRouter.post("/:slug/connect", async (req, res) => {
-  const card = await loadCard(req.params.slug, await resolveOrgId(req));
+  const card = await loadCard(req.params.slug, await hostOrg(req));
   if (!card) return res.status(404).send("Not found");
   const { name, email, phone, company, note } = req.body || {};
   if (!name) return res.status(400).send("Name required");

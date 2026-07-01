@@ -79,7 +79,7 @@ export function cardPayload(card: any) {
   return {
     id: card.id,
     slug: card.slug,
-    url: `${config.baseUrl}/c/${card.slug}`,
+    url: `${config.cardUrl}/c/${card.slug}`,
     prefix: card.prefix ?? null,
     firstName: card.firstName,
     lastName: card.lastName,

@@ -1,0 +1,97 @@
+# Production stack for OpenCard.
+#   db        — PostgreSQL 16 (persistent volume)
+#   web       — the app (migrate -> bootstrap RLS role -> seed -> serve on :3000, internal)
+#   caddy     — TLS reverse proxy for opencard.id (+ *.opencard.id) and tapshare.cards
+#   portainer — container management UI, bound to localhost only (SSH-tunnel to reach it)
+#
+# Reads secrets from a .env file in this directory. See .env.prod.example.
+name: opencard
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: opencard
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in deploy/.env}
+      POSTGRES_DB: opencard
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opencard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://opencard:${DB_PASSWORD}@db:5432/opencard?schema=public"
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Set APP_DB_PASSWORD in deploy/.env}
+      POSTGRES_DB: opencard
+      NODE_ENV: production
+      APP_URL: ${APP_URL:?Set APP_URL (e.g. https://opencard.id)}
+      CARD_URL: ${CARD_URL:?Set CARD_URL (e.g. https://tapshare.cards)}
+      PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in deploy/.env}
+      SCIM_TOKEN: ${SCIM_TOKEN:?Set SCIM_TOKEN in deploy/.env}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in deploy/.env}
+      UPLOAD_DIR: /app/uploads
+      SIGNUPS_ENABLED: ${SIGNUPS_ENABLED:-1}
+      SEED_DEMO: ${SEED_DEMO:-0}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_TEAM: ${STRIPE_PRICE_TEAM:-}
+      STRIPE_PRICE_DEALER_GROUP: ${STRIPE_PRICE_DEALER_GROUP:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
+      PORT: "3000"
+    volumes:
+      - uploads_data:/app/uploads
+    command: >
+      sh -c "set -e;
+             npx prisma migrate deploy || { npx prisma migrate resolve --applied 0_init && npx prisma migrate deploy; };
+             node dist/db-bootstrap.js;
+             node dist/seed.js || true;
+             exec node dist/server.js"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    restart: unless-stopped
+    # Bound to localhost: reach it via `ssh -L 9443:localhost:9443 <vm>` then
+    # https://localhost:9443 — never exposed to the public internet.
+    ports:
+      - "127.0.0.1:9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+volumes:
+  db_data:
+  uploads_data:
+  caddy_data:
+  caddy_config:
+  portainer_data:
