@@ -25,6 +25,34 @@ import {
 } from "../dealership";
 import { HIDEABLE_FIELDS, SIGNATURE_TOKENS, ROLE_SUGGESTIONS, asStringArray } from "../roletemplate";
 import { ASSET_TYPES, ASSET_DEST_TYPES, assetTypeLabel } from "../assets";
+import { LEAD_FIELDS, DEFAULT_LEAD_FIELDS } from "../leadform";
+
+// Shared lead-form config block for the template + brand editors.
+function leadFormConfig(opts: {
+  fields: string[];
+  consentText: string | null;
+  inheritName: string;
+  inheritLabel: string;
+  inherit: boolean;
+}): string {
+  const set = new Set(opts.fields);
+  const boxes = LEAD_FIELDS.map(
+    ([v, l]) =>
+      `<label class="chk"><input type="checkbox" name="leadFields" value="${esc(v)}" ${
+        set.has(v) ? "checked" : ""
+      } /> ${esc(l)}</label>`
+  ).join("");
+  return `
+    <label class="chk" style="margin:8px 0"><input type="checkbox" name="${esc(opts.inheritName)}" value="1" ${
+    opts.inherit ? "checked" : ""
+  } /> ${esc(opts.inheritLabel)}</label>
+    <label>Lead form fields <span class="muted">(name is always shown)</span></label>
+    <div class="self-fields">${boxes}</div>
+    <label style="margin-top:8px">Consent / privacy text</label>
+    <textarea name="leadConsentText" rows="2" placeholder="I agree to be contacted about my inquiry.">${esc(
+      opts.consentText || ""
+    )}</textarea>`;
+}
 
 // Render the self-service "allowed fields" checkboxes.
 function selfFieldChecks(allowed: string[], opts: { name: string; includeInherit?: boolean; inherit?: boolean } ): string {
@@ -171,6 +199,16 @@ export function brandForm(
     <p class="muted">Which fields employees may edit on their own card (at <code>/me</code> via SSO). Per-card overrides are available on each card.</p>
     ${selfFieldChecks(Array.isArray(b.selfEditFields) ? b.selfEditFields : DEFAULT_SELF_FIELDS, {
       name: "selfEditFields",
+    })}
+
+    <h3 style="margin-top:16px">Lead form (default)</h3>
+    <p class="muted">The default lead-capture form for this brand's cards and asset landing pages. Templates can override it.</p>
+    ${leadFormConfig({
+      fields: Array.isArray(b.leadFields) ? asStringArray(b.leadFields) : DEFAULT_LEAD_FIELDS,
+      consentText: b.leadConsentText,
+      inheritName: "leadDefault",
+      inheritLabel: "Use the built-in default lead form",
+      inherit: b.leadFields == null,
     })}
 
     <p style="margin-top:16px"><button class="btn" type="submit">Save brand</button>
@@ -676,6 +714,15 @@ export function templateForm(brandId: string, template?: any): string {
       t.emailSignature
     )}</textarea>
 
+    <h3 style="margin-top:20px">Lead form</h3>
+    ${leadFormConfig({
+      fields: Array.isArray(t.leadFields) ? asStringArray(t.leadFields) : DEFAULT_LEAD_FIELDS,
+      consentText: t.leadConsentText,
+      inheritName: "leadInherit",
+      inheritLabel: "Inherit the lead form from the brand",
+      inherit: t.leadFields == null,
+    })}
+
     <p style="margin-top:16px"><button class="btn" type="submit">Save template</button>
     <a class="btn secondary" href="/admin/templates?brandId=${esc(brandId)}">Cancel</a></p>
   </form>
@@ -1112,9 +1159,15 @@ export function leadsView(leads: any[]): string {
               }${flags(l)}</td>
         <td style="font-size:12px">${source(l)}</td>
         <td><span class="pill ${l.status === "new" ? "on" : "off"}">${esc(l.status || "new")}</span></td>
-        <td><a href="/c/${esc(l.card.slug)}" target="_blank">${esc(l.card.firstName)} ${esc(l.card.lastName)}</a>${
+        <td>${
+          l.card
+            ? `<a href="/c/${esc(l.card.slug)}" target="_blank">${esc(l.card.firstName)} ${esc(l.card.lastName)}</a>${
                 l.card.department ? `<br><span class="muted" style="font-size:11px">${esc(l.card.department)}</span>` : ""
-              }</td></tr>`
+              }`
+            : l.asset
+            ? `<a href="/a/${esc(l.asset.slug)}" target="_blank">${esc(l.asset.name)}</a><br><span class="muted" style="font-size:11px">asset</span>`
+            : `<span class="muted">—</span>`
+        }</td></tr>`
             )
             .join("")
         : `<tr><td colspan="7" class="muted">No leads captured yet.</td></tr>`

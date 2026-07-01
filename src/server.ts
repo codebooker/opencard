@@ -81,7 +81,7 @@ app.use("/signup", signupRouter);
 app.use("/admin", adminRouter);
 app.use("/me", selfRouter);
 app.use("/c", leadLimiter, cardsRouter);
-app.use("/a", assetsRouter);
+app.use("/a", leadLimiter, assetsRouter);
 
 app.use(notFound);
 app.use(errorHandler);

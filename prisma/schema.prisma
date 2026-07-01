@@ -70,6 +70,9 @@ model Brand {
   showQr       Boolean    @default(true)
   // Brand-wide self-service policy: which card fields employees may edit at /me.
   selfEditFields Json     @default("[\"photo\",\"bio\",\"phones\",\"emails\",\"socials\"]")
+  // Brand-default lead form: which fields show + consent/privacy text.
+  leadFields    Json?
+  leadConsentText String?
   locations    Location[]
   templates    Template[]
   createdAt    DateTime   @default(now())
@@ -124,6 +127,7 @@ model Asset {
   active            Boolean   @default(true)
   scanCount         Int       @default(0)
   lastScanAt        DateTime?
+  leads             Lead[]
   createdAt         DateTime  @default(now())
 
   @@index([orgId])
@@ -168,6 +172,8 @@ model Template {
   hiddenFields  Json    @default("[]") // field keys hidden from the public card
   roleCtas      Json    @default("[]") // [{ label, url }] role-level CTAs
   leadCapture   Boolean @default(true) // show the "share your details back" form
+  leadFields    Json? // configurable lead-form fields (null = inherit brand)
+  leadConsentText String? // consent/privacy text under the lead form (null = inherit)
   disclaimer    String? // legal/disclaimer text shown on the card
   showQr        Boolean? // QR on the card page (null = inherit brand)
   emailSignature String? // signature block with {{token}} placeholders
@@ -271,8 +277,11 @@ model AnalyticsEvent {
 
 model Lead {
   id        String   @id @default(cuid())
-  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  cardId    String
+  // A lead comes from a card OR an asset landing page (exactly one).
+  card      Card?    @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  cardId    String?
+  asset     Asset?   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetId   String?
   org       Org      @relation(fields: [orgId], references: [id])
   orgId     String
   name      String
@@ -298,6 +307,7 @@ model Lead {
   createdAt DateTime @default(now())
 
   @@index([cardId])
+  @@index([assetId])
   @@index([orgId])
   @@index([status])
 }

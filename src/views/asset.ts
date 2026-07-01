@@ -1,8 +1,10 @@
 import { esc, page } from "./html";
 import { rooftopCtas, parseOemBrands } from "../dealership";
+import { resolveLeadFields, resolveConsentText } from "../leadform";
+import { renderLeadForm, leadRefScript, LeadAttribution } from "./leadform-view";
 
 // A lightweight dealership landing page for a rooftop/department asset (no person).
-export function renderAssetLanding(asset: any, _baseUrl: string): string {
+export function renderAssetLanding(asset: any, baseUrl: string, attribution: LeadAttribution = {}): string {
   const loc = asset.location;
   const primary = loc.primaryColor || loc.brand?.primaryColor || "#1f6f43";
   const logo = loc.logoUrl || loc.brand?.logoUrl || null;
@@ -10,6 +12,8 @@ export function renderAssetLanding(asset: any, _baseUrl: string): string {
   const ctas = rooftopCtas(loc);
   const addr = (loc.address as any) || {};
   const addrText = [addr.line1, addr.city, addr.region, addr.postal].filter(Boolean).join(", ");
+  const leadFieldSet = new Set(resolveLeadFields(null, loc.brand?.leadFields));
+  const consentText = resolveConsentText(null, loc.brand?.leadConsentText);
 
   const body = `
 <main class="card" style="--primary:${esc(primary)};--text:#111827;--bg:#ffffff;--font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
@@ -46,7 +50,17 @@ export function renderAssetLanding(asset: any, _baseUrl: string): string {
           .join("")}</div>`
       : ""
   }
+  <button class="connect-toggle" onclick="document.getElementById('connect').classList.toggle('open')">Get in touch</button>
+  <section id="connect" class="connect">
+    ${renderLeadForm({
+      action: `${esc(baseUrl)}/a/${esc(asset.slug)}/connect`,
+      fields: leadFieldSet,
+      consentText,
+      attribution,
+    })}
+  </section>
   <footer class="brand">${esc(loc.brand?.name || "")} · ${esc(loc.name)}</footer>
-</main>`;
+</main>
+${leadRefScript}`;
   return page({ title: `${loc.name} — ${asset.name}`, body, bodyClass: "card-body" });
 }

@@ -429,6 +429,8 @@ adminRouter.post("/brands", upload.single("logoFile"), async (req, res) => {
       layout: b.layout || "classic",
       showQr: !!b.showQr,
       selfEditFields: asArray(b.selfEditFields),
+      leadFields: b.leadDefault ? Prisma.DbNull : asArray(b.leadFields),
+      leadConsentText: b.leadDefault ? null : clean(b.leadConsentText),
     },
   });
   res.redirect("/admin");
@@ -448,6 +450,8 @@ adminRouter.post("/brands/:id", upload.single("logoFile"), async (req, res) => {
       layout: b.layout,
       showQr: !!b.showQr,
       selfEditFields: asArray(b.selfEditFields),
+      leadFields: b.leadDefault ? Prisma.DbNull : asArray(b.leadFields),
+      leadConsentText: b.leadDefault ? null : clean(b.leadConsentText),
     },
   });
   res.redirect("/admin");
@@ -524,6 +528,8 @@ function templateData(b: any) {
     disclaimer: clean(b.disclaimer),
     showQr: b.showQr === "1" ? true : b.showQr === "0" ? false : null,
     emailSignature: clean(b.emailSignature),
+    leadFields: b.leadInherit ? Prisma.DbNull : asArray(b.leadFields),
+    leadConsentText: b.leadInherit ? null : clean(b.leadConsentText),
   };
 }
 
@@ -1024,23 +1030,31 @@ adminRouter.get("/analytics", async (req, res) => {
 });
 
 // ---------- leads ----------
+// Scope leads to what the admin may see: cards in their locations OR assets in
+// their locations (global admins see all).
+async function leadScopeWhere(p: RBAC.AdminPrincipal) {
+  const cardIds = await accessibleCardIds(p);
+  if (cardIds === null) return {};
+  const locIds = await RBAC.accessibleLocationIds(p);
+  const assets = await prisma.asset.findMany({ where: { locationId: { in: locIds } }, select: { id: true } });
+  return { OR: [{ cardId: { in: cardIds } }, { assetId: { in: assets.map((a) => a.id) } }] };
+}
+
 adminRouter.get("/leads", async (req, res) => {
-  const ids = await accessibleCardIds(reqAdmin(req));
   const leads = await prisma.lead.findMany({
-    where: ids ? { cardId: { in: ids } } : {},
+    where: await leadScopeWhere(reqAdmin(req)),
     orderBy: { createdAt: "desc" },
-    include: { card: true },
+    include: { card: true, asset: true },
     take: 500,
   });
   res.send(V.leadsView(leads));
 });
 
 adminRouter.get("/leads.csv", async (req, res) => {
-  const ids = await accessibleCardIds(reqAdmin(req));
   const leads = await prisma.lead.findMany({
-    where: ids ? { cardId: { in: ids } } : {},
+    where: await leadScopeWhere(reqAdmin(req)),
     orderBy: { createdAt: "desc" },
-    include: { card: true },
+    include: { card: true, asset: true },
   });
   const rows = [
     [
@@ -1069,8 +1083,8 @@ adminRouter.get("/leads.csv", async (req, res) => {
       l.utmCampaign || "",
       l.referrer || "",
       l.device || "",
-      `${l.card.firstName} ${l.card.lastName}`,
-      l.card.department || "",
+      l.card ? `${l.card.firstName} ${l.card.lastName}` : l.asset ? `${l.asset.name} (asset)` : "",
+      l.card?.department || "",
     ]),
   ];
   const csv = rows.map((r) => r.map((f) => `"${String(f).replace(/"/g, '""')}"`).join(",")).join("\n");

@@ -5,7 +5,10 @@ import { qrPng } from "../qr";
 import { orgIdForHost, requestHost } from "../tenant-resolver";
 import { resolveAssetDestination } from "../assets";
 import { renderAssetLanding } from "../views/asset";
-import { page } from "../views/html";
+import { page, esc } from "../views/html";
+import { parseUtm } from "../attribution";
+import { assembleLead } from "../leadform";
+import { emitEvent, leadPayload } from "../webhooks";
 
 export const assetsRouter = Router();
 const hostOrg = (req: Request) => orgIdForHost(requestHost(req));
@@ -48,8 +51,30 @@ assetsRouter.get("/:slug", async (req, res) => {
   );
 
   if (dest.kind === "redirect") return res.redirect(302, dest.url);
-  if (dest.kind === "landing") return res.send(renderAssetLanding(asset, config.cardUrl));
+  if (dest.kind === "landing") return res.send(renderAssetLanding(asset, config.cardUrl, parseUtm(req.query as any)));
   return notFound(res, "This code isn't set up yet.");
+});
+
+// Lead capture from an asset landing page.
+assetsRouter.post("/:slug/connect", async (req, res) => {
+  const asset = await loadAsset(req.params.slug, await hostOrg(req));
+  if (!asset) return notFound(res);
+  const b = req.body || {};
+  if (!b.name) return res.status(400).send("Name required");
+  const data = assembleLead(b, req.headers["user-agent"] as string);
+  const lead = await runWithOrg(asset.orgId, (db) =>
+    db.lead.create({ data: { assetId: asset.id, orgId: asset.orgId, ...data } })
+  );
+  emitEvent("lead.captured", leadPayload(lead, { asset }));
+  res.send(
+    page({
+      title: "Thanks!",
+      body: `<main class="card"><section class="ident"><h1>Thanks!</h1><p class="company">Your details were sent to ${esc(
+        asset.location.name
+      )}.</p></section></main>`,
+      bodyClass: "card-body",
+    })
+  );
 });
 
 // Printable QR for the asset.

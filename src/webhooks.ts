@@ -167,7 +167,9 @@ export function cardPayload(card: any) {
   };
 }
 
-export function leadPayload(lead: any, card: any) {
+export function leadPayload(lead: any, source: { card?: any; asset?: any }) {
+  const card = source.card;
+  const asset = source.asset;
   return {
     id: lead.id,
     name: lead.name,
@@ -191,12 +193,16 @@ export function leadPayload(lead: any, card: any) {
       device: lead.device ?? null,
     },
     createdAt: lead.createdAt,
-    card: {
-      id: card.id,
-      slug: card.slug,
-      fullName: [card.firstName, card.lastName].join(" "),
-      department: card.department ?? null,
-      ownerEmail: card.ownerEmail ?? null,
-    },
+    source: asset ? "asset" : "card",
+    card: card
+      ? {
+          id: card.id,
+          slug: card.slug,
+          fullName: [card.firstName, card.lastName].join(" "),
+          department: card.department ?? null,
+          ownerEmail: card.ownerEmail ?? null,
+        }
+      : null,
+    asset: asset ? { id: asset.id, slug: asset.slug, name: asset.name, type: asset.type } : null,
   };
 }

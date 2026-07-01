@@ -3,14 +3,8 @@ import { asLabeled, asSocials, Address } from "../types";
 import { esc, page } from "./html";
 import { rooftopCtas, parseOemBrands, ctasFromJson, mergeCtas } from "../dealership";
 import { asStringArray, isHidden, resolveShowQr, renderSignature } from "../roletemplate";
-import { PREFERRED_CONTACTS } from "../attribution";
-
-export type LeadAttribution = {
-  campaign?: string | null;
-  utmSource?: string | null;
-  utmMedium?: string | null;
-  utmCampaign?: string | null;
-};
+import { resolveLeadFields, resolveConsentText } from "../leadform";
+import { renderLeadForm, LeadAttribution } from "./leadform-view";
 
 export type FullCard = Card & {
   location: Location & { brand: Brand };
@@ -82,6 +76,10 @@ export function renderCardPage(
   const hide = (f: string) => isHidden(f, hidden);
   const showQr = resolveShowQr(card.showQr, (card.template as any)?.showQr, card.location.brand.showQr);
   const leadCapture = (card.template as any)?.leadCapture !== false;
+  const brand = card.location.brand as any;
+  const tpl = card.template as any;
+  const leadFieldSet = new Set(resolveLeadFields(tpl?.leadFields, brand?.leadFields));
+  const consentText = resolveConsentText(tpl?.leadConsentText, brand?.leadConsentText);
   const fullName = [card.prefix, card.firstName, card.lastName].filter(Boolean).join(" ");
   const phones = asLabeled(card.phones);
   const emails = asLabeled(card.emails);
@@ -215,27 +213,12 @@ export function renderCardPage(
     Share your details back
   </button>
   <section id="connect" class="connect">
-    <form method="POST" action="${esc(baseUrl)}/c/${esc(card.slug)}/connect">
-      <input name="name" placeholder="Your name" required />
-      <input name="email" type="email" placeholder="Email" />
-      <input name="phone" placeholder="Phone" />
-      <select name="preferredContact">
-        <option value="">Preferred contact…</option>
-        ${PREFERRED_CONTACTS.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("")}
-      </select>
-      <input name="vehicleInterest" placeholder="Vehicle of interest (year/make/model)" />
-      <label class="chk-inline"><input type="checkbox" name="tradeIn" value="1" /> I have a trade-in</label>
-      <input name="serviceNeed" placeholder="Service need (optional)" />
-      <label class="chk-inline"><input type="checkbox" name="appointmentRequest" value="1" /> I'd like to book an appointment</label>
-      <textarea name="note" placeholder="Note (optional)"></textarea>
-      <label class="chk-inline"><input type="checkbox" name="consent" value="1" /> I agree to be contacted about my inquiry.</label>
-      <input type="hidden" name="campaign" value="${esc(attribution.campaign)}" />
-      <input type="hidden" name="utm_source" value="${esc(attribution.utmSource)}" />
-      <input type="hidden" name="utm_medium" value="${esc(attribution.utmMedium)}" />
-      <input type="hidden" name="utm_campaign" value="${esc(attribution.utmCampaign)}" />
-      <input type="hidden" name="referrer" id="lead-ref" value="" />
-      <button type="submit">Send my details</button>
-    </form>
+    ${renderLeadForm({
+      action: `${esc(baseUrl)}/c/${esc(card.slug)}/connect`,
+      fields: leadFieldSet,
+      consentText,
+      attribution,
+    })}
   </section>`
       : ""
   }
@@ -250,8 +233,8 @@ export function renderCardPage(
 </main>
 
 <script>
-// Capture the referring page for lead attribution.
-try { var _r = document.getElementById('lead-ref'); if (_r) _r.value = document.referrer || ''; } catch (e) {}
+// Capture the referring page for lead attribution (all lead forms on the page).
+try { document.querySelectorAll('.lead-ref').forEach(function(e){ e.value = document.referrer || ''; }); } catch (e) {}
 // Lightweight click tracking — fire-and-forget beacon, never blocks navigation.
 document.querySelectorAll('[data-track]').forEach(function (el) {
   el.addEventListener('click', function () {

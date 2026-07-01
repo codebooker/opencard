@@ -7,7 +7,8 @@ import { qrPng, qrDataUrl } from "../qr";
 import { renderCardPage } from "../views/card";
 import { page, esc } from "../views/html";
 import { emitEvent, leadPayload } from "../webhooks";
-import { parseUtm, deviceFromUa, normalizePreferredContact, cleanReferrer } from "../attribution";
+import { parseUtm } from "../attribution";
+import { assembleLead } from "../leadform";
 
 export const cardsRouter = Router();
 
@@ -121,40 +122,14 @@ cardsRouter.post("/:slug/connect", async (req, res) => {
   const card = await loadCard(req.params.slug, await hostOrg(req));
   if (!card) return res.status(404).send("Not found");
   const b = req.body || {};
-  const { name, email, phone, company, note } = b;
-  if (!name) return res.status(400).send("Name required");
-  const str = (v: any, n: number) => (v ? String(v).slice(0, n) : null);
-  const utm = parseUtm(b as any); // UTM/campaign carried as hidden fields from the card page
+  if (!b.name) return res.status(400).send("Name required");
+  const data = assembleLead(b, req.headers["user-agent"] as string);
   const lead = await runWithOrg(card.orgId, async (db) => {
-    const created = await db.lead.create({
-      data: {
-        cardId: card.id,
-        orgId: card.orgId,
-        name: String(name).slice(0, 200),
-        email: str(email, 200),
-        phone: str(phone, 60),
-        company: str(company, 200),
-        note: str(note, 1000),
-        // dealership fields
-        preferredContact: normalizePreferredContact(b.preferredContact),
-        vehicleInterest: str(b.vehicleInterest, 200),
-        tradeIn: b.tradeIn === "1",
-        serviceNeed: str(b.serviceNeed, 200),
-        appointmentRequest: b.appointmentRequest === "1",
-        consent: b.consent === "1",
-        // attribution
-        campaign: utm.campaign,
-        utmSource: utm.utmSource,
-        utmMedium: utm.utmMedium,
-        utmCampaign: utm.utmCampaign,
-        referrer: cleanReferrer(b.referrer),
-        device: deviceFromUa(req.headers["user-agent"] as string),
-      },
-    });
+    const created = await db.lead.create({ data: { cardId: card.id, orgId: card.orgId, ...data } });
     await db.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "connect", ip: clientIp(req) } });
     return created;
   });
-  emitEvent("lead.captured", leadPayload(lead, card));
+  emitEvent("lead.captured", leadPayload(lead, { card }));
   res.send(
     page({
       title: "Thanks!",
