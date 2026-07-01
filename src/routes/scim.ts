@@ -2,7 +2,8 @@ import { Router, Request, Response, NextFunction } from "express";
 import { prisma, runWithOrg } from "../db";
 import { config } from "../config";
 import { uniqueSlug } from "../slug";
-import { orgIdForLocation } from "../tenant";
+import { resolveScimOrg } from "../scim-auth";
+import { orgHasFeature } from "../entitlements";
 import { emitEvent, cardPayload } from "../webhooks";
 
 // Minimal SCIM 2.0 Users endpoint for Azure AD / Entra automatic provisioning.
@@ -12,15 +13,22 @@ export const scimRouter = Router();
 
 const ENTERPRISE = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User";
 
-// ---- bearer auth ----
-scimRouter.use((req: Request, res: Response, next: NextFunction) => {
+// ---- bearer auth: resolve the tenant from the SCIM token ----
+scimRouter.use(async (req: Request, res: Response, next: NextFunction) => {
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (token !== config.scimToken) {
+  const orgId = await resolveScimOrg(token);
+  if (!orgId) {
     return res.status(401).json({ schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"], detail: "Unauthorized", status: "401" });
   }
+  if (!(await orgHasFeature(orgId, "scim"))) {
+    return res.status(403).json({ schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"], detail: "SCIM provisioning is not included in this plan.", status: "403" });
+  }
+  (req as any).scimOrgId = orgId;
   next();
 });
+
+const scimOrg = (req: Request): string => (req as any).scimOrgId;
 
 scimRouter.get("/ServiceProviderConfig", (_req, res) => {
   res.json({
@@ -38,7 +46,7 @@ scimRouter.get("/ServiceProviderConfig", (_req, res) => {
 // Decide which store a provisioned user belongs to.
 // Order: explicit store code (enterprise.costCenter/organization or address locality)
 // matched against Location.code, then brand name match, then default location.
-async function resolveLocationId(scim: any): Promise<string | null> {
+async function resolveLocationId(scim: any, orgId: string): Promise<string | null> {
   const ent = scim[ENTERPRISE] || {};
   const candidates = [
     ent.costCenter,
@@ -48,19 +56,19 @@ async function resolveLocationId(scim: any): Promise<string | null> {
   ].filter(Boolean);
 
   for (const code of candidates) {
-    const loc = await prisma.location.findFirst({ where: { code: String(code) } });
+    const loc = await prisma.location.findFirst({ where: { code: String(code), orgId } });
     if (loc) return loc.id;
   }
-  // brand name match -> that brand's first store
+  // brand name match -> that brand's first store (within this org)
   if (ent.organization) {
     const brand = await prisma.brand.findFirst({
-      where: { name: { equals: String(ent.organization), mode: "insensitive" } },
+      where: { name: { equals: String(ent.organization), mode: "insensitive" }, orgId },
       include: { locations: { take: 1, orderBy: { createdAt: "asc" } } },
     });
     if (brand?.locations[0]) return brand.locations[0].id;
   }
-  // fallback: first location in the system
-  const fallback = await prisma.location.findFirst({ orderBy: { createdAt: "asc" } });
+  // fallback: first location in this org
+  const fallback = await prisma.location.findFirst({ where: { orgId }, orderBy: { createdAt: "asc" } });
   return fallback?.id || null;
 }
 
@@ -99,6 +107,7 @@ function phonesFromScim(scim: any) {
 
 // ---- list / filter (Entra queries before create) ----
 scimRouter.get("/Users", async (req, res) => {
+  const orgId = scimOrg(req);
   const filter = String(req.query.filter || "");
   const m = filter.match(/(userName|externalId)\s+eq\s+"([^"]+)"/i);
   let users: any[] = [];
@@ -106,11 +115,11 @@ scimRouter.get("/Users", async (req, res) => {
     const field = m[1].toLowerCase();
     const value = m[2];
     users = await prisma.user.findMany({
-      where: field === "username" ? { email: value } : { externalId: value },
+      where: { orgId, ...(field === "username" ? { email: value } : { externalId: value }) },
       include: { card: true },
     });
   } else {
-    users = await prisma.user.findMany({ include: { card: true }, take: 200 });
+    users = await prisma.user.findMany({ where: { orgId }, include: { card: true }, take: 200 });
   }
   res.json({
     schemas: ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
@@ -122,7 +131,7 @@ scimRouter.get("/Users", async (req, res) => {
 });
 
 scimRouter.get("/Users/:id", async (req, res) => {
-  const user = await prisma.user.findUnique({ where: { id: req.params.id }, include: { card: true } });
+  const user = await prisma.user.findFirst({ where: { id: req.params.id, orgId: scimOrg(req) }, include: { card: true } });
   if (!user) return res.status(404).json({ schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"], status: "404" });
   res.json(scimUserResponse(user, user.card, req));
 });
@@ -130,16 +139,16 @@ scimRouter.get("/Users/:id", async (req, res) => {
 // ---- create ----
 scimRouter.post("/Users", async (req, res) => {
   const scim = req.body || {};
+  const orgId = scimOrg(req);
   const email = firstEmail(scim);
   if (!email) return res.status(400).json({ detail: "userName/email required", status: "400" });
 
-  const existing = await prisma.user.findUnique({ where: { email }, include: { card: true } });
+  const existing = await prisma.user.findFirst({ where: { email, orgId }, include: { card: true } });
   if (existing) return res.status(200).json(scimUserResponse(existing, existing.card, req));
 
-  const locationId = await resolveLocationId(scim);
+  const locationId = await resolveLocationId(scim, orgId);
   if (!locationId)
     return res.status(400).json({ detail: "No location to assign user to. Create a brand+store first.", status: "400" });
-  const orgId = await orgIdForLocation(locationId);
 
   const ent = scim[ENTERPRISE] || {};
   const firstName = scim.name?.givenName || scim.displayName?.split(" ")[0] || email.split("@")[0];
@@ -179,9 +188,11 @@ scimRouter.post("/Users", async (req, res) => {
   res.status(201).json(scimUserResponse(user, user.card, req));
 });
 
-// The org that owns a provisioned user, so the mutation can run under RLS.
-async function userOrgId(id: string): Promise<string | null> {
-  const u = await prisma.user.findUnique({ where: { id }, select: { orgId: true } });
+// Confirm the target user belongs to the caller's org, returning the org id (so
+// the mutation runs under RLS) or null. Scoping by orgId prevents one tenant's
+// SCIM token from touching another tenant's users by id.
+async function userOrgId(id: string, orgId: string): Promise<string | null> {
+  const u = await prisma.user.findFirst({ where: { id, orgId }, select: { orgId: true } });
   return u?.orgId ?? null;
 }
 function scimNotFound(res: Response) {
@@ -191,7 +202,7 @@ function scimNotFound(res: Response) {
 // ---- replace ----
 scimRouter.put("/Users/:id", async (req, res) => {
   const scim = req.body || {};
-  const orgId = await userOrgId(req.params.id);
+  const orgId = await userOrgId(req.params.id, scimOrg(req));
   if (!orgId) return scimNotFound(res);
   const user = await runWithOrg(orgId, (db) =>
     db.user.update({
@@ -216,7 +227,7 @@ scimRouter.patch("/Users/:id", async (req, res) => {
       active = typeof op.value === "object" ? op.value.active : op.value === true || op.value === "True";
     }
   }
-  const orgId = await userOrgId(req.params.id);
+  const orgId = await userOrgId(req.params.id, scimOrg(req));
   if (!orgId) return scimNotFound(res);
   const user = await runWithOrg(orgId, (db) =>
     db.user.update({
@@ -233,7 +244,7 @@ scimRouter.patch("/Users/:id", async (req, res) => {
 
 // ---- delete (deactivate) ----
 scimRouter.delete("/Users/:id", async (req, res) => {
-  const orgId = await userOrgId(req.params.id);
+  const orgId = await userOrgId(req.params.id, scimOrg(req));
   if (!orgId) return res.status(204).end();
   await runWithOrg(orgId, (db) =>
     db.user.update({

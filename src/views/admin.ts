@@ -551,6 +551,9 @@ export function integrationsView(data: {
   saml: any;
   samlIssuer: string;
   samlAcsUrl: string;
+  scimBaseUrl: string;
+  scimTokenSet: boolean;
+  newScimToken?: string | null;
 }): string {
   const keyRows = data.keys.length
     ? data.keys
@@ -647,6 +650,25 @@ export function integrationsView(data: {
       saml.idpCert || ""
     )}</textarea>
     <p style="margin-top:10px"><button class="btn" type="submit">Save SAML settings</button></p>
+  </form>
+
+  <h3 style="margin-top:28px">SCIM provisioning</h3>
+  ${
+    data.newScimToken
+      ? `<div class="stat" style="border:1px solid #16a34a;background:#f0fdf4;margin-bottom:12px"><strong>New SCIM token — copy it now, it won't be shown again:</strong><p><code style="font-size:14px;word-break:break-all">${esc(
+          data.newScimToken
+        )}</code></p></div>`
+      : ""
+  }
+  <div class="stat" style="margin-bottom:12px">
+    <p style="margin:0 0 6px">Token: ${data.scimTokenSet ? `<span class="pill on">configured</span>` : `<span class="pill off">not set</span>`}</p>
+    <p class="muted" style="margin:0">Tenant URL (SCIM 2.0): <code>${esc(data.scimBaseUrl)}</code></p>
+    <p class="muted">In Entra/Okta, set the Tenant URL above and paste the generated token as the Secret Token. Provisioned users land in this org only.</p>
+  </div>
+  <form method="POST" action="/admin/scim-token/generate" onsubmit="return confirm('${
+    data.scimTokenSet ? "Regenerate the SCIM token? The current token will stop working." : "Generate a SCIM token?"
+  }')">
+    <button class="btn" type="submit">${data.scimTokenSet ? "Regenerate token" : "Generate token"}</button>
   </form>
 
   <h3 style="margin-top:28px">Webhooks</h3>

@@ -307,6 +307,18 @@ Suggested starting plan structure:
 
 Goal: make enterprise identity and integrations tenant-scoped.
 
+### Increment status
+
+- **Per-tenant SCIM tokens (done).** Each org can generate its own SCIM bearer
+  token (only the hash is stored; shown once) from Admin → Integrations. The
+  SCIM router resolves the tenant from the token, gates on the `scim` plan
+  feature, and scopes every list/get/create/update/delete to that org so one
+  customer's IdP can only provision into their own org. The legacy global
+  `SCIM_TOKEN` still maps to the default org for back-compat.
+- **Next:** API-key permission scopes + last-used-by-route; per-org SAML/OIDC
+  (needs host-based routing for the sign-in/ACS flow); webhook event expansion +
+  delivery inspector/replay.
+
 ### SSO
 
 - Move global SAML config into per-org auth config.

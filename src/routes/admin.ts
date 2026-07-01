@@ -10,6 +10,7 @@ import { uniqueSlug } from "../slug";
 import { upload, uploadedUrl } from "../upload";
 import { emitEvent, cardPayload, WEBHOOK_EVENTS } from "../webhooks";
 import { generateApiKey } from "../apiauth";
+import { generateScimToken } from "../scim-auth";
 import { getSamlConfig, samlAcsUrl, samlIssuer } from "../saml";
 import { signEmail, verifyEmail } from "../selfauth";
 import { hashPassword, verifyPassword, generateTotpSecret, totpUri, verifyTotp } from "../security";
@@ -817,11 +818,11 @@ adminRouter.get("/leads.csv", async (req, res) => {
   res.send(csv);
 });
 
-// ---------- integrations: API keys + webhooks ----------
+// ---------- integrations: API keys + webhooks + SCIM ----------
 // API keys and webhooks are per-org; only platform owners see across orgs.
-async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: string | null = null) {
+async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: string | null = null, newScimToken: string | null = null) {
   const orgFilter = p.platform ? {} : { orgId: p.orgId };
-  const [keys, endpoints, saml] = await Promise.all([
+  const [keys, endpoints, saml, org] = await Promise.all([
     prisma.apiKey.findMany({ where: orgFilter, orderBy: { createdAt: "desc" } }),
     prisma.webhookEndpoint.findMany({
       where: orgFilter,
@@ -829,6 +830,7 @@ async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: stri
       include: { deliveries: { orderBy: { createdAt: "desc" }, take: 1 } },
     }),
     getSamlConfig(),
+    prisma.org.findUnique({ where: { id: p.orgId }, select: { scimTokenHash: true } }),
   ]);
   res.send(
     V.integrationsView({
@@ -840,6 +842,9 @@ async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: stri
       saml,
       samlIssuer: samlIssuer(),
       samlAcsUrl: samlAcsUrl(),
+      scimBaseUrl: `${config.baseUrl}/scim/v2`,
+      scimTokenSet: !!org?.scimTokenHash,
+      newScimToken,
     })
   );
 }
@@ -894,6 +899,16 @@ adminRouter.post("/webhooks/:id/delete", async (req, res) => {
     where: p.platform ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
   });
   res.redirect("/admin/integrations");
+});
+
+adminRouter.post("/scim-token/generate", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  if (!(await ensureFeature(res, p.orgId, "scim", "SCIM provisioning"))) return;
+  const { raw, hash } = generateScimToken();
+  await prisma.org.update({ where: { id: p.orgId }, data: { scimTokenHash: hash } });
+  // Show the raw token once (never stored in plaintext / never in a URL).
+  await renderIntegrations(res, p, null, raw);
 });
 
 adminRouter.post("/saml-config", async (req, res) => {

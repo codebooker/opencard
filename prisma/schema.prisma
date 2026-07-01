@@ -31,6 +31,9 @@ model Org {
   cancelAtPeriodEnd    Boolean   @default(false)
   stripeCustomerId     String?   @unique
   stripeSubscriptionId String?   @unique
+  // Per-tenant SCIM bearer token (only the SHA-256 hash is stored). Lets each
+  // customer's IdP provision into their own org.
+  scimTokenHash        String?   @unique
   terminology Json     @default("{\"brandSingular\":\"Brand\",\"brandPlural\":\"Brands\",\"locationSingular\":\"Location\",\"locationPlural\":\"Locations\",\"locationCodeLabel\":\"Location code\",\"cardSingular\":\"Card\",\"cardPlural\":\"Cards\",\"leadSingular\":\"Lead\",\"leadPlural\":\"Leads\"}")
   brands            Brand[]
   locations         Location[]
