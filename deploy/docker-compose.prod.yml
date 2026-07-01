@@ -73,9 +73,11 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      # Certs live at a stable host path (outside the git clone) so Portainer
-      # git-based deploys don't wipe them. Populate /opt/opencard/certs on the host.
+      # Caddyfile + certs are bound from stable ABSOLUTE host paths, not from the
+      # git clone. Portainer keeps clones inside its own volume, so relative
+      # bind-mounts resolve to a path the Docker daemon can't see on the host.
+      # Infra config (proxy + TLS) lives on the host; app code is built from git.
+      - /opt/opencard/Caddyfile:/etc/caddy/Caddyfile:ro
       - /opt/opencard/certs:/certs:ro
       - caddy_data:/data
       - caddy_config:/config
