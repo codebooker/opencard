@@ -254,7 +254,10 @@ model ApiKey {
   name       String
   prefix     String // first chars of the key, for display
   keyHash    String    @unique
-  lastUsedAt DateTime?
+  // Granted permission scopes (e.g. ["cards:read"]). Empty = full access.
+  scopes     Json      @default("[]")
+  lastUsedAt   DateTime?
+  lastUsedPath String? // "<METHOD> <path>" of the most recent request
   revoked    Boolean   @default(false)
   createdAt  DateTime  @default(now())
 

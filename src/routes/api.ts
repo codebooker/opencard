@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { runWithOrg } from "../db";
-import { requireApi, apiOrgId } from "../apiauth";
+import { requireApi, apiOrgId, requireScope } from "../apiauth";
 import { uniqueSlug } from "../slug";
 import { emitEvent, cardPayload } from "../webhooks";
 
@@ -67,20 +67,20 @@ function storeJson(l: any) {
 // kept as a second, application-level layer of defense.
 
 // ---- brands ----
-apiRouter.get("/brands", async (req, res) => {
+apiRouter.get("/brands", requireScope("brands:read"), async (req, res) => {
   const org = apiOrgId(req);
   const brands = await runWithOrg(org, (db) =>
     db.brand.findMany({ where: { orgId: org }, orderBy: { name: "asc" } })
   );
   res.json({ data: brands.map(brandJson) });
 });
-apiRouter.get("/brands/:id", async (req, res) => {
+apiRouter.get("/brands/:id", requireScope("brands:read"), async (req, res) => {
   const org = apiOrgId(req);
   const b = await runWithOrg(org, (db) => db.brand.findFirst({ where: { id: req.params.id, orgId: org } }));
   if (!b) return res.status(404).json({ error: "not_found" });
   res.json({ data: brandJson(b) });
 });
-apiRouter.post("/brands", async (req, res) => {
+apiRouter.post("/brands", requireScope("brands:write"), async (req, res) => {
   const b = req.body || {};
   if (!b.name) return res.status(422).json({ error: "name_required" });
   const org = apiOrgId(req);
@@ -99,20 +99,20 @@ apiRouter.post("/brands", async (req, res) => {
 });
 
 // ---- stores (locations) ----
-apiRouter.get("/stores", async (req, res) => {
+apiRouter.get("/stores", requireScope("stores:read"), async (req, res) => {
   const org = apiOrgId(req);
   const where: any = { orgId: org };
   if (req.query.brandId) where.brandId = String(req.query.brandId);
   const stores = await runWithOrg(org, (db) => db.location.findMany({ where, orderBy: { name: "asc" } }));
   res.json({ data: stores.map(storeJson) });
 });
-apiRouter.get("/stores/:id", async (req, res) => {
+apiRouter.get("/stores/:id", requireScope("stores:read"), async (req, res) => {
   const org = apiOrgId(req);
   const l = await runWithOrg(org, (db) => db.location.findFirst({ where: { id: req.params.id, orgId: org } }));
   if (!l) return res.status(404).json({ error: "not_found" });
   res.json({ data: storeJson(l) });
 });
-apiRouter.post("/stores", async (req, res) => {
+apiRouter.post("/stores", requireScope("stores:write"), async (req, res) => {
   const b = req.body || {};
   if (!b.brandId || !b.name) return res.status(422).json({ error: "brandId_and_name_required" });
   const org = apiOrgId(req);
@@ -138,7 +138,7 @@ apiRouter.post("/stores", async (req, res) => {
 });
 
 // ---- cards ----
-apiRouter.get("/cards", async (req, res) => {
+apiRouter.get("/cards", requireScope("cards:read"), async (req, res) => {
   const org = apiOrgId(req);
   const where: any = { orgId: org };
   if (req.query.locationId) where.locationId = String(req.query.locationId);
@@ -149,13 +149,13 @@ apiRouter.get("/cards", async (req, res) => {
   );
   res.json({ data: cards.map(cardPayload) });
 });
-apiRouter.get("/cards/:id", async (req, res) => {
+apiRouter.get("/cards/:id", requireScope("cards:read"), async (req, res) => {
   const org = apiOrgId(req);
   const card = await runWithOrg(org, (db) => db.card.findFirst({ where: { id: req.params.id, orgId: org } }));
   if (!card) return res.status(404).json({ error: "not_found" });
   res.json({ data: cardPayload(card) });
 });
-apiRouter.post("/cards", async (req, res) => {
+apiRouter.post("/cards", requireScope("cards:write"), async (req, res) => {
   const b = req.body || {};
   if (!b.locationId || !b.firstName || !b.lastName) {
     return res.status(422).json({ error: "locationId_firstName_lastName_required" });
@@ -173,7 +173,7 @@ apiRouter.post("/cards", async (req, res) => {
   emitEvent("card.created", cardPayload(card));
   res.status(201).json({ data: cardPayload(card) });
 });
-apiRouter.patch("/cards/:id", async (req, res) => {
+apiRouter.patch("/cards/:id", requireScope("cards:write"), async (req, res) => {
   const org = apiOrgId(req);
   const card = await runWithOrg(org, async (db) => {
     const exists = await db.card.findFirst({ where: { id: req.params.id, orgId: org } });
@@ -184,7 +184,7 @@ apiRouter.patch("/cards/:id", async (req, res) => {
   emitEvent("card.updated", cardPayload(card));
   res.json({ data: cardPayload(card) });
 });
-apiRouter.delete("/cards/:id", async (req, res) => {
+apiRouter.delete("/cards/:id", requireScope("cards:write"), async (req, res) => {
   const org = apiOrgId(req);
   const card = await runWithOrg(org, async (db) => {
     const found = await db.card.findFirst({ where: { id: req.params.id, orgId: org } });
@@ -198,7 +198,7 @@ apiRouter.delete("/cards/:id", async (req, res) => {
 });
 
 // ---- leads ----
-apiRouter.get("/leads", async (req, res) => {
+apiRouter.get("/leads", requireScope("leads:read"), async (req, res) => {
   const org = apiOrgId(req);
   const where: any = { orgId: org };
   if (req.query.cardId) where.cardId = String(req.query.cardId);
@@ -218,7 +218,7 @@ apiRouter.get("/leads", async (req, res) => {
 });
 
 // ---- analytics ----
-apiRouter.get("/analytics", async (req, res) => {
+apiRouter.get("/analytics", requireScope("analytics:read"), async (req, res) => {
   const org = apiOrgId(req);
   const where: any = { orgId: org };
   if (req.query.cardId) where.cardId = String(req.query.cardId);

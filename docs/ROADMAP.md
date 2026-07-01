@@ -315,9 +315,14 @@ Goal: make enterprise identity and integrations tenant-scoped.
   feature, and scopes every list/get/create/update/delete to that org so one
   customer's IdP can only provision into their own org. The legacy global
   `SCIM_TOKEN` still maps to the default org for back-compat.
-- **Next:** API-key permission scopes + last-used-by-route; per-org SAML/OIDC
-  (needs host-based routing for the sign-in/ACS flow); webhook event expansion +
-  delivery inspector/replay.
+- **API-key permission scopes (done).** Keys carry granted scopes
+  (brands/stores/cards/leads/analytics read/write); each API route enforces the
+  scope it needs and returns 403 `insufficient_scope` otherwise. Empty scopes =
+  full access (back-compat with existing keys + admin token). Keys track
+  last-used time and route, chosen via checkboxes at creation and shown in the
+  key list.
+- **Next:** per-org SAML/OIDC (needs host-based routing for the sign-in/ACS
+  flow); webhook event expansion + delivery inspector/replay.
 
 ### SSO
 

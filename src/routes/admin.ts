@@ -10,6 +10,7 @@ import { uniqueSlug } from "../slug";
 import { upload, uploadedUrl } from "../upload";
 import { emitEvent, cardPayload, WEBHOOK_EVENTS } from "../webhooks";
 import { generateApiKey } from "../apiauth";
+import { sanitizeScopes } from "../api-scopes";
 import { generateScimToken } from "../scim-auth";
 import { getSamlConfig, samlAcsUrl, samlIssuer } from "../saml";
 import { signEmail, verifyEmail } from "../selfauth";
@@ -861,8 +862,9 @@ adminRouter.post("/api-keys", async (req, res) => {
   if (!(await ensureFeature(res, p.orgId, "api", "API access"))) return;
   if (!(await canAdd(p.orgId, "apiKeys"))) return limitReached(res, "API key");
   const name = clean(req.body?.name) || "API key";
+  const scopes = sanitizeScopes(asArray(req.body?.scopes));
   const { raw, hash, prefix } = generateApiKey();
-  await prisma.apiKey.create({ data: { name, keyHash: hash, prefix, orgId: p.orgId } });
+  await prisma.apiKey.create({ data: { name, keyHash: hash, prefix, orgId: p.orgId, scopes } });
   // Render directly (not a redirect) so the raw key never lands in a URL/log.
   await renderIntegrations(res, p, raw);
 });

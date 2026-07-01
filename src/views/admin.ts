@@ -1,6 +1,7 @@
 import { esc, page } from "./html";
 import { Address } from "../types";
 import { AdminPrincipal, ROLE_LABELS } from "../rbac";
+import { API_SCOPES, SCOPE_LABELS } from "../api-scopes";
 import { GENERAL_TERMINOLOGY, Terminology, lower } from "../terminology";
 import {
   photoField,
@@ -555,13 +556,19 @@ export function integrationsView(data: {
   scimTokenSet: boolean;
   newScimToken?: string | null;
 }): string {
+  const keyScopes = (k: any) => {
+    const s = Array.isArray(k.scopes) ? k.scopes : [];
+    if (!s.length) return `<span class="muted">full access</span>`;
+    return s.map((x: string) => `<span class="pill">${esc(x)}</span>`).join(" ");
+  };
   const keyRows = data.keys.length
     ? data.keys
         .map(
           (k) => `<tr>
         <td>${esc(k.name)}</td>
         <td class="muted"><code>${esc(k.prefix)}…</code></td>
-        <td class="muted">${k.lastUsedAt ? esc(new Date(k.lastUsedAt).toISOString().slice(0, 16).replace("T", " ")) : "never"}</td>
+        <td style="max-width:220px">${keyScopes(k)}</td>
+        <td class="muted">${k.lastUsedAt ? `${esc(new Date(k.lastUsedAt).toISOString().slice(0, 16).replace("T", " "))}${k.lastUsedPath ? `<br><span style="font-size:11px">${esc(k.lastUsedPath)}</span>` : ""}` : "never"}</td>
         <td>${k.revoked ? `<span class="pill off">revoked</span>` : `<span class="pill on">active</span>`}</td>
         <td>${
           k.revoked
@@ -570,7 +577,7 @@ export function integrationsView(data: {
         }</td></tr>`
         )
         .join("")
-    : `<tr><td colspan="5" class="muted">No API keys yet.</td></tr>`;
+    : `<tr><td colspan="6" class="muted">No API keys yet.</td></tr>`;
 
   const epRows = data.endpoints.length
     ? data.endpoints
@@ -615,12 +622,16 @@ export function integrationsView(data: {
   <h3>REST API</h3>
   <p class="muted">Base URL: <code>${esc(data.baseUrl)}/api/v1</code>. Authenticate with <code>Authorization: Bearer &lt;key&gt;</code>.</p>
   <table>
-    <tr><th>Name</th><th>Key</th><th>Last used</th><th>Status</th><th></th></tr>
+    <tr><th>Name</th><th>Key</th><th>Scopes</th><th>Last used</th><th>Status</th><th></th></tr>
     ${keyRows}
   </table>
-  <form class="editor" method="POST" action="/admin/api-keys" style="margin-top:12px;max-width:520px">
+  <form class="editor" method="POST" action="/admin/api-keys" style="margin-top:12px;max-width:560px">
     <label>Create API key — name</label>
     <input name="name" placeholder="e.g. Zapier, CRM sync" required />
+    <label style="margin-top:10px">Permissions <span class="muted">(leave all unchecked for full access)</span></label>
+    <div class="self-fields">${API_SCOPES.map(
+      (s) => `<label class="chk"><input type="checkbox" name="scopes" value="${esc(s)}" /> ${esc(SCOPE_LABELS[s])}</label>`
+    ).join("")}</div>
     <p style="margin-top:10px"><button class="btn" type="submit">Create key</button></p>
   </form>
 
