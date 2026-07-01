@@ -935,12 +935,13 @@ adminRouter.post("/saml-config", async (req, res) => {
   }
 
   // Workspace address (needed for a stable ACS/reply URL). Normalize + validate.
-  const subRaw = clean(req.body?.subdomain).toLowerCase();
+  const subRaw = (clean(req.body?.subdomain) || "").toLowerCase();
   const subdomain = subRaw ? subRaw.replace(/[^a-z0-9-]/g, "") : null;
   if (subRaw && (!subdomain || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(subdomain))) {
     return res.status(400).send("Subdomain may contain only letters, numbers and hyphens.");
   }
-  const customDomain = clean(req.body?.customDomain).toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "") || null;
+  const customDomain =
+    (clean(req.body?.customDomain) || "").toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "") || null;
 
   try {
     // Address is org-level; scoped to this admin's org.
