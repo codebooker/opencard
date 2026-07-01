@@ -1080,24 +1080,44 @@ export function analyticsView(stats: {
 }
 
 export function leadsView(leads: any[]): string {
+  const flags = (l: any) => {
+    const f: string[] = [];
+    if (l.tradeIn) f.push("trade-in");
+    if (l.appointmentRequest) f.push("appt");
+    if (l.consent) f.push("consent");
+    return f.map((x) => `<span class="pill on" style="font-size:10px">${esc(x)}</span>`).join(" ");
+  };
+  const source = (l: any) => {
+    const parts = [l.campaign, l.utmSource, l.device].filter(Boolean);
+    return parts.length ? esc(parts.join(" · ")) : `<span class="muted">—</span>`;
+  };
   const body = `
   <div class="topbar"><h2>Captured leads</h2><a class="btn" href="/admin/leads.csv">Export CSV</a></div>
   <table>
-    <tr><th>When</th><th>Name</th><th>Email</th><th>Phone</th><th>Company</th><th>From card</th></tr>
+    <tr><th>When</th><th>Name</th><th>Contact</th><th>Interest</th><th>Source</th><th>Status</th><th>From card</th></tr>
     ${
       leads.length
         ? leads
             .map(
               (l) => `<tr>
-        <td class="muted">${esc(new Date(l.createdAt).toISOString().slice(0, 16).replace("T", " "))}</td>
-        <td>${esc(l.name)}</td><td>${esc(l.email || "")}</td><td>${esc(l.phone || "")}</td>
-        <td>${esc(l.company || "")}</td>
-        <td><a href="/c/${esc(l.card.slug)}" target="_blank">${esc(l.card.firstName)} ${esc(
-                l.card.lastName
-              )}</a></td></tr>`
+        <td class="muted" style="white-space:nowrap">${esc(
+          new Date(l.createdAt).toISOString().slice(0, 16).replace("T", " ")
+        )}</td>
+        <td>${esc(l.name)}${l.company ? `<br><span class="muted" style="font-size:11px">${esc(l.company)}</span>` : ""}</td>
+        <td style="font-size:12px">${esc(l.email || "")}${l.email && l.phone ? "<br>" : ""}${esc(l.phone || "")}${
+                l.preferredContact ? `<br><span class="muted">prefers ${esc(l.preferredContact)}</span>` : ""
+              }</td>
+        <td style="font-size:12px">${esc(l.vehicleInterest || l.serviceNeed || "")}${
+                (l.vehicleInterest || l.serviceNeed) && flags(l) ? "<br>" : ""
+              }${flags(l)}</td>
+        <td style="font-size:12px">${source(l)}</td>
+        <td><span class="pill ${l.status === "new" ? "on" : "off"}">${esc(l.status || "new")}</span></td>
+        <td><a href="/c/${esc(l.card.slug)}" target="_blank">${esc(l.card.firstName)} ${esc(l.card.lastName)}</a>${
+                l.card.department ? `<br><span class="muted" style="font-size:11px">${esc(l.card.department)}</span>` : ""
+              }</td></tr>`
             )
             .join("")
-        : `<tr><td colspan="6" class="muted">No leads captured yet.</td></tr>`
+        : `<tr><td colspan="7" class="muted">No leads captured yet.</td></tr>`
     }
   </table>
   <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;

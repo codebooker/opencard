@@ -280,10 +280,26 @@ model Lead {
   phone     String?
   company   String?
   note      String?
+  // Dealership lead fields (Phase 5).
+  preferredContact   String? // email | phone | text | any
+  vehicleInterest    String?
+  tradeIn            Boolean @default(false)
+  serviceNeed        String?
+  appointmentRequest Boolean @default(false)
+  consent            Boolean @default(false)
+  status             String  @default("new") // new | sent | synced | failed | archived
+  // Attribution / source tracking.
+  campaign    String?
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  referrer    String?
+  device      String? // mobile | tablet | desktop | bot | unknown
   createdAt DateTime @default(now())
 
   @@index([cardId])
   @@index([orgId])
+  @@index([status])
 }
 
 // An admin account with a role. Self-service (card owners) are NOT stored here;

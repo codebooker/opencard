@@ -3,6 +3,14 @@ import { asLabeled, asSocials, Address } from "../types";
 import { esc, page } from "./html";
 import { rooftopCtas, parseOemBrands, ctasFromJson, mergeCtas } from "../dealership";
 import { asStringArray, isHidden, resolveShowQr, renderSignature } from "../roletemplate";
+import { PREFERRED_CONTACTS } from "../attribution";
+
+export type LeadAttribution = {
+  campaign?: string | null;
+  utmSource?: string | null;
+  utmMedium?: string | null;
+  utmCampaign?: string | null;
+};
 
 export type FullCard = Card & {
   location: Location & { brand: Brand };
@@ -62,7 +70,12 @@ function contactRow(icon: string, label: string, value: string, href: string, da
   </a>`;
 }
 
-export function renderCardPage(card: FullCard, qrDataUrl: string, baseUrl: string): string {
+export function renderCardPage(
+  card: FullCard,
+  qrDataUrl: string,
+  baseUrl: string,
+  attribution: LeadAttribution = {}
+): string {
   const t = theme(card);
   // Role template: which fields to hide on the public card, QR behavior.
   const hidden = asStringArray((card.template as any)?.hiddenFields);
@@ -206,8 +219,21 @@ export function renderCardPage(card: FullCard, qrDataUrl: string, baseUrl: strin
       <input name="name" placeholder="Your name" required />
       <input name="email" type="email" placeholder="Email" />
       <input name="phone" placeholder="Phone" />
-      <input name="company" placeholder="Company" />
+      <select name="preferredContact">
+        <option value="">Preferred contact…</option>
+        ${PREFERRED_CONTACTS.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("")}
+      </select>
+      <input name="vehicleInterest" placeholder="Vehicle of interest (year/make/model)" />
+      <label class="chk-inline"><input type="checkbox" name="tradeIn" value="1" /> I have a trade-in</label>
+      <input name="serviceNeed" placeholder="Service need (optional)" />
+      <label class="chk-inline"><input type="checkbox" name="appointmentRequest" value="1" /> I'd like to book an appointment</label>
       <textarea name="note" placeholder="Note (optional)"></textarea>
+      <label class="chk-inline"><input type="checkbox" name="consent" value="1" /> I agree to be contacted about my inquiry.</label>
+      <input type="hidden" name="campaign" value="${esc(attribution.campaign)}" />
+      <input type="hidden" name="utmSource" value="${esc(attribution.utmSource)}" />
+      <input type="hidden" name="utmMedium" value="${esc(attribution.utmMedium)}" />
+      <input type="hidden" name="utmCampaign" value="${esc(attribution.utmCampaign)}" />
+      <input type="hidden" name="referrer" id="lead-ref" value="" />
       <button type="submit">Send my details</button>
     </form>
   </section>`
@@ -224,6 +250,8 @@ export function renderCardPage(card: FullCard, qrDataUrl: string, baseUrl: strin
 </main>
 
 <script>
+// Capture the referring page for lead attribution.
+try { var _r = document.getElementById('lead-ref'); if (_r) _r.value = document.referrer || ''; } catch (e) {}
 // Lightweight click tracking — fire-and-forget beacon, never blocks navigation.
 document.querySelectorAll('[data-track]').forEach(function (el) {
   el.addEventListener('click', function () {

@@ -1043,7 +1043,12 @@ adminRouter.get("/leads.csv", async (req, res) => {
     include: { card: true },
   });
   const rows = [
-    ["created", "name", "email", "phone", "company", "note", "from_card"],
+    [
+      "created", "name", "email", "phone", "company", "note",
+      "preferred_contact", "vehicle_interest", "trade_in", "service_need", "appointment", "consent",
+      "status", "campaign", "utm_source", "utm_medium", "utm_campaign", "referrer", "device",
+      "from_card", "department",
+    ],
     ...leads.map((l) => [
       new Date(l.createdAt).toISOString(),
       l.name,
@@ -1051,7 +1056,21 @@ adminRouter.get("/leads.csv", async (req, res) => {
       l.phone || "",
       l.company || "",
       (l.note || "").replace(/\n/g, " "),
+      l.preferredContact || "",
+      l.vehicleInterest || "",
+      l.tradeIn ? "yes" : "",
+      l.serviceNeed || "",
+      l.appointmentRequest ? "yes" : "",
+      l.consent ? "yes" : "",
+      l.status || "new",
+      l.campaign || "",
+      l.utmSource || "",
+      l.utmMedium || "",
+      l.utmCampaign || "",
+      l.referrer || "",
+      l.device || "",
       `${l.card.firstName} ${l.card.lastName}`,
+      l.card.department || "",
     ]),
   ];
   const csv = rows.map((r) => r.map((f) => `"${String(f).replace(/"/g, '""')}"`).join(",")).join("\n");

@@ -7,6 +7,7 @@ import { qrPng, qrDataUrl } from "../qr";
 import { renderCardPage } from "../views/card";
 import { page, esc } from "../views/html";
 import { emitEvent, leadPayload } from "../webhooks";
+import { parseUtm, deviceFromUa, normalizePreferredContact, cleanReferrer } from "../attribution";
 
 export const cardsRouter = Router();
 
@@ -65,7 +66,7 @@ cardsRouter.get("/:slug", async (req, res) => {
 
   const primary = cardPrimary(card);
   const qr = await qrDataUrl(`${config.cardUrl}/c/${card.slug}`, primary);
-  res.send(renderCardPage(card, qr, config.cardUrl));
+  res.send(renderCardPage(card, qr, config.cardUrl, parseUtm(req.query as any)));
 });
 
 // vCard download (Add to Contacts)
@@ -119,18 +120,35 @@ cardsRouter.post("/:slug/event", async (req, res) => {
 cardsRouter.post("/:slug/connect", async (req, res) => {
   const card = await loadCard(req.params.slug, await hostOrg(req));
   if (!card) return res.status(404).send("Not found");
-  const { name, email, phone, company, note } = req.body || {};
+  const b = req.body || {};
+  const { name, email, phone, company, note } = b;
   if (!name) return res.status(400).send("Name required");
+  const str = (v: any, n: number) => (v ? String(v).slice(0, n) : null);
+  const utm = parseUtm(b as any); // UTM/campaign carried as hidden fields from the card page
   const lead = await runWithOrg(card.orgId, async (db) => {
     const created = await db.lead.create({
       data: {
         cardId: card.id,
         orgId: card.orgId,
         name: String(name).slice(0, 200),
-        email: email ? String(email).slice(0, 200) : null,
-        phone: phone ? String(phone).slice(0, 60) : null,
-        company: company ? String(company).slice(0, 200) : null,
-        note: note ? String(note).slice(0, 1000) : null,
+        email: str(email, 200),
+        phone: str(phone, 60),
+        company: str(company, 200),
+        note: str(note, 1000),
+        // dealership fields
+        preferredContact: normalizePreferredContact(b.preferredContact),
+        vehicleInterest: str(b.vehicleInterest, 200),
+        tradeIn: b.tradeIn === "1",
+        serviceNeed: str(b.serviceNeed, 200),
+        appointmentRequest: b.appointmentRequest === "1",
+        consent: b.consent === "1",
+        // attribution
+        campaign: utm.campaign,
+        utmSource: utm.utmSource,
+        utmMedium: utm.utmMedium,
+        utmCampaign: utm.utmCampaign,
+        referrer: cleanReferrer(b.referrer),
+        device: deviceFromUa(req.headers["user-agent"] as string),
       },
     });
     await db.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "connect", ip: clientIp(req) } });
