@@ -67,6 +67,7 @@ assetsRouter.post("/:slug/connect", async (req, res) => {
     db.lead.create({ data: { assetId: asset.id, orgId: asset.orgId, ...data } })
   );
   emitEvent("lead.captured", leadPayload(lead, { asset }));
+  notifyLead(lead, { asset });
   res.send(
     page({
       title: "Thanks!",
