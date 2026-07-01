@@ -70,7 +70,7 @@ app.use(
   })
 );
 
-app.get("/healthz", (_req, res) => res.json({ ok: true, deploy: "gitops-verify-1" }));
+app.get("/healthz", (_req, res) => res.json({ ok: true }));
 app.get("/", (_req, res) => res.redirect("/admin"));
 
 app.use("/scim/v2", scimLimiter, scimRouter);
