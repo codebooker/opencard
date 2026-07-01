@@ -230,9 +230,9 @@ export function renderCardPage(
       <textarea name="note" placeholder="Note (optional)"></textarea>
       <label class="chk-inline"><input type="checkbox" name="consent" value="1" /> I agree to be contacted about my inquiry.</label>
       <input type="hidden" name="campaign" value="${esc(attribution.campaign)}" />
-      <input type="hidden" name="utmSource" value="${esc(attribution.utmSource)}" />
-      <input type="hidden" name="utmMedium" value="${esc(attribution.utmMedium)}" />
-      <input type="hidden" name="utmCampaign" value="${esc(attribution.utmCampaign)}" />
+      <input type="hidden" name="utm_source" value="${esc(attribution.utmSource)}" />
+      <input type="hidden" name="utm_medium" value="${esc(attribution.utmMedium)}" />
+      <input type="hidden" name="utm_campaign" value="${esc(attribution.utmCampaign)}" />
       <input type="hidden" name="referrer" id="lead-ref" value="" />
       <button type="submit">Send my details</button>
     </form>
