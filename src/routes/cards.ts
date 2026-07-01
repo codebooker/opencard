@@ -23,7 +23,7 @@ function clientIp(req: Request): string {
 async function loadCard(slug: string, orgId: string | null) {
   return prisma.card.findFirst({
     where: { slug, active: true, ...(orgId ? { orgId } : {}) },
-    include: { location: { include: { brand: true } }, template: true },
+    include: { location: { include: { brand: true } }, template: true, dept: true },
   });
 }
 const hostOrg = (req: Request) => orgIdForHost(requestHost(req));

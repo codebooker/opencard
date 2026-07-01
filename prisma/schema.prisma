@@ -47,6 +47,7 @@ model Org {
   webhookDeliveries WebhookDelivery[]
   adminUsers        AdminUser[]
   samlConfig        SamlConfig?
+  departments       Department[]
   createdAt   DateTime @default(now())
 }
 
@@ -95,9 +96,27 @@ model Location {
   timezone     String?  // IANA tz, e.g. America/New_York
   users        User[]
   cards        Card[]
+  departments  Department[]
   createdAt    DateTime @default(now())
 
   @@unique([brandId, code])
+  @@index([orgId])
+}
+
+// A department within a rooftop (Sales/Service/Parts/Finance/BDC/Management or
+// custom), carrying its own call-to-action buttons that override the rooftop's.
+model Department {
+  id         String   @id @default(cuid())
+  org        Org      @relation(fields: [orgId], references: [id])
+  orgId      String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  locationId String
+  name       String
+  ctas       Json     @default("[]") // [{ label, url }]
+  cards      Card[]
+  createdAt  DateTime @default(now())
+
+  @@unique([locationId, name])
   @@index([orgId])
 }
 
@@ -147,6 +166,8 @@ model Card {
   userId      String?   @unique
   template    Template? @relation(fields: [templateId], references: [id])
   templateId  String?
+  dept        Department? @relation(fields: [departmentId], references: [id])
+  departmentId String?
   org         Org       @relation(fields: [orgId], references: [id])
   orgId       String
 

@@ -1,11 +1,12 @@
-import type { Card, Brand, Location, Template } from "@prisma/client";
+import type { Card, Brand, Location, Template, Department } from "@prisma/client";
 import { asLabeled, asSocials, Address } from "../types";
 import { esc, page } from "./html";
-import { rooftopCtas, parseOemBrands } from "../dealership";
+import { rooftopCtas, parseOemBrands, ctasFromJson, mergeCtas } from "../dealership";
 
 export type FullCard = Card & {
   location: Location & { brand: Brand };
   template: Template | null;
+  dept?: Department | null;
 };
 
 export function fontStack(name?: string | null): string {
@@ -103,9 +104,11 @@ export function renderCardPage(card: FullCard, qrDataUrl: string, baseUrl: strin
         .join("")}</div>`
     : "";
 
-  // Dealership rooftop context: click-to-call + Sales/Service CTAs and OEM badges.
+  // Dealership context: department CTAs (if any) take precedence over the
+  // rooftop's; then OEM badges. Click-to-call + Sales/Service buttons.
   const rooftop = card.location as any;
-  const dealerCtas = rooftopCtas(rooftop);
+  const deptCtas = ctasFromJson((card.dept as any)?.ctas);
+  const dealerCtas = mergeCtas(deptCtas, rooftopCtas(rooftop));
   const oems = parseOemBrands(rooftop.oemBrands);
   const oemBadges = oems.length
     ? `<div class="oem-badges">${oems.map((o) => `<span class="oem">${esc(o)}</span>`).join("")}</div>`

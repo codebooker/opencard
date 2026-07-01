@@ -9,7 +9,7 @@ import { page, esc } from "../views/html";
 import { uniqueSlug } from "../slug";
 import { upload, uploadedUrl } from "../upload";
 import { emitEvent, cardPayload, WEBHOOK_EVENTS, replayDelivery, sendTestEvent } from "../webhooks";
-import { parseOemBrands } from "../dealership";
+import { parseOemBrands, parseCtaLines } from "../dealership";
 import { generateApiKey } from "../apiauth";
 import { sanitizeScopes } from "../api-scopes";
 import { generateScimToken } from "../scim-auth";
@@ -607,6 +607,55 @@ adminRouter.post("/locations/:id", upload.single("logoFile"), async (req, res) =
   res.redirect("/admin");
 });
 
+// ---------- departments (per rooftop) ----------
+async function locationForDept(id: string) {
+  return prisma.location.findUnique({ where: { id }, select: { id: true, name: true, brandId: true, orgId: true } });
+}
+
+adminRouter.get("/locations/:id/departments", async (req, res) => {
+  const loc = await locationForDept(req.params.id);
+  if (!loc) return res.status(404).send("Not found");
+  if (!RBAC.canManageBrand(reqAdmin(req), loc.brandId)) return forbidden(res);
+  const departments = await prisma.department.findMany({
+    where: { locationId: loc.id },
+    orderBy: { name: "asc" },
+  });
+  res.send(V.departmentsView({ location: loc, departments }));
+});
+
+adminRouter.post("/locations/:id/departments", async (req, res) => {
+  const loc = await locationForDept(req.params.id);
+  if (!loc) return res.status(404).send("Not found");
+  if (!RBAC.canManageBrand(reqAdmin(req), loc.brandId)) return forbidden(res);
+  const ctas = parseCtaLines(req.body?.ctas);
+  const deptId = clean(req.body?.departmentId);
+  if (deptId) {
+    // update (name is fixed once created; only CTAs change), scoped to this rooftop
+    await prisma.department.updateMany({ where: { id: deptId, locationId: loc.id }, data: { ctas } });
+  } else {
+    const name = clean(req.body?.name);
+    if (name) {
+      await prisma.department.upsert({
+        where: { locationId_name: { locationId: loc.id, name } },
+        create: { locationId: loc.id, orgId: loc.orgId, name, ctas },
+        update: { ctas },
+      });
+    }
+  }
+  res.redirect(`/admin/locations/${loc.id}/departments`);
+});
+
+adminRouter.post("/departments/:id/delete", async (req, res) => {
+  const dept = await prisma.department.findUnique({
+    where: { id: req.params.id },
+    include: { location: { select: { id: true, brandId: true } } },
+  });
+  if (!dept) return res.status(404).send("Not found");
+  if (!RBAC.canManageBrand(reqAdmin(req), dept.location.brandId)) return forbidden(res);
+  await prisma.department.delete({ where: { id: dept.id } });
+  res.redirect(`/admin/locations/${dept.location.id}/departments`);
+});
+
 // ---------- cards ----------
 adminRouter.get("/cards", async (req, res) => {
   const t = await currentTerminology();
@@ -635,7 +684,8 @@ adminRouter.get("/cards/new", async (req, res) => {
   });
   if (!loc) return res.status(404).send(`${t.locationSingular} not found`);
   const templates = await prisma.template.findMany({ where: { brandId: loc.brandId } });
-  res.send(V.cardForm({ locationId, templates, brandSelfFields: brandFields(loc.brand), terminology: t }));
+  const departments = await prisma.department.findMany({ where: { locationId }, orderBy: { name: "asc" } });
+  res.send(V.cardForm({ locationId, templates, departments, brandSelfFields: brandFields(loc.brand), terminology: t }));
 });
 
 adminRouter.get("/cards/:id/edit", async (req, res) => {
@@ -647,11 +697,16 @@ adminRouter.get("/cards/:id/edit", async (req, res) => {
   if (!card) return res.status(404).send("Not found");
   if (!(await RBAC.canAccessLocation(reqAdmin(req), card.locationId))) return forbidden(res);
   const templates = await prisma.template.findMany({ where: { brandId: card.location.brandId } });
+  const departments = await prisma.department.findMany({
+    where: { locationId: card.locationId },
+    orderBy: { name: "asc" },
+  });
   res.send(
     V.cardForm({
       card,
       locationId: card.locationId,
       templates,
+      departments,
       brandSelfFields: brandFields(card.location.brand),
       terminology: t,
     })
@@ -706,6 +761,21 @@ function withCardUploads(req: any) {
   return data;
 }
 
+// Resolve the chosen department (validated against the card's rooftop) onto the
+// card data: sets departmentId and the display `department` string to its name.
+async function applyDepartment(data: any, b: any, locationId: string) {
+  const deptId = clean(b.departmentId);
+  if (deptId) {
+    const d = await prisma.department.findFirst({ where: { id: deptId, locationId } });
+    if (d) {
+      data.departmentId = d.id;
+      data.department = d.name;
+      return;
+    }
+  }
+  data.departmentId = null; // keeps any free-text `department` fallback from the form
+}
+
 adminRouter.post("/cards", cardUploads, async (req, res) => {
   const p = reqAdmin(req);
   const b = req.body;
@@ -716,6 +786,7 @@ adminRouter.post("/cards", cardUploads, async (req, res) => {
   const slug = await uniqueSlug(b.firstName, b.lastName);
   const data = withCardUploads(req);
   data.templateId = await allowedTemplateId(clean(b.templateId), loc.brandId);
+  await applyDepartment(data, b, b.locationId);
   const card = await prisma.card.create({
     data: { locationId: b.locationId, orgId: loc.orgId, slug, ...data },
   });
@@ -733,6 +804,7 @@ adminRouter.post("/cards/:id", cardUploads, async (req, res) => {
   if (!(await RBAC.canAccessLocation(reqAdmin(req), existing.locationId))) return forbidden(res);
   const data = withCardUploads(req);
   data.templateId = await allowedTemplateId(clean(b.templateId), existing.location.brandId);
+  await applyDepartment(data, b, existing.locationId);
   const card = await prisma.card.update({ where: { id: req.params.id }, data });
   emitEvent("card.updated", cardPayload(card));
   res.redirect(`/admin/cards?locationId=${existing.locationId}`);

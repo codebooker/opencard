@@ -1,6 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { httpUrl, telHref, rooftopCtas, parseOemBrands } from "./dealership";
+import {
+  httpUrl,
+  telHref,
+  rooftopCtas,
+  parseOemBrands,
+  ctasFromJson,
+  parseCtaLines,
+  ctaLinesFromJson,
+  mergeCtas,
+  type Cta,
+} from "./dealership";
 
 test("httpUrl accepts absolute and bare domains, rejects junk", () => {
   assert.equal(httpUrl("https://acmeford.com"), "https://acmeford.com");
@@ -44,6 +54,46 @@ test("rooftopCtas drops missing/invalid entries", () => {
 
 test("rooftopCtas empty profile -> no CTAs", () => {
   assert.deepEqual(rooftopCtas({}), []);
+});
+
+test("ctasFromJson validates urls + labels, drops junk, caps", () => {
+  const ctas = ctasFromJson([
+    { label: "Book service", url: "acmeford.com/svc" },
+    { label: "", url: "acmeford.com" }, // no label
+    { label: "Bad", url: "nope" }, // invalid url
+    { label: "Text us", url: "https://acmeford.com/text" },
+  ]);
+  assert.deepEqual(ctas.map((c) => c.label), ["Book service", "Text us"]);
+  assert.equal(ctas[0].href, "https://acmeford.com/svc");
+  assert.ok(ctas.every((c) => c.kind === "custom"));
+  assert.deepEqual(ctasFromJson("not-an-array"), []);
+});
+
+test("parseCtaLines parses 'Label | url' lines", () => {
+  assert.deepEqual(parseCtaLines("Sales | acmeford.com/inv\nService | acmeford.com/svc"), [
+    { label: "Sales", url: "acmeford.com/inv" },
+    { label: "Service", url: "acmeford.com/svc" },
+  ]);
+  assert.deepEqual(parseCtaLines("no pipe here"), []);
+  assert.deepEqual(parseCtaLines("  |  "), []);
+  assert.deepEqual(parseCtaLines(null), []);
+});
+
+test("ctaLinesFromJson round-trips with parseCtaLines", () => {
+  const stored = [{ label: "Sales", url: "acmeford.com/inv" }];
+  const text = ctaLinesFromJson(stored);
+  assert.equal(text, "Sales | acmeford.com/inv");
+  assert.deepEqual(parseCtaLines(text), stored);
+});
+
+test("mergeCtas puts department first, de-dupes by href, caps", () => {
+  const dept: Cta[] = [{ label: "Book service", href: "https://a.com/svc", track: "cta:custom", kind: "custom" }];
+  const rooftop = rooftopCtas({ phone: "555-123-4567", website: "a.com", serviceUrl: "a.com/svc" });
+  const merged = mergeCtas(dept, rooftop);
+  // department service CTA first; rooftop's duplicate service href dropped
+  assert.equal(merged[0].href, "https://a.com/svc");
+  assert.equal(merged.filter((c) => c.href === "https://a.com/svc").length, 1);
+  assert.ok(merged.some((c) => c.kind === "call"));
 });
 
 test("parseOemBrands handles arrays, strings, dedupe, cap", () => {

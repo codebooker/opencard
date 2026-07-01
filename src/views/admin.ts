@@ -16,7 +16,13 @@ import {
   EMAIL_LABELS,
   WEB_LABELS,
 } from "./widgets";
-import { KNOWN_OEMS, DEALERSHIP_TIMEZONES, parseOemBrands } from "../dealership";
+import {
+  KNOWN_OEMS,
+  DEALERSHIP_TIMEZONES,
+  parseOemBrands,
+  DEPARTMENTS,
+  ctaLinesFromJson,
+} from "../dealership";
 
 // Render the self-service "allowed fields" checkboxes.
 function selfFieldChecks(allowed: string[], opts: { name: string; includeInherit?: boolean; inherit?: boolean } ): string {
@@ -252,9 +258,49 @@ export function locationForm(
     ).join("")}</select>
 
     <p style="margin-top:16px"><button class="btn" type="submit">Save ${esc(lower(t.locationSingular))}</button>
-    <a class="btn secondary" href="/admin">Cancel</a></p>
+    <a class="btn secondary" href="/admin">Cancel</a>
+    ${location ? `<a class="btn secondary" href="/admin/locations/${esc(location.id)}/departments">Departments</a>` : ""}</p>
   </form>`;
   return shell(t.locationSingular, body);
+}
+
+// Manage the departments (and their CTAs) within a rooftop.
+export function departmentsView(data: { location: any; departments: any[] }): string {
+  const loc = data.location;
+  const existing = new Set(data.departments.map((d) => d.name));
+  const suggestions = DEPARTMENTS.filter((d) => !existing.has(d));
+  const rows = data.departments.length
+    ? data.departments
+        .map(
+          (d) => `<form class="editor" method="POST" action="/admin/locations/${esc(loc.id)}/departments"
+      style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:12px">
+      <input type="hidden" name="departmentId" value="${esc(d.id)}" />
+      <strong>${esc(d.name)}</strong>
+      <label style="margin-top:8px">Call-to-action buttons <span class="muted">(one per line: <code>Label | https://url</code>)</span></label>
+      <textarea name="ctas" rows="3" placeholder="Schedule service | acmeford.com/service">${esc(ctaLinesFromJson(d.ctas))}</textarea>
+      <p style="margin-top:8px"><button class="btn" type="submit">Save</button>
+      <button class="btn danger" type="submit" formaction="/admin/departments/${esc(d.id)}/delete"
+        formnovalidate onclick="return confirm('Delete the ${esc(d.name)} department? Cards keep their other settings.')">Delete</button></p>
+    </form>`
+        )
+        .join("")
+    : `<p class="muted">No departments yet.</p>`;
+
+  const body = `
+  <h2>Departments — ${esc(loc.name)}</h2>
+  <p class="muted">Each department can carry its own CTA buttons, which take precedence over the rooftop's on cards assigned to it.</p>
+  ${rows}
+  <h3 style="margin-top:20px">Add a department</h3>
+  <form class="editor" method="POST" action="/admin/locations/${esc(loc.id)}/departments" style="max-width:560px">
+    <label>Name</label>
+    <input name="name" list="dept-suggest" placeholder="Sales" required />
+    <datalist id="dept-suggest">${suggestions.map((d) => `<option value="${esc(d)}"></option>`).join("")}</datalist>
+    <label style="margin-top:8px">Call-to-action buttons <span class="muted">(one per line: <code>Label | https://url</code>)</span></label>
+    <textarea name="ctas" rows="3" placeholder="View inventory | acmeford.com/inventory"></textarea>
+    <p style="margin-top:10px"><button class="btn" type="submit">Add department</button>
+    <a class="btn secondary" href="/admin/locations/${esc(loc.id)}/edit">Back</a></p>
+  </form>`;
+  return shell("Departments", body);
 }
 
 export function cardList(
@@ -297,6 +343,7 @@ export function cardForm(opts: {
   card?: any;
   locationId: string;
   templates: any[];
+  departments?: any[];
   brandSelfFields?: string[];
   terminology?: Terminology;
 }): string {
@@ -321,7 +368,16 @@ export function cardForm(opts: {
     </div>
     <div class="grid2">
       <div><label>Title</label><input name="title" value="${esc(c.title)}" /></div>
-      <div><label>Department</label><input name="department" value="${esc(c.department)}" /></div>
+      <div><label>Department</label>${
+        opts.departments && opts.departments.length
+          ? `<select name="departmentId"><option value="">— none —</option>${opts.departments
+              .map(
+                (d) =>
+                  `<option value="${esc(d.id)}" ${c.departmentId === d.id ? "selected" : ""}>${esc(d.name)}</option>`
+              )
+              .join("")}</select>`
+          : `<input name="department" value="${esc(c.department)}" placeholder="e.g. Sales" />`
+      }</div>
     </div>
     <label>Company (overrides brand name on card)</label><input name="company" value="${esc(c.company)}" />
     <label>Bio</label><textarea name="bio" rows="2">${esc(c.bio)}</textarea>

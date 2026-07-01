@@ -1,8 +1,11 @@
 // Pure dealership helpers — no db/config, so they're unit-testable in isolation.
 // Used to render a card's rooftop (dealership) context + call-to-action buttons.
 
-export type CtaKind = "sales" | "service" | "site" | "call";
+export type CtaKind = "sales" | "service" | "site" | "call" | "custom";
 export type Cta = { label: string; href: string; track: string; kind: CtaKind };
+
+// The standard dealership department set (customizable per rooftop).
+export const DEPARTMENTS = ["Sales", "Service", "Parts", "Finance", "BDC", "Management"] as const;
 
 export type RooftopProfile = {
   phone?: string | null;
@@ -65,6 +68,61 @@ export function parseOemBrands(v: unknown, max = 12): string[] {
     if (out.length >= max) break;
   }
   return out;
+}
+
+// Parse a department's stored CTAs ([{label,url}]) into validated, render-ready
+// CTAs. Invalid URLs and blank labels are dropped; capped for sanity.
+export function ctasFromJson(v: unknown, max = 8): Cta[] {
+  if (!Array.isArray(v)) return [];
+  const out: Cta[] = [];
+  for (const item of v) {
+    if (!item || typeof item !== "object") continue;
+    const label = String((item as Record<string, unknown>).label ?? "").trim();
+    const href = httpUrl(String((item as Record<string, unknown>).url ?? ""));
+    if (!label || !href) continue;
+    out.push({ label, href, track: "cta:custom", kind: "custom" });
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+// Parse admin textarea input ("Label | https://url" per line) into raw CTA pairs
+// for storage. Kept lossless (no URL normalization) so the editor round-trips.
+export function parseCtaLines(text: string | null | undefined, max = 8): { label: string; url: string }[] {
+  const out: { label: string; url: string }[] = [];
+  for (const line of (text || "").split(/\r?\n/)) {
+    const s = line.trim();
+    if (!s) continue;
+    const idx = s.indexOf("|");
+    if (idx < 0) continue;
+    const label = s.slice(0, idx).trim();
+    const url = s.slice(idx + 1).trim();
+    if (label && url) out.push({ label, url });
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+// Serialize stored CTA pairs back to editable "Label | url" lines.
+export function ctaLinesFromJson(v: unknown): string {
+  if (!Array.isArray(v)) return "";
+  return v
+    .filter((x) => x && typeof x === "object")
+    .map((x) => `${(x as any).label ?? ""} | ${(x as any).url ?? ""}`)
+    .join("\n");
+}
+
+// Merge department CTAs (primary) with rooftop CTAs (fallback), de-duped by href,
+// department first. Capped so a card never shows an unwieldy wall of buttons.
+export function mergeCtas(primary: Cta[], fallback: Cta[], max = 8): Cta[] {
+  const seen = new Set(primary.map((c) => c.href));
+  const out = [...primary];
+  for (const c of fallback) {
+    if (seen.has(c.href)) continue;
+    seen.add(c.href);
+    out.push(c);
+  }
+  return out.slice(0, max);
 }
 
 // Common North-American OEM names, for admin suggestions (not enforced).
