@@ -231,10 +231,19 @@ Goal: make the product sellable and enforce plan boundaries.
   rooftop / card / admin creation enforce plan limits; API keys, webhooks, and
   SSO are gated by plan feature. A Plan & usage admin page shows limits/usage and
   lets a platform owner assign a plan (interim, until checkout).
-- **Stripe checkout / portal / webhooks (next).** Requires Stripe test keys and a
-  publicly reachable webhook URL, so it can't be exercised on localhost — wired as
-  the next increment behind a `STRIPE_SECRET_KEY` config flag. Trial state,
-  failed-payment handling, and cancel/downgrade land with it.
+- **Account billing modes (done).** `Org.billingMode` = standard / demo / free.
+  `src/access.ts` computes active vs expired from mode + status + trial deadline
+  (unit-tested); an admin gate blocks writes and shows a "subscription required"
+  wall when a demo/trial lapses (reads + billing stay open). Platform owners set
+  mode, demo length (30/60 days), and plan from the Plan & usage page.
+- **Stripe checkout / portal / webhooks (done, needs keys to activate).** Behind
+  `STRIPE_SECRET_KEY`: `/admin/billing/checkout` creates a hosted Checkout
+  session per plan, `/admin/billing/portal` opens the customer portal, and
+  `POST /stripe/webhook` (raw-body, signature-verified) reconciles
+  plan/subscriptionStatus/period/cancel from subscription + invoice events. All
+  inert until keys are set. To activate: add Stripe test keys + per-plan Price
+  ids to `.env`, and run `stripe listen --forward-to localhost:3000/stripe/webhook`.
+  Cards are entered on Stripe's hosted page — the app never sees them.
 
 ### Billing
 

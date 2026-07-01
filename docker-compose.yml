@@ -40,6 +40,13 @@ services:
       SELF_SERVICE_DEV_LOGIN: ${SELF_SERVICE_DEV_LOGIN:-0}
       # "1" opens public self-service signup (/signup). Off by default in prod.
       SIGNUPS_ENABLED: ${SIGNUPS_ENABLED:-0}
+      # Stripe billing (all optional — leave blank to run without card checkout).
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_TEAM: ${STRIPE_PRICE_TEAM:-}
+      STRIPE_PRICE_DEALER_GROUP: ${STRIPE_PRICE_DEALER_GROUP:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
       PORT: "3000"
     ports:
       - "${PORT:-3000}:3000"

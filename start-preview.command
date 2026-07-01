@@ -24,6 +24,14 @@ AZURE_CLIENT_ID=""
 AZURE_CLIENT_SECRET=""
 SELF_SERVICE_DEV_LOGIN="0"
 SIGNUPS_ENABLED="1"
+# Stripe billing (optional). Paste test keys here to enable card checkout, then
+# run: stripe listen --forward-to localhost:3000/stripe/webhook
+STRIPE_SECRET_KEY=""
+STRIPE_PUBLISHABLE_KEY=""
+STRIPE_WEBHOOK_SECRET=""
+STRIPE_PRICE_TEAM=""
+STRIPE_PRICE_DEALER_GROUP=""
+STRIPE_PRICE_ENTERPRISE=""
 EOF
   echo "Created .env with random local preview secrets."
   echo "Admin token for this preview: ${ADMIN_TOKEN}"

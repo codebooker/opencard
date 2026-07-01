@@ -1,6 +1,20 @@
 // Database-aware entitlement checks built on the pure plan engine in ./plans.
 import { prisma } from "./db";
 import { Feature, LimitKey, hasFeature, withinLimit } from "./plans";
+import { accessState, AccessState } from "./access";
+
+// Current access state (active / expired) for an org, from its billing fields.
+export async function orgAccessState(orgId: string): Promise<AccessState> {
+  const org = await prisma.org.findUnique({
+    where: { id: orgId },
+    select: { billingMode: true, subscriptionStatus: true, trialEndsAt: true },
+  });
+  return accessState({
+    billingMode: org?.billingMode ?? "standard",
+    subscriptionStatus: org?.subscriptionStatus ?? "canceled",
+    trialEndsAt: org?.trialEndsAt ?? null,
+  });
+}
 
 export async function orgPlanKey(orgId: string): Promise<string> {
   const org = await prisma.org.findUnique({ where: { id: orgId }, select: { plan: true } });

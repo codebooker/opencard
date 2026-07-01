@@ -22,6 +22,9 @@ model Org {
   // Billing / plan state. `plan` keys into src/plans.ts. Stripe ids are set once
   // hosted checkout is wired; until then plans are assigned by a platform owner.
   plan                 String    @default("starter")
+  // How this tenant is billed: standard (Stripe), demo (time-limited free comp,
+  // then must subscribe), or free (permanent comp — friends/family).
+  billingMode          String    @default("standard") // standard | demo | free
   subscriptionStatus   String    @default("trialing") // trialing | active | past_due | canceled
   trialEndsAt          DateTime?
   currentPeriodEnd     DateTime?

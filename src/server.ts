@@ -9,6 +9,7 @@ import { selfRouter } from "./routes/selfservice";
 import { signupRouter } from "./routes/signup";
 import { apiRouter } from "./routes/api";
 import { previewRouter } from "./routes/preview";
+import { handleStripeWebhook } from "./stripe";
 import { uploadDir } from "./upload";
 import {
   securityHeaders,
@@ -25,6 +26,10 @@ app.disable("x-powered-by");
 
 app.use(requestLogger);
 app.use(securityHeaders);
+
+// Stripe webhook must see the raw request body to verify the signature, so it is
+// registered before the JSON body parser (and before CSRF, which it is exempt from).
+app.post("/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
 
 // SCIM sends application/scim+json; admin forms send urlencoded; beacons send text/plain.
 app.use(express.json({ type: ["application/json", "application/scim+json"], limit: "1mb" }));

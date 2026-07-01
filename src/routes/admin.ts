@@ -16,8 +16,10 @@ import { hashPassword, verifyPassword, generateTotpSecret, totpUri, verifyTotp }
 import { qrDataUrl } from "../qr";
 import { currentTerminology } from "../terminology";
 import { defaultOrgId, orgIdForBrand, orgIdForLocation } from "../tenant";
-import { canAdd, orgHasFeature, orgPlanKey, orgUsage } from "../entitlements";
+import { canAdd, orgHasFeature, orgPlanKey, orgUsage, orgAccessState } from "../entitlements";
 import { requiredPlanFor, planFor, PLANS, PLAN_ORDER, isPlanKey, Feature, LimitKey } from "../plans";
+import { accessSummary } from "../access";
+import { stripe, stripeEnabled } from "../stripe";
 import * as RBAC from "../rbac";
 import * as V from "../views/admin";
 
@@ -86,6 +88,26 @@ adminRouter.get("/logout", (_req, res) => {
 
 // everything below requires an admin principal (attached as req.admin)
 adminRouter.use(requireAdmin);
+
+// Workspace access gate: when a tenant's demo/trial has lapsed (or a subscription
+// is past due / canceled), block state-changing actions and steer them to billing.
+// Reads still work, so they can see their data and the plan page. Platform owners
+// and the billing/logout routes are always allowed.
+adminRouter.use(async (req, res, next) => {
+  const p = reqAdmin(req);
+  if (p.platform || req.method !== "POST") return next();
+  if (req.path === "/logout" || req.path.startsWith("/billing")) return next();
+  const access = await orgAccessState(p.orgId);
+  if (access.active) return next();
+  return res.status(402).send(
+    page({
+      title: "Subscription required",
+      body: `<main class="card" style="max-width:520px"><section class="ident"><h1>Subscription required</h1><p class="company">${esc(
+        accessSummary(access)
+      )}. Choose a plan to keep making changes.</p></section><a class="cta" href="/admin/billing">Go to billing</a></main>`,
+    })
+  );
+});
 
 // ---------- helpers ----------
 function parseLabeled(text: string): LabeledValue[] {
@@ -236,8 +258,28 @@ const LIMIT_LABELS: Record<LimitKey, string> = {
 
 adminRouter.get("/billing", async (req, res) => {
   const p = reqAdmin(req);
-  const [planKey, usage] = await Promise.all([orgPlanKey(p.orgId), orgUsage(p.orgId)]);
+  const [planKey, usage, access, org] = await Promise.all([
+    orgPlanKey(p.orgId),
+    orgUsage(p.orgId),
+    orgAccessState(p.orgId),
+    prisma.org.findUnique({ where: { id: p.orgId }, select: { billingMode: true, stripeCustomerId: true } }),
+  ]);
   const plan = planFor(planKey);
+  const mode = org?.billingMode ?? "standard";
+  const hasCustomer = !!org?.stripeCustomerId;
+
+  // Self-serve Stripe checkout (only for plans that have a configured price).
+  const paySection = stripeEnabled
+    ? `<div style="margin-top:18px"><h3 style="margin-bottom:8px">Subscribe</h3>
+         ${PLAN_ORDER.filter((k) => config.stripe.prices[k])
+           .map(
+             (k) =>
+               `<form method="POST" action="/admin/billing/checkout" style="display:inline-block;margin:0 6px 6px 0"><input type="hidden" name="plan" value="${k}"><button class="btn" type="submit">${esc(PLANS[k].label)} — ${esc(PLANS[k].price)}</button></form>`
+           )
+           .join("")}
+         ${hasCustomer ? `<form method="POST" action="/admin/billing/portal" style="display:inline-block"><button class="btn secondary" type="submit">Manage billing</button></form>` : ""}
+       </div>`
+    : `<p class="muted" style="margin-top:12px">Card checkout isn't enabled on this instance yet.</p>`;
   const rows = (Object.keys(LIMIT_LABELS) as LimitKey[])
     .map((k) => {
       const limit = plan.limits[k];
@@ -247,20 +289,35 @@ adminRouter.get("/billing", async (req, res) => {
     })
     .join("");
   const feats = plan.features.map((f) => `<span class="pill">${esc(f)}</span>`).join(" ") || `<span class="muted">Basic features only</span>`;
+  const statusColor = access.active ? "#15803d" : "#b91c1c";
+  const modeLabel = mode === "free" ? "Free (comp)" : mode === "demo" ? "Demo" : "Standard";
+
+  // Platform owners can set mode / demo length / plan by hand (comp accounts,
+  // manual overrides). Paying customers use Stripe checkout (wired separately).
   const setter = p.platform
-    ? `<form method="POST" action="/admin/billing/plan" style="margin-top:18px">
-         <label>Set plan (platform owner)</label>
+    ? `<form method="POST" action="/admin/billing/plan" style="margin-top:18px;max-width:420px">
+         <label>Plan</label>
          <select name="plan">${PLAN_ORDER.map((k) => `<option value="${k}" ${k === plan.key ? "selected" : ""}>${esc(PLANS[k].label)} — ${esc(PLANS[k].price)}</option>`).join("")}</select>
-         <p style="margin-top:8px"><button class="btn" type="submit">Update plan</button></p>
+         <label style="margin-top:10px">Billing mode</label>
+         <select name="billingMode">
+           <option value="standard" ${mode === "standard" ? "selected" : ""}>Standard (Stripe)</option>
+           <option value="demo" ${mode === "demo" ? "selected" : ""}>Demo (free for a set period)</option>
+           <option value="free" ${mode === "free" ? "selected" : ""}>Free (permanent comp)</option>
+         </select>
+         <label style="margin-top:10px">Demo length (days, demo mode only)</label>
+         <select name="demoDays"><option value="30">30 days</option><option value="60">60 days</option></select>
+         <p style="margin-top:10px"><button class="btn" type="submit">Update account</button></p>
        </form>`
     : `<p class="muted" style="margin-top:18px">Self-serve upgrades are coming soon. Contact us to change your plan.</p>`;
   res.send(
     page({
       title: "Plan & usage",
       body: `<main class="admin"><div class="topbar"><h2>Plan &amp; usage</h2><a class="btn secondary" href="/admin">Back</a></div>
-        <p>Current plan: <strong>${esc(plan.label)}</strong> · ${esc(plan.price)}</p>
+        <p>Current plan: <strong>${esc(plan.label)}</strong> · ${esc(plan.price)} <span class="muted">(${esc(modeLabel)})</span></p>
+        <p style="color:${statusColor};font-weight:600">${esc(accessSummary(access))}</p>
         <table class="usage"><tbody>${rows}</tbody></table>
         <p style="margin-top:14px">Included: ${feats}</p>
+        ${paySection}
         ${setter}</main>`,
     })
   );
@@ -268,11 +325,67 @@ adminRouter.get("/billing", async (req, res) => {
 
 adminRouter.post("/billing/plan", async (req, res) => {
   const p = reqAdmin(req);
-  // Until Stripe self-serve checkout is wired, only the platform owner assigns plans.
+  // Until Stripe self-serve checkout is wired, only the platform owner assigns
+  // plans / billing modes (comp accounts, demos, manual overrides).
   if (!p.platform) return forbidden(res, "Self-serve plan changes aren't available yet.");
-  const key = String(req.body?.plan || "");
-  if (isPlanKey(key)) await prisma.org.update({ where: { id: p.orgId }, data: { plan: key } });
+  const b = req.body || {};
+  const data: any = {};
+  if (isPlanKey(String(b.plan))) data.plan = String(b.plan);
+  const mode = String(b.billingMode || "");
+  if (["standard", "demo", "free"].includes(mode)) {
+    data.billingMode = mode;
+    if (mode === "demo") {
+      const days = Number(b.demoDays) === 60 ? 60 : 30;
+      data.trialEndsAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      data.subscriptionStatus = "trialing";
+    }
+  }
+  if (Object.keys(data).length) await prisma.org.update({ where: { id: p.orgId }, data });
   res.redirect("/admin/billing");
+});
+
+// Start a Stripe Checkout session for a paid plan (customer enters their card on
+// Stripe's hosted page — we never see it).
+adminRouter.post("/billing/checkout", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!stripeEnabled || !stripe) return res.status(503).send("Card checkout isn't configured on this instance.");
+  const planKey = String(req.body?.plan || "");
+  const price = config.stripe.prices[planKey];
+  if (!isPlanKey(planKey) || !price) return res.redirect("/admin/billing");
+  const org = await prisma.org.findUnique({ where: { id: p.orgId }, select: { name: true, stripeCustomerId: true } });
+  let customerId = org?.stripeCustomerId || undefined;
+  if (!customerId) {
+    const cust = await stripe.customers.create({
+      name: org?.name || undefined,
+      email: p.email || undefined,
+      metadata: { orgId: p.orgId },
+    });
+    customerId = cust.id;
+    await prisma.org.update({ where: { id: p.orgId }, data: { stripeCustomerId: customerId } });
+  }
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    customer: customerId,
+    line_items: [{ price, quantity: 1 }],
+    success_url: `${config.baseUrl}/admin/billing?checkout=success`,
+    cancel_url: `${config.baseUrl}/admin/billing?checkout=cancel`,
+    metadata: { orgId: p.orgId, plan: planKey },
+    subscription_data: { metadata: { orgId: p.orgId, plan: planKey } },
+  });
+  res.redirect(303, session.url || "/admin/billing");
+});
+
+// Open the Stripe customer portal so a customer can manage/cancel their plan.
+adminRouter.post("/billing/portal", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!stripeEnabled || !stripe) return res.status(503).send("Card checkout isn't configured on this instance.");
+  const org = await prisma.org.findUnique({ where: { id: p.orgId }, select: { stripeCustomerId: true } });
+  if (!org?.stripeCustomerId) return res.redirect("/admin/billing");
+  const session = await stripe.billingPortal.sessions.create({
+    customer: org.stripeCustomerId,
+    return_url: `${config.baseUrl}/admin/billing`,
+  });
+  res.redirect(303, session.url);
 });
 
 // ---------- brands ----------

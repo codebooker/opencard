@@ -46,4 +46,19 @@ export const config = {
   // off in production unless SIGNUPS_ENABLED=1, so a deployed instance doesn't
   // accept random org creation before you're ready to open the doors.
   signupsEnabled: process.env.SIGNUPS_ENABLED === "1" || !isProduction,
+  // Stripe billing. All optional — when STRIPE_SECRET_KEY is unset, checkout and
+  // the webhook are inert and plans are managed manually by the platform owner.
+  stripe: {
+    secretKey: process.env.STRIPE_SECRET_KEY || "",
+    publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || "",
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
+    // One recurring Price id per paid plan (from the Stripe dashboard).
+    prices: {
+      team: process.env.STRIPE_PRICE_TEAM || "",
+      dealer_group: process.env.STRIPE_PRICE_DEALER_GROUP || "",
+      enterprise: process.env.STRIPE_PRICE_ENTERPRISE || "",
+    } as Record<string, string>,
+  },
 };
+
+export const stripeEnabled = !!config.stripe.secretKey;
