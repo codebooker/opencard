@@ -222,6 +222,20 @@ technical groundwork.)
 
 Goal: make the product sellable and enforce plan boundaries.
 
+### Increment status
+
+- **Plans + entitlements engine (done).** `src/plans.ts` defines Starter / Team /
+  Dealer Group / Enterprise with per-tier features and countable limits (pure +
+  unit-tested). `src/entitlements.ts` resolves an org's plan and usage.
+- **Feature gating + limits (done).** Org billing fields on the tenant; brand /
+  rooftop / card / admin creation enforce plan limits; API keys, webhooks, and
+  SSO are gated by plan feature. A Plan & usage admin page shows limits/usage and
+  lets a platform owner assign a plan (interim, until checkout).
+- **Stripe checkout / portal / webhooks (next).** Requires Stripe test keys and a
+  publicly reachable webhook URL, so it can't be exercised on localhost — wired as
+  the next increment behind a `STRIPE_SECRET_KEY` config flag. Trial state,
+  failed-payment handling, and cancel/downgrade land with it.
+
 ### Billing
 
 - Add Stripe customer and subscription records.

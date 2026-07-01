@@ -67,6 +67,7 @@ export function dashboard(
   const canManage = (brandId: string) =>
     p.global || (p.role === "brand_admin" && p.brandIds.includes(brandId));
   const topActions = `
+    <a class="btn secondary" href="/admin/billing">Plan</a>
     <a class="btn secondary" href="/admin/security">Security</a>
     ${p.super ? `<a class="btn secondary" href="/admin/admins">Admins</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/integrations">Integrations</a>` : ""}

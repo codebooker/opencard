@@ -73,7 +73,8 @@ signupRouter.post("/", async (req, res) => {
   // Create the tenant + its owner. Org and AdminUser are not RLS-scoped (they're
   // needed before any tenant context exists); the brand + rooftop are created
   // under the new org's RLS context as a consistency check.
-  const org = await prisma.org.create({ data: { name: orgName } });
+  const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14-day trial
+  const org = await prisma.org.create({ data: { name: orgName, plan: "starter", subscriptionStatus: "trialing", trialEndsAt } });
   await prisma.adminUser.create({
     data: { email, name: adminName, role: "org_owner", orgId: org.id, passwordHash: hashPassword(password) },
   });

@@ -19,6 +19,15 @@ model Org {
   // live these are simply unused metadata.
   subdomain    String? @unique
   customDomain String? @unique
+  // Billing / plan state. `plan` keys into src/plans.ts. Stripe ids are set once
+  // hosted checkout is wired; until then plans are assigned by a platform owner.
+  plan                 String    @default("starter")
+  subscriptionStatus   String    @default("trialing") // trialing | active | past_due | canceled
+  trialEndsAt          DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean   @default(false)
+  stripeCustomerId     String?   @unique
+  stripeSubscriptionId String?   @unique
   terminology Json     @default("{\"brandSingular\":\"Brand\",\"brandPlural\":\"Brands\",\"locationSingular\":\"Location\",\"locationPlural\":\"Locations\",\"locationCodeLabel\":\"Location code\",\"cardSingular\":\"Card\",\"cardPlural\":\"Cards\",\"leadSingular\":\"Lead\",\"leadPlural\":\"Leads\"}")
   brands            Brand[]
   locations         Location[]

@@ -16,8 +16,21 @@ import { hashPassword, verifyPassword, generateTotpSecret, totpUri, verifyTotp }
 import { qrDataUrl } from "../qr";
 import { currentTerminology } from "../terminology";
 import { defaultOrgId, orgIdForBrand, orgIdForLocation } from "../tenant";
+import { canAdd, orgHasFeature, orgPlanKey, orgUsage } from "../entitlements";
+import { requiredPlanFor, planFor, PLANS, PLAN_ORDER, isPlanKey, Feature, LimitKey } from "../plans";
 import * as RBAC from "../rbac";
 import * as V from "../views/admin";
+
+// Plan-gate helpers: reject with a friendly upgrade message.
+function limitReached(res: any, what: string) {
+  return forbidden(res, `You've reached your plan's ${what} limit. Upgrade your plan to add more.`);
+}
+async function ensureFeature(res: any, orgId: string, feature: Feature, label: string): Promise<boolean> {
+  if (await orgHasFeature(orgId, feature)) return true;
+  const need = requiredPlanFor(feature);
+  forbidden(res, `${label} isn't included in your plan.${need ? ` It's available on the ${need.label} plan and above.` : ""}`);
+  return false;
+}
 
 export const adminRouter = Router();
 
@@ -211,6 +224,57 @@ adminRouter.post("/security/mfa/disable", async (req, res) => {
   res.redirect("/admin/security?mfa=off");
 });
 
+// ---------- plan & usage ----------
+const LIMIT_LABELS: Record<LimitKey, string> = {
+  brands: "Brands",
+  locations: "Locations",
+  cards: "Cards",
+  admins: "Admins",
+  apiKeys: "API keys",
+  customDomains: "Custom domains",
+};
+
+adminRouter.get("/billing", async (req, res) => {
+  const p = reqAdmin(req);
+  const [planKey, usage] = await Promise.all([orgPlanKey(p.orgId), orgUsage(p.orgId)]);
+  const plan = planFor(planKey);
+  const rows = (Object.keys(LIMIT_LABELS) as LimitKey[])
+    .map((k) => {
+      const limit = plan.limits[k];
+      const cap = limit < 0 ? "∞" : String(limit);
+      const over = limit >= 0 && usage[k] >= limit;
+      return `<tr><td>${esc(LIMIT_LABELS[k])}</td><td style="text-align:right${over ? ";color:#b91c1c;font-weight:600" : ""}">${usage[k]} / ${cap}</td></tr>`;
+    })
+    .join("");
+  const feats = plan.features.map((f) => `<span class="pill">${esc(f)}</span>`).join(" ") || `<span class="muted">Basic features only</span>`;
+  const setter = p.platform
+    ? `<form method="POST" action="/admin/billing/plan" style="margin-top:18px">
+         <label>Set plan (platform owner)</label>
+         <select name="plan">${PLAN_ORDER.map((k) => `<option value="${k}" ${k === plan.key ? "selected" : ""}>${esc(PLANS[k].label)} — ${esc(PLANS[k].price)}</option>`).join("")}</select>
+         <p style="margin-top:8px"><button class="btn" type="submit">Update plan</button></p>
+       </form>`
+    : `<p class="muted" style="margin-top:18px">Self-serve upgrades are coming soon. Contact us to change your plan.</p>`;
+  res.send(
+    page({
+      title: "Plan & usage",
+      body: `<main class="admin"><div class="topbar"><h2>Plan &amp; usage</h2><a class="btn secondary" href="/admin">Back</a></div>
+        <p>Current plan: <strong>${esc(plan.label)}</strong> · ${esc(plan.price)}</p>
+        <table class="usage"><tbody>${rows}</tbody></table>
+        <p style="margin-top:14px">Included: ${feats}</p>
+        ${setter}</main>`,
+    })
+  );
+});
+
+adminRouter.post("/billing/plan", async (req, res) => {
+  const p = reqAdmin(req);
+  // Until Stripe self-serve checkout is wired, only the platform owner assigns plans.
+  if (!p.platform) return forbidden(res, "Self-serve plan changes aren't available yet.");
+  const key = String(req.body?.plan || "");
+  if (isPlanKey(key)) await prisma.org.update({ where: { id: p.orgId }, data: { plan: key } });
+  res.redirect("/admin/billing");
+});
+
 // ---------- brands ----------
 adminRouter.get("/brands/new", async (req, res) => {
   if (!RBAC.canCreateBrand(reqAdmin(req))) return forbidden(res);
@@ -233,6 +297,7 @@ adminRouter.get("/brands/:id/edit", async (req, res) => {
 adminRouter.post("/brands", upload.single("logoFile"), async (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canCreateBrand(p)) return forbidden(res);
+  if (!(await canAdd(p.orgId, "brands"))) return limitReached(res, "brand");
   const b = req.body;
   await prisma.brand.create({
     data: {
@@ -375,8 +440,10 @@ adminRouter.get("/locations/:id/edit", async (req, res) => {
   res.send(V.locationForm(loc.brandId, loc, await currentTerminology()));
 });
 adminRouter.post("/locations", upload.single("logoFile"), async (req, res) => {
+  const p = reqAdmin(req);
   const b = req.body;
-  if (!RBAC.canManageBrand(reqAdmin(req), b.brandId)) return forbidden(res);
+  if (!RBAC.canManageBrand(p, b.brandId)) return forbidden(res);
+  if (!(await canAdd(p.orgId, "locations"))) return limitReached(res, "location");
   await prisma.location.create({
     data: {
       brandId: b.brandId,
@@ -510,8 +577,10 @@ function withCardUploads(req: any) {
 }
 
 adminRouter.post("/cards", cardUploads, async (req, res) => {
+  const p = reqAdmin(req);
   const b = req.body;
-  if (!(await RBAC.canAccessLocation(reqAdmin(req), b.locationId))) return forbidden(res);
+  if (!(await RBAC.canAccessLocation(p, b.locationId))) return forbidden(res);
+  if (!(await canAdd(p.orgId, "cards"))) return limitReached(res, "card");
   const loc = await prisma.location.findUnique({ where: { id: b.locationId } });
   if (!loc) return res.status(404).send("Location not found");
   const slug = await uniqueSlug(b.firstName, b.lastName);
@@ -671,6 +740,8 @@ adminRouter.get("/integrations", (req, res) => {
 adminRouter.post("/api-keys", async (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  if (!(await ensureFeature(res, p.orgId, "api", "API access"))) return;
+  if (!(await canAdd(p.orgId, "apiKeys"))) return limitReached(res, "API key");
   const name = clean(req.body?.name) || "API key";
   const { raw, hash, prefix } = generateApiKey();
   await prisma.apiKey.create({ data: { name, keyHash: hash, prefix, orgId: p.orgId } });
@@ -692,6 +763,7 @@ adminRouter.post("/api-keys/:id/revoke", async (req, res) => {
 adminRouter.post("/webhooks", async (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  if (!(await ensureFeature(res, p.orgId, "webhooks", "Webhooks"))) return;
   const url = clean(req.body?.url);
   if (!url) return res.redirect("/admin/integrations");
   const events = asArray(req.body?.events).filter((e) => (WEBHOOK_EVENTS as readonly string[]).includes(e));
@@ -712,8 +784,11 @@ adminRouter.post("/webhooks/:id/delete", async (req, res) => {
 });
 
 adminRouter.post("/saml-config", async (req, res) => {
-  if (!RBAC.canManageIntegrations(reqAdmin(req))) return forbidden(res);
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
   const enabled = !!req.body?.enabled;
+  // Turning SSO on requires a plan that includes it.
+  if (enabled && !(await ensureFeature(res, p.orgId, "sso", "Single sign-on (SAML)"))) return;
   const issuer = clean(req.body?.issuer) || samlIssuer();
   const entryPoint = clean(req.body?.entryPoint);
   const idpIssuer = clean(req.body?.idpIssuer);
@@ -793,6 +868,7 @@ adminRouter.post("/admins", async (req, res) => {
   const b = req.body;
   const email = String(b.email || "").toLowerCase().trim();
   if (!email || !b.role) return res.redirect("/admin/admins/new");
+  if (!(await canAdd(p.orgId, "admins"))) return limitReached(res, "admin");
   const data: any = {
     email,
     name: clean(b.name),
