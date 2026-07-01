@@ -134,6 +134,16 @@ model Template {
   bgColor      String  @default("#ffffff")
   font         String  @default("system")
   isDefault    Boolean @default(false)
+  // Role-template behaviors (Phase 4.2b). A template can act as a full role
+  // preset (e.g. "Service Advisor"), not just a design.
+  role          String? // role label, e.g. "Sales Consultant"
+  lockedFields  Json    @default("[]") // field keys removed from the self-edit policy
+  hiddenFields  Json    @default("[]") // field keys hidden from the public card
+  roleCtas      Json    @default("[]") // [{ label, url }] role-level CTAs
+  leadCapture   Boolean @default(true) // show the "share your details back" form
+  disclaimer    String? // legal/disclaimer text shown on the card
+  showQr        Boolean? // QR on the card page (null = inherit brand)
+  emailSignature String? // signature block with {{token}} placeholders
   cards        Card[]
   createdAt    DateTime @default(now())
 

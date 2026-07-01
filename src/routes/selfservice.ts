@@ -10,6 +10,7 @@ import { DEFAULT_SELF_FIELDS } from "../views/widgets";
 import { emailFromSamlProfile, getEnabledSamlForOrg } from "../saml";
 import { resolveOrgId, orgIdForHost, requestHost } from "../tenant-resolver";
 import { roleFlags, Role } from "../roles";
+import { effectiveSelfFields, asStringArray, renderSignature } from "../roletemplate";
 import {
   signEmail,
   verifyEmail,
@@ -44,10 +45,32 @@ async function loadOwnCard(email: string, orgId: string) {
   });
 }
 
+// Effective self-edit fields: card override -> brand policy -> defaults, minus
+// any fields the card's role template locks (governance always wins).
 function allowedFields(card: any): string[] {
-  if (Array.isArray(card.selfEditFields)) return card.selfEditFields as string[];
-  if (Array.isArray(card.location?.brand?.selfEditFields)) return card.location.brand.selfEditFields as string[];
-  return DEFAULT_SELF_FIELDS;
+  const cardSelf = Array.isArray(card.selfEditFields) ? (card.selfEditFields as string[]) : null;
+  const brandSelf = Array.isArray(card.location?.brand?.selfEditFields)
+    ? (card.location.brand.selfEditFields as string[])
+    : null;
+  const locked = asStringArray(card.template?.lockedFields);
+  return effectiveSelfFields(cardSelf, brandSelf, locked, DEFAULT_SELF_FIELDS);
+}
+
+// Rendered email signature for the cardholder (role template), or "".
+function cardSignature(card: any): string {
+  const phones = Array.isArray(card.phones) ? (card.phones as any[]) : [];
+  const emails = Array.isArray(card.emails) ? (card.emails as any[]) : [];
+  return renderSignature(card.template?.emailSignature, {
+    fullName: [card.firstName, card.lastName].filter(Boolean).join(" "),
+    firstName: card.firstName,
+    lastName: card.lastName,
+    title: card.title,
+    department: card.department,
+    company: card.company || card.location?.brand?.name,
+    phone: phones[0]?.value,
+    email: emails[0]?.value || card.ownerEmail,
+    cardUrl: `${config.cardUrl}/c/${card.slug}`,
+  });
 }
 
 // ---- sign in ----
@@ -151,7 +174,7 @@ selfRouter.get("/", async (req, res) => {
   if (!email) return res.redirect("/me/login");
   const card = await loadOwnCard(email, await resolveOrgId(req));
   if (!card) return res.send(V.noCardPage(email));
-  res.send(V.selfEditPage(card, new Set(allowedFields(card)), email, req.query.saved === "1"));
+  res.send(V.selfEditPage(card, new Set(allowedFields(card)), email, req.query.saved === "1", cardSignature(card)));
 });
 
 const selfUploads = upload.fields([{ name: "photoFile", maxCount: 1 }]);

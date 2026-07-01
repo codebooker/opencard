@@ -126,6 +126,7 @@ body {
 .connect button[type=submit] {
   padding: 12px; background: var(--primary); color:#fff; border:0; border-radius: 8px; font-weight:700; cursor:pointer;
 }
+.disclaimer { color: #9ca3af; font-size: 11px; line-height: 1.5; padding: 4px 24px 0; margin: 8px 0 0; text-align: center; }
 .brand { text-align: center; color: #9ca3af; padding: 24px; font-size: 13px; }
 
 /* ---------- Admin ---------- */

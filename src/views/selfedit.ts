@@ -56,7 +56,13 @@ export function noCardPage(email: string): string {
   );
 }
 
-export function selfEditPage(card: any, allowed: Set<string>, email: string, saved: boolean): string {
+export function selfEditPage(
+  card: any,
+  allowed: Set<string>,
+  email: string,
+  saved: boolean,
+  signature = ""
+): string {
   const fullName = [card.prefix, card.firstName, card.lastName].filter(Boolean).join(" ");
   const can = (k: string) => allowed.has(k);
 
@@ -103,6 +109,18 @@ export function selfEditPage(card: any, allowed: Set<string>, email: string, sav
     <p style="margin-top:16px"><button class="btn" type="submit">Save my card</button>
     <a class="btn secondary" href="/c/${esc(card.slug)}" target="_blank">Preview</a></p>
   </form>
+  ${
+    signature
+      ? `<div class="stat" style="margin-top:20px">
+    <strong>Email signature</strong>
+    <p class="muted" style="margin:4px 0 8px">Copy this into your email client's signature settings.</p>
+    <pre id="sig" style="white-space:pre-wrap;word-break:break-word;background:#f6f8fa;border:1px solid #e5e7eb;padding:10px;border-radius:6px;font:inherit">${esc(
+      signature
+    )}</pre>
+    <button type="button" class="btn secondary" onclick="navigator.clipboard.writeText(document.getElementById('sig').innerText).then(function(){this.textContent='Copied';}.bind(this))">Copy signature</button>
+  </div>`
+      : ""
+  }
   ${editorScripts()}`;
   return shell("My card", body);
 }

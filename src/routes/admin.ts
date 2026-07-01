@@ -513,6 +513,15 @@ function templateData(b: any) {
     bgColor: b.bgColor || "#ffffff",
     font: b.font || "system",
     isDefault: !!b.isDefault,
+    // role-template behaviors
+    role: clean(b.role),
+    lockedFields: asArray(b.lockedFields),
+    hiddenFields: asArray(b.hiddenFields),
+    roleCtas: parseCtaLines(b.roleCtas),
+    leadCapture: !!b.leadCapture,
+    disclaimer: clean(b.disclaimer),
+    showQr: b.showQr === "1" ? true : b.showQr === "0" ? false : null,
+    emailSignature: clean(b.emailSignature),
   };
 }
 

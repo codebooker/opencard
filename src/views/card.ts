@@ -2,6 +2,7 @@ import type { Card, Brand, Location, Template, Department } from "@prisma/client
 import { asLabeled, asSocials, Address } from "../types";
 import { esc, page } from "./html";
 import { rooftopCtas, parseOemBrands, ctasFromJson, mergeCtas } from "../dealership";
+import { asStringArray, isHidden, resolveShowQr, renderSignature } from "../roletemplate";
 
 export type FullCard = Card & {
   location: Location & { brand: Brand };
@@ -63,14 +64,19 @@ function contactRow(icon: string, label: string, value: string, href: string, da
 
 export function renderCardPage(card: FullCard, qrDataUrl: string, baseUrl: string): string {
   const t = theme(card);
-  // Show QR on the page? card override -> brand default -> true.
-  const showQr = card.showQr ?? card.location.brand.showQr ?? true;
+  // Role template: which fields to hide on the public card, QR behavior.
+  const hidden = asStringArray((card.template as any)?.hiddenFields);
+  const hide = (f: string) => isHidden(f, hidden);
+  const showQr = resolveShowQr(card.showQr, (card.template as any)?.showQr, card.location.brand.showQr);
+  const leadCapture = (card.template as any)?.leadCapture !== false;
   const fullName = [card.prefix, card.firstName, card.lastName].filter(Boolean).join(" ");
   const phones = asLabeled(card.phones);
   const emails = asLabeled(card.emails);
   const sites = asLabeled(card.websites);
-  const socials = asSocials(card.socials);
-  const addr = (card.address as Address | null) || (card.location.address as Address | null);
+  const socials = hide("socials") ? [] : asSocials(card.socials);
+  const addr = hide("address")
+    ? null
+    : (card.address as Address | null) || (card.location.address as Address | null);
 
   const photo = card.photoUrl
     ? `<img class="photo" src="${esc(card.photoUrl)}" alt="${esc(fullName)}" />`
@@ -108,7 +114,9 @@ export function renderCardPage(card: FullCard, qrDataUrl: string, baseUrl: strin
   // rooftop's; then OEM badges. Click-to-call + Sales/Service buttons.
   const rooftop = card.location as any;
   const deptCtas = ctasFromJson((card.dept as any)?.ctas);
-  const dealerCtas = mergeCtas(deptCtas, rooftopCtas(rooftop));
+  const roleCtas = ctasFromJson((card.template as any)?.roleCtas);
+  // Order: department -> role -> rooftop, de-duped.
+  const dealerCtas = mergeCtas(mergeCtas(deptCtas, roleCtas), rooftopCtas(rooftop));
   const oems = parseOemBrands(rooftop.oemBrands);
   const oemBadges = oems.length
     ? `<div class="oem-badges">${oems.map((o) => `<span class="oem">${esc(o)}</span>`).join("")}</div>`
@@ -159,12 +167,17 @@ export function renderCardPage(card: FullCard, qrDataUrl: string, baseUrl: strin
   }
   <section class="ident">
     <h1>${esc(fullName)}</h1>
-    ${card.pronouns ? `<p class="pronouns">(${esc(card.pronouns)})</p>` : ""}
-    ${card.title ? `<p class="title">${esc(card.title)}</p>` : ""}
-    <p class="company">${esc([card.department, card.company].filter(Boolean).join(" · "))}</p>
+    ${card.pronouns && !hide("pronouns") ? `<p class="pronouns">(${esc(card.pronouns)})</p>` : ""}
+    ${card.title && !hide("title") ? `<p class="title">${esc(card.title)}</p>` : ""}
+    ${
+      (() => {
+        const parts = [hide("department") ? "" : card.department, hide("company") ? "" : card.company].filter(Boolean);
+        return parts.length ? `<p class="company">${esc(parts.join(" · "))}</p>` : "";
+      })()
+    }
   </section>
 
-  ${card.bio ? `<section class="bio"><p>${esc(card.bio)}</p></section>` : ""}
+  ${card.bio && !hide("bio") ? `<section class="bio"><p>${esc(card.bio)}</p></section>` : ""}
 
   ${contacts.length ? `<section class="contacts">${contacts.join("")}</section>` : ""}
 
@@ -183,7 +196,9 @@ export function renderCardPage(card: FullCard, qrDataUrl: string, baseUrl: strin
       : ""
   }
 
-  <button class="connect-toggle" onclick="document.getElementById('connect').classList.toggle('open')">
+  ${
+    leadCapture
+      ? `<button class="connect-toggle" onclick="document.getElementById('connect').classList.toggle('open')">
     Share your details back
   </button>
   <section id="connect" class="connect">
@@ -195,7 +210,15 @@ export function renderCardPage(card: FullCard, qrDataUrl: string, baseUrl: strin
       <textarea name="note" placeholder="Note (optional)"></textarea>
       <button type="submit">Send my details</button>
     </form>
-  </section>
+  </section>`
+      : ""
+  }
+
+  ${
+    (card.template as any)?.disclaimer
+      ? `<p class="disclaimer">${esc((card.template as any).disclaimer)}</p>`
+      : ""
+  }
 
   <footer class="brand">${esc(card.location.brand.name)} · ${esc(card.location.name)}</footer>
 </main>

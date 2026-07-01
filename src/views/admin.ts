@@ -23,6 +23,7 @@ import {
   DEPARTMENTS,
   ctaLinesFromJson,
 } from "../dealership";
+import { HIDEABLE_FIELDS, SIGNATURE_TOKENS, ROLE_SUGGESTIONS, asStringArray } from "../roletemplate";
 
 // Render the self-service "allowed fields" checkboxes.
 function selfFieldChecks(allowed: string[], opts: { name: string; includeInherit?: boolean; inherit?: boolean } ): string {
@@ -494,6 +495,8 @@ export function templatesGallery(brandName: string, brandId: string, templates: 
 
 export function templateForm(brandId: string, template?: any): string {
   const t = template || {};
+  const locked = new Set(asStringArray(t.lockedFields));
+  const hidden = new Set(asStringArray(t.hiddenFields));
   const action = template ? `/admin/templates/${template.id}` : "/admin/templates";
   const body = `
   <h2>${template ? "Edit" : "New"} template</h2>
@@ -512,6 +515,52 @@ export function templateForm(brandId: string, template?: any): string {
       bgColor: t.bgColor,
       font: t.font,
     })}
+
+    <h3 style="margin-top:20px">Role behavior <span class="muted">(optional)</span></h3>
+    <label>Role name</label>
+    <input name="role" list="role-suggest" value="${esc(t.role)}" placeholder="e.g. Service Advisor" />
+    <datalist id="role-suggest">${ROLE_SUGGESTIONS.map((r) => `<option value="${esc(r)}"></option>`).join("")}</datalist>
+
+    <label style="margin-top:12px">Lock fields from self-editing <span class="muted">(employees can't change these)</span></label>
+    <div class="self-fields">${SELF_FIELDS.map(
+      ([v, l]) =>
+        `<label class="chk"><input type="checkbox" name="lockedFields" value="${esc(v)}" ${
+          locked.has(v) ? "checked" : ""
+        } /> ${esc(l)}</label>`
+    ).join("")}</div>
+
+    <label style="margin-top:12px">Hide fields on the public card</label>
+    <div class="self-fields">${HIDEABLE_FIELDS.map(
+      ([v, l]) =>
+        `<label class="chk"><input type="checkbox" name="hiddenFields" value="${esc(v)}" ${
+          hidden.has(v) ? "checked" : ""
+        } /> ${esc(l)}</label>`
+    ).join("")}</div>
+
+    <label class="chk" style="margin:12px 0"><input type="checkbox" name="leadCapture" value="1" ${
+      t.leadCapture !== false ? "checked" : ""
+    } /> Show the "share your details back" lead form</label>
+
+    <label>QR code on the card</label>
+    <select name="showQr">
+      <option value="">(inherit brand)</option>
+      <option value="1" ${t.showQr === true ? "selected" : ""}>Show</option>
+      <option value="0" ${t.showQr === false ? "selected" : ""}>Hide</option>
+    </select>
+
+    <label style="margin-top:12px">Role CTA buttons <span class="muted">(one per line: <code>Label | https://url</code>)</span></label>
+    <textarea name="roleCtas" rows="2" placeholder="Text me | sms:+15551234567">${esc(ctaLinesFromJson(t.roleCtas))}</textarea>
+
+    <label style="margin-top:12px">Disclaimer <span class="muted">(shown on the card)</span></label>
+    <textarea name="disclaimer" rows="2" placeholder="Prices exclude tax, title, and license.">${esc(t.disclaimer)}</textarea>
+
+    <label style="margin-top:12px">Email signature <span class="muted">(tokens: ${SIGNATURE_TOKENS.map(
+      (x) => "{{" + x + "}}"
+    ).join(", ")})</span></label>
+    <textarea name="emailSignature" rows="4" placeholder="{{fullName}} — {{title}}&#10;{{company}} · {{phone}}&#10;{{cardUrl}}">${esc(
+      t.emailSignature
+    )}</textarea>
+
     <p style="margin-top:16px"><button class="btn" type="submit">Save template</button>
     <a class="btn secondary" href="/admin/templates?brandId=${esc(brandId)}">Cancel</a></p>
   </form>
