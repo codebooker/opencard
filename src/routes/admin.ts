@@ -9,6 +9,7 @@ import { page, esc } from "../views/html";
 import { uniqueSlug } from "../slug";
 import { upload, uploadedUrl } from "../upload";
 import { emitEvent, cardPayload, WEBHOOK_EVENTS, replayDelivery, sendTestEvent } from "../webhooks";
+import { parseOemBrands } from "../dealership";
 import { generateApiKey } from "../apiauth";
 import { sanitizeScopes } from "../api-scopes";
 import { generateScimToken } from "../scim-auth";
@@ -543,6 +544,18 @@ adminRouter.post("/templates/:id/delete", async (req, res) => {
 });
 
 // ---------- locations (stores) ----------
+// Dealership rooftop profile fields parsed from the location editor form.
+function rooftopProfile(b: any) {
+  return {
+    oemBrands: parseOemBrands(b.oemBrands),
+    phone: clean(b.phone),
+    website: clean(b.website),
+    salesUrl: clean(b.salesUrl),
+    serviceUrl: clean(b.serviceUrl),
+    timezone: clean(b.timezone),
+  };
+}
+
 adminRouter.get("/locations/new", async (req, res) => {
   const brandId = String(req.query.brandId || "");
   if (!RBAC.canManageBrand(reqAdmin(req), brandId)) return forbidden(res);
@@ -569,6 +582,7 @@ adminRouter.post("/locations", upload.single("logoFile"), async (req, res) => {
       primaryColor: clean(b.primaryColor),
       layout: clean(b.layout),
       address: parseAddress(b) || undefined,
+      ...rooftopProfile(b),
     },
   });
   res.redirect("/admin");
@@ -587,6 +601,7 @@ adminRouter.post("/locations/:id", upload.single("logoFile"), async (req, res) =
       primaryColor: clean(b.primaryColor),
       layout: clean(b.layout),
       address: parseAddress(b) || undefined,
+      ...rooftopProfile(b),
     },
   });
   res.redirect("/admin");

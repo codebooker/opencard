@@ -16,6 +16,7 @@ import {
   EMAIL_LABELS,
   WEB_LABELS,
 } from "./widgets";
+import { KNOWN_OEMS, DEALERSHIP_TIMEZONES, parseOemBrands } from "../dealership";
 
 // Render the self-service "allowed fields" checkboxes.
 function selfFieldChecks(allowed: string[], opts: { name: string; includeInherit?: boolean; inherit?: boolean } ): string {
@@ -231,6 +232,25 @@ export function locationForm(
       <div><label>Postal code</label><input name="addr_postal" value="${esc(addr.postal)}" /></div>
       <div><label>Country</label><input name="addr_country" value="${esc(addr.country)}" /></div>
     </div>
+
+    <h3>Dealership profile</h3>
+    <p class="muted">Shown on this ${esc(lower(t.locationSingular))}'s cards as click-to-call and Sales/Service buttons.</p>
+    <label>OEM brands <span class="muted">(comma-separated)</span></label>
+    <input name="oemBrands" list="oem-list" value="${esc(parseOemBrands(l.oemBrands).join(", "))}" placeholder="e.g. Ford, Lincoln" />
+    <datalist id="oem-list">${KNOWN_OEMS.map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>
+    <div class="grid2">
+      <div><label>Main phone</label><input name="phone" value="${esc(l.phone)}" placeholder="(555) 123-4567" /></div>
+      <div><label>Website</label><input name="website" value="${esc(l.website)}" placeholder="acmeford.com" /></div>
+    </div>
+    <div class="grid2">
+      <div><label>Sales URL</label><input name="salesUrl" value="${esc(l.salesUrl)}" placeholder="acmeford.com/inventory" /></div>
+      <div><label>Service URL</label><input name="serviceUrl" value="${esc(l.serviceUrl)}" placeholder="acmeford.com/service" /></div>
+    </div>
+    <label>Timezone</label>
+    <select name="timezone"><option value="">(none)</option>${DEALERSHIP_TIMEZONES.map(
+      (tz) => `<option ${l.timezone === tz ? "selected" : ""}>${esc(tz)}</option>`
+    ).join("")}</select>
+
     <p style="margin-top:16px"><button class="btn" type="submit">Save ${esc(lower(t.locationSingular))}</button>
     <a class="btn secondary" href="/admin">Cancel</a></p>
   </form>`;

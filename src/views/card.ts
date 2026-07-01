@@ -1,6 +1,7 @@
 import type { Card, Brand, Location, Template } from "@prisma/client";
 import { asLabeled, asSocials, Address } from "../types";
 import { esc, page } from "./html";
+import { rooftopCtas, parseOemBrands } from "../dealership";
 
 export type FullCard = Card & {
   location: Location & { brand: Brand };
@@ -102,6 +103,30 @@ export function renderCardPage(card: FullCard, qrDataUrl: string, baseUrl: strin
         .join("")}</div>`
     : "";
 
+  // Dealership rooftop context: click-to-call + Sales/Service CTAs and OEM badges.
+  const rooftop = card.location as any;
+  const dealerCtas = rooftopCtas(rooftop);
+  const oems = parseOemBrands(rooftop.oemBrands);
+  const oemBadges = oems.length
+    ? `<div class="oem-badges">${oems.map((o) => `<span class="oem">${esc(o)}</span>`).join("")}</div>`
+    : "";
+  const dealerSection = dealerCtas.length
+    ? `<section class="dealer">
+    <p class="dealer-name">${esc(card.location.name)}</p>
+    ${oemBadges}
+    <div class="dealer-ctas">${dealerCtas
+      .map(
+        (c) =>
+          `<a class="cta dealer-cta cta-${c.kind}" href="${esc(c.href)}" data-track="${esc(c.track)}"${
+            c.kind === "call" ? "" : ' target="_blank" rel="noopener"'
+          }>${esc(c.label)}</a>`
+      )
+      .join("")}</div>
+  </section>`
+    : oemBadges
+    ? `<section class="dealer"><p class="dealer-name">${esc(card.location.name)}</p>${oemBadges}</section>`
+    : "";
+
   const body = `
 <main class="card layout-${esc(t.layout)}" style="--primary:${esc(t.primary)};--text:${esc(
     t.text
@@ -143,6 +168,8 @@ export function renderCardPage(card: FullCard, qrDataUrl: string, baseUrl: strin
   ${socialHtml}
 
   <a class="cta" href="${esc(baseUrl)}/c/${esc(card.slug)}/vcard" data-track="vcard">+ Add to Contacts</a>
+
+  ${dealerSection}
 
   ${
     showQr

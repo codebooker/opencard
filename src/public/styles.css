@@ -95,6 +95,19 @@ body {
   background: var(--primary); color: #fff; text-align: center;
   border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 17px;
 }
+.dealer { margin: 4px 24px 8px; padding: 14px 0 4px; border-top: 1px solid #eef0f2; }
+.dealer-name { font-weight: 700; font-size: 14px; margin: 0 0 8px; color: #374151; }
+.oem-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.oem {
+  font-size: 12px; font-weight: 600; color: var(--primary);
+  border: 1px solid var(--primary); border-radius: 999px; padding: 3px 10px; background: transparent;
+}
+.dealer-ctas { display: flex; flex-direction: column; gap: 8px; }
+.dealer-cta {
+  display: block; margin: 0; padding: 13px; font-size: 15px; border-radius: 10px;
+  background: transparent; color: var(--primary); border: 1.5px solid var(--primary);
+}
+.dealer-cta.cta-service { background: var(--primary); color: #fff; }
 .qr { text-align: center; padding: 8px 24px 16px; color: #6b7280; }
 .qr img { background:#fff; padding: 8px; border-radius: 8px; }
 .qr p { font-size: 13px; margin: 6px 0 0; }
