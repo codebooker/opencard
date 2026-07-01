@@ -80,20 +80,12 @@ services:
       - caddy_data:/data
       - caddy_config:/config
 
-  portainer:
-    image: portainer/portainer-ce:latest
-    restart: unless-stopped
-    # Bound to localhost: reach it via `ssh -L 9443:localhost:9443 <vm>` then
-    # https://localhost:9443 — never exposed to the public internet.
-    ports:
-      - "127.0.0.1:9443:9443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - portainer_data:/data
+# NOTE: Portainer runs as a SEPARATE standalone container (not part of this
+# stack), so it can manage/redeploy this stack from git without tearing itself
+# down. See deploy/README.md for the one-line `docker run` that starts it.
 
 volumes:
   db_data:
   uploads_data:
   caddy_data:
   caddy_config:
-  portainer_data:
