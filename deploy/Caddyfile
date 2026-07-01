@@ -9,25 +9,28 @@
 # The real Host header is preserved so the app can resolve the tenant from the
 # subdomain (e.g. acme.opencard.id).
 
-(common) {
-	tls /certs/origin.pem /certs/origin.key
+(proxy) {
 	encode gzip
 	header -Server
 	reverse_proxy web:3000
 }
 
-# App + admin, and per-tenant subdomains.
+# App + admin, and per-tenant subdomains (opencard.id origin cert).
 opencard.id, www.opencard.id {
-	import common
+	tls /certs/opencard.pem /certs/opencard.key
+	import proxy
 }
 *.opencard.id {
-	import common
+	tls /certs/opencard.pem /certs/opencard.key
+	import proxy
 }
 
-# Public card-sharing pages.
+# Public card-sharing pages (tapshare.cards origin cert).
 tapshare.cards, www.tapshare.cards {
-	import common
+	tls /certs/tapshare.pem /certs/tapshare.key
+	import proxy
 }
 *.tapshare.cards {
-	import common
+	tls /certs/tapshare.pem /certs/tapshare.key
+	import proxy
 }

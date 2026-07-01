@@ -74,7 +74,9 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./certs:/certs:ro
+      # Certs live at a stable host path (outside the git clone) so Portainer
+      # git-based deploys don't wipe them. Populate /opt/opencard/certs on the host.
+      - /opt/opencard/certs:/certs:ro
       - caddy_data:/data
       - caddy_config:/config
 
