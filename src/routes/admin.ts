@@ -12,7 +12,7 @@ import { emitEvent, cardPayload, WEBHOOK_EVENTS } from "../webhooks";
 import { generateApiKey } from "../apiauth";
 import { sanitizeScopes } from "../api-scopes";
 import { generateScimToken } from "../scim-auth";
-import { getSamlConfig, samlAcsUrl, samlIssuer } from "../saml";
+import { getSamlConfigForOrg, samlAcsUrl, samlSpIssuer, orgCanonicalHost } from "../saml";
 import { signEmail, verifyEmail } from "../selfauth";
 import { hashPassword, verifyPassword, generateTotpSecret, totpUri, verifyTotp } from "../security";
 import { qrDataUrl } from "../qr";
@@ -830,9 +830,13 @@ async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: stri
       orderBy: { createdAt: "desc" },
       include: { deliveries: { orderBy: { createdAt: "desc" }, take: 1 } },
     }),
-    getSamlConfig(),
-    prisma.org.findUnique({ where: { id: p.orgId }, select: { scimTokenHash: true } }),
+    getSamlConfigForOrg(p.orgId),
+    prisma.org.findUnique({
+      where: { id: p.orgId },
+      select: { scimTokenHash: true, subdomain: true, customDomain: true },
+    }),
   ]);
+  const samlHost = org ? orgCanonicalHost(org) : null;
   res.send(
     V.integrationsView({
       keys,
@@ -841,8 +845,12 @@ async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: stri
       newKey,
       baseUrl: config.baseUrl,
       saml,
-      samlIssuer: samlIssuer(),
-      samlAcsUrl: samlAcsUrl(),
+      samlIssuer: samlHost ? samlSpIssuer(samlHost) : "",
+      samlAcsUrl: samlHost ? samlAcsUrl(samlHost) : "",
+      samlHost,
+      subdomain: org?.subdomain ?? null,
+      customDomain: org?.customDomain ?? null,
+      platformDomain: process.env.PLATFORM_DOMAIN || "",
       scimBaseUrl: `${config.baseUrl}/scim/v2`,
       scimTokenSet: !!org?.scimTokenHash,
       newScimToken,
@@ -919,17 +927,35 @@ adminRouter.post("/saml-config", async (req, res) => {
   const enabled = !!req.body?.enabled;
   // Turning SSO on requires a plan that includes it.
   if (enabled && !(await ensureFeature(res, p.orgId, "sso", "Single sign-on (SAML)"))) return;
-  const issuer = clean(req.body?.issuer) || samlIssuer();
   const entryPoint = clean(req.body?.entryPoint);
   const idpIssuer = clean(req.body?.idpIssuer);
   const idpCert = clean(req.body?.idpCert);
   if (enabled && (!entryPoint || !idpCert)) {
     return res.status(400).send("SAML sign-in needs an IdP SSO URL and signing certificate before it can be enabled.");
   }
+
+  // Workspace address (needed for a stable ACS/reply URL). Normalize + validate.
+  const subRaw = clean(req.body?.subdomain).toLowerCase();
+  const subdomain = subRaw ? subRaw.replace(/[^a-z0-9-]/g, "") : null;
+  if (subRaw && (!subdomain || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(subdomain))) {
+    return res.status(400).send("Subdomain may contain only letters, numbers and hyphens.");
+  }
+  const customDomain = clean(req.body?.customDomain).toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "") || null;
+
+  try {
+    // Address is org-level; scoped to this admin's org.
+    await prisma.org.update({ where: { id: p.orgId }, data: { subdomain, customDomain } });
+  } catch (e: any) {
+    if (e?.code === "P2002") {
+      return res.status(409).send("That subdomain or custom domain is already taken by another workspace.");
+    }
+    throw e;
+  }
+
   await prisma.samlConfig.upsert({
-    where: { id: "default" },
-    create: { id: "default", enabled, issuer, entryPoint, idpIssuer, idpCert },
-    update: { enabled, issuer, entryPoint, idpIssuer, idpCert },
+    where: { orgId: p.orgId },
+    create: { orgId: p.orgId, enabled, entryPoint, idpIssuer, idpCert },
+    update: { enabled, entryPoint, idpIssuer, idpCert },
   });
   res.redirect("/admin/integrations");
 });

@@ -7,7 +7,9 @@ import { upload, uploadedUrl } from "../upload";
 import { clean, parseLabeled, parseSocials } from "../parse";
 import { emitEvent, cardPayload } from "../webhooks";
 import { DEFAULT_SELF_FIELDS } from "../views/widgets";
-import { emailFromSamlProfile, getEnabledSaml } from "../saml";
+import { emailFromSamlProfile, getEnabledSamlForOrg } from "../saml";
+import { resolveOrgId, orgIdForHost, requestHost } from "../tenant-resolver";
+import { roleFlags, Role } from "../roles";
 import {
   signEmail,
   verifyEmail,
@@ -24,9 +26,20 @@ function currentEmail(req: any): string | null {
   return verifyEmail(req.cookies?.[COOKIE]);
 }
 
-async function loadOwnCard(email: string) {
+// Load the org (with SSO settings) that owns the current request's host.
+async function orgForRequest(req: any) {
+  const orgId = await resolveOrgId(req);
+  return prisma.org.findUnique({
+    where: { id: orgId },
+    select: { id: true, subdomain: true, customDomain: true, samlConfig: true },
+  });
+}
+
+// A card owner's card, scoped to the given org so an IdP on one tenant can't
+// assert an email that matches a card in a different tenant.
+async function loadOwnCard(email: string, orgId: string) {
   return prisma.card.findFirst({
-    where: { ownerEmail: { equals: email, mode: "insensitive" }, active: true },
+    where: { ownerEmail: { equals: email, mode: "insensitive" }, active: true, orgId },
     include: { location: { include: { brand: true } }, template: true },
   });
 }
@@ -47,8 +60,8 @@ selfRouter.get("/login", async (req, res) => {
     return res.redirect(authorizeUrl(state, nonce));
   }
   if (config.devLogin) return res.send(V.devLoginPage());
-  const saml = await getEnabledSaml();
-  if (saml) return res.send(V.samlLoginPage());
+  const org = await orgForRequest(req);
+  if (org && (await getEnabledSamlForOrg(org))) return res.send(V.samlLoginPage());
   return res.send(
     V.notConfiguredPage(
       "Self-service sign-in isn't configured yet. Ask your admin to enable SAML SSO or Azure AD SSO."
@@ -67,29 +80,41 @@ selfRouter.get("/auth/callback", async (req, res) => {
   const email = await exchangeCode(code, nonce);
   if (!email) return res.status(401).send("Sign-in failed.");
   res.cookie(COOKIE, signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
-  res.redirect(await postLoginDest(email));
+  res.redirect(await postLoginDest(email, await resolveOrgId(req)));
 });
 
-selfRouter.get("/saml/login", async (_req, res) => {
-  const enabled = await getEnabledSaml();
-  if (!enabled) return res.status(404).send("SAML sign-in is not enabled.");
-  const url = await enabled.saml.getAuthorizeUrlAsync("", undefined, {});
+selfRouter.get("/saml/login", async (req, res) => {
+  const org = await orgForRequest(req);
+  const enabled = org && (await getEnabledSamlForOrg(org));
+  if (!org || !enabled) return res.status(404).send("SAML sign-in is not enabled for this workspace.");
+  // RelayState carries the org id so the ACS can resolve the tenant even if the
+  // IdP posts back to a shared host.
+  const url = await enabled.saml.getAuthorizeUrlAsync(org.id, undefined, {});
   res.redirect(url);
 });
 
 selfRouter.post("/saml/acs", async (req, res) => {
-  const enabled = await getEnabledSaml();
-  if (!enabled) return res.status(404).send("SAML sign-in is not enabled.");
+  const relay = String(req.body?.RelayState || "");
+  // Prefer the org from the host the assertion arrived on; fall back to RelayState.
+  const orgId = (await orgIdForHost(requestHost(req))) || relay || null;
+  const org = orgId
+    ? await prisma.org.findUnique({
+        where: { id: orgId },
+        select: { id: true, subdomain: true, customDomain: true, samlConfig: true },
+      })
+    : null;
+  const enabled = org && (await getEnabledSamlForOrg(org));
+  if (!org || !enabled) return res.status(404).send("SAML sign-in is not enabled.");
   try {
     const result = await enabled.saml.validatePostResponseAsync({
       SAMLResponse: String(req.body?.SAMLResponse || ""),
-      RelayState: String(req.body?.RelayState || ""),
+      RelayState: relay,
     });
     if (!result.profile) return res.status(401).send("SAML sign-in failed.");
     const email = emailFromSamlProfile(result.profile);
     if (!email) return res.status(401).send("SAML response did not include an email address.");
     res.cookie(COOKIE, signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
-    res.redirect(await postLoginDest(email));
+    res.redirect(await postLoginDest(email, org.id));
   } catch {
     res.status(401).send("SAML sign-in failed.");
   }
@@ -99,14 +124,20 @@ selfRouter.post("/devlogin", async (req, res) => {
   if (!config.devLogin) return res.status(404).send("Not found");
   const email = String(req.body?.email || "").toLowerCase().trim();
   if (!email) return res.redirect("/me/login");
+  const orgId = await resolveOrgId(req);
   res.cookie(COOKIE, signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
-  res.redirect(await postLoginDest(email));
+  res.redirect(await postLoginDest(email, orgId));
 });
 
-// Admins land in /admin; everyone else in their own card.
-async function postLoginDest(email: string): Promise<string> {
+// Admins land in /admin; everyone else in their own card. The admin match is
+// scoped to the signing-in org (or platform-level admins) so an IdP can't grant
+// another tenant's admin access; platform owners are allowed from any host.
+async function postLoginDest(email: string, orgId: string): Promise<string> {
   const au = await prisma.adminUser.findUnique({ where: { email } });
-  return au && au.active ? "/admin" : "/me";
+  if (au && au.active && (au.orgId === orgId || roleFlags(au.role as Role).platform)) {
+    return "/admin";
+  }
+  return "/me";
 }
 
 selfRouter.get("/logout", (_req, res) => {
@@ -118,7 +149,7 @@ selfRouter.get("/logout", (_req, res) => {
 selfRouter.get("/", async (req, res) => {
   const email = currentEmail(req);
   if (!email) return res.redirect("/me/login");
-  const card = await loadOwnCard(email);
+  const card = await loadOwnCard(email, await resolveOrgId(req));
   if (!card) return res.send(V.noCardPage(email));
   res.send(V.selfEditPage(card, new Set(allowedFields(card)), email, req.query.saved === "1"));
 });
@@ -128,7 +159,7 @@ const selfUploads = upload.fields([{ name: "photoFile", maxCount: 1 }]);
 selfRouter.post("/", selfUploads, async (req, res) => {
   const email = currentEmail(req);
   if (!email) return res.redirect("/me/login");
-  const card = await loadOwnCard(email);
+  const card = await loadOwnCard(email, await resolveOrgId(req));
   if (!card) return res.status(404).send("No card");
 
   const allowed = new Set(allowedFields(card));

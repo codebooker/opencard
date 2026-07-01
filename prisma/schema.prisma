@@ -46,6 +46,7 @@ model Org {
   webhookEndpoints  WebhookEndpoint[]
   webhookDeliveries WebhookDelivery[]
   adminUsers        AdminUser[]
+  samlConfig        SamlConfig?
   createdAt   DateTime @default(now())
 }
 
@@ -266,13 +267,17 @@ model ApiKey {
 
 // Optional employee/admin SSO using SAML 2.0. Disabled until a super admin turns
 // it on from Admin -> Integrations.
+// Per-org SAML SSO. One config per org (keyed by orgId). The SP entityID and ACS
+// URL are DERIVED from the org's canonical host (subdomain/custom domain), not
+// stored — so each tenant's IdP posts back to its own host.
 model SamlConfig {
-  id         String   @id @default("default")
+  id         String   @id @default(cuid())
+  org        Org      @relation(fields: [orgId], references: [id])
+  orgId      String   @unique
   enabled    Boolean  @default(false)
-  issuer     String?
-  entryPoint String?
-  idpIssuer  String?
-  idpCert    String?
+  entryPoint String? // IdP SSO URL (where we send the user to authenticate)
+  idpIssuer  String? // IdP entityID (optional, validated if set)
+  idpCert    String? // IdP signing certificate (PEM or bare base64)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }

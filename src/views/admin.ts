@@ -552,6 +552,10 @@ export function integrationsView(data: {
   saml: any;
   samlIssuer: string;
   samlAcsUrl: string;
+  samlHost: string | null;
+  subdomain: string | null;
+  customDomain: string | null;
+  platformDomain: string;
   scimBaseUrl: string;
   scimTokenSet: boolean;
   newScimToken?: string | null;
@@ -635,32 +639,44 @@ export function integrationsView(data: {
     <p style="margin-top:10px"><button class="btn" type="submit">Create key</button></p>
   </form>
 
-  <h3 style="margin-top:28px">SAML sign-in</h3>
+  <h3 style="margin-top:28px">SAML single sign-on</h3>
   <div class="stat" style="margin-bottom:12px">
     <p style="margin:0 0 8px">Status: ${
       saml.enabled
         ? `<span class="pill on">enabled</span>`
         : `<span class="pill off">disabled</span>`
     }</p>
-    <p class="muted" style="margin:0">SAML is off by default. Enable it only after the IdP SSO URL and signing certificate are configured.</p>
-    <p class="muted">Service provider entity ID: <code>${esc(data.samlIssuer)}</code></p>
-    <p class="muted">Assertion Consumer Service URL: <code>${esc(data.samlAcsUrl)}</code></p>
+    ${
+      data.samlHost
+        ? `<p class="muted" style="margin:0 0 6px">Give these to your identity provider (Okta, Entra, Google Workspace, etc.):</p>
+    <p class="muted">SP entity ID: <code>${esc(data.samlIssuer)}</code></p>
+    <p class="muted">ACS / reply URL: <code>${esc(data.samlAcsUrl)}</code></p>
+    <p class="muted">Your team signs in at: <code>https://${esc(data.samlHost)}/me/login</code></p>`
+        : `<p class="muted" style="margin:0;color:#b45309">Set a workspace address (subdomain or custom domain) below first — your IdP needs a stable reply URL tied to this tenant.</p>`
+    }
   </div>
   <form class="editor" method="POST" action="/admin/saml-config" style="margin-top:12px;max-width:760px">
+    <label>Workspace subdomain ${
+      data.platformDomain
+        ? `<span class="muted">(team signs in at &lt;name&gt;.${esc(data.platformDomain)})</span>`
+        : ""
+    }</label>
+    <input name="subdomain" value="${esc(data.subdomain || "")}" placeholder="acme" />
+    <label style="margin-top:10px">Custom domain <span class="muted">(optional; overrides subdomain)</span></label>
+    <input name="customDomain" value="${esc(data.customDomain || "")}" placeholder="cards.acmecorp.com" />
+    <hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb" />
     <label class="chk"><input type="checkbox" name="enabled" value="1" ${
       saml.enabled ? "checked" : ""
     } /> Enable SAML sign-in</label>
-    <label>Service provider entity ID</label>
-    <input name="issuer" value="${esc(saml.issuer || data.samlIssuer)}" />
-    <label>IdP SSO URL</label>
+    <label style="margin-top:10px">IdP SSO URL</label>
     <input name="entryPoint" type="url" value="${esc(saml.entryPoint || "")}" placeholder="https://idp.example.com/sso/saml" />
-    <label>IdP issuer <span class="muted">(optional, but recommended)</span></label>
+    <label style="margin-top:10px">IdP issuer / entity ID <span class="muted">(optional, but recommended)</span></label>
     <input name="idpIssuer" value="${esc(saml.idpIssuer || "")}" placeholder="https://idp.example.com/entity-id" />
-    <label>IdP signing certificate</label>
+    <label style="margin-top:10px">IdP signing certificate</label>
     <textarea name="idpCert" rows="8" placeholder="-----BEGIN CERTIFICATE-----...">${esc(
       saml.idpCert || ""
     )}</textarea>
-    <p style="margin-top:10px"><button class="btn" type="submit">Save SAML settings</button></p>
+    <p style="margin-top:10px"><button class="btn" type="submit">Save SSO settings</button></p>
   </form>
 
   <h3 style="margin-top:28px">SCIM provisioning</h3>
