@@ -125,6 +125,31 @@ export function withinLimit(planKey: string, key: LimitKey, currentCount: number
   return isUnlimited(limit) || currentCount < limit;
 }
 
+// A per-client seat allowance (set by OpenCard staff) overrides the plan's card
+// limit: null = use the plan; negative = unlimited (per-seat billing); else cap.
+export function effectiveCardLimit(seatLimit: number | null | undefined, planKey: string): number {
+  return seatLimit == null ? limitFor(planKey, "cards") : seatLimit;
+}
+
+export function withinSeatLimit(
+  seatLimit: number | null | undefined,
+  planKey: string,
+  currentCount: number
+): boolean {
+  const limit = effectiveCardLimit(seatLimit, planKey);
+  return isUnlimited(limit) || currentCount < limit;
+}
+
+// Parse the admin "user allowance" input: blank/"default" -> null (use plan),
+// "unlimited"/"-1" -> -1, a non-negative number -> that cap, else null.
+export function parseSeatLimit(raw: string | null | undefined): number | null {
+  const s = (raw || "").trim().toLowerCase();
+  if (!s || s === "default" || s === "plan") return null;
+  if (s === "unlimited" || s === "-1") return -1;
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 // The lowest plan that unlocks a feature (for upgrade prompts).
 export function requiredPlanFor(feature: Feature): Plan | null {
   for (const key of PLAN_ORDER) {

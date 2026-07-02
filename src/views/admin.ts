@@ -1,6 +1,8 @@
 import { esc, page } from "./html";
 import { Address } from "../types";
 import { AdminPrincipal, ROLE_LABELS } from "../rbac";
+import { showsBilling } from "../roles";
+import { PLAN_ORDER } from "../plans";
 import { API_SCOPES, SCOPE_LABELS } from "../api-scopes";
 import { GENERAL_TERMINOLOGY, Terminology, lower } from "../terminology";
 import {
@@ -99,20 +101,89 @@ type BrandWithLocations = {
   locations: LocationLite[];
 };
 
+// The OpenCard staff console: every client workspace in the system. Platform
+// staff see this instead of a client dashboard (no plan/billing of their own).
+export function clientsConsole(orgs: any[], p: AdminPrincipal): string {
+  const modePill = (m: string) =>
+    `<span class="pill ${m === "demo" ? "off" : "on"}">${esc(m)}</span>`;
+  const rows = orgs.length
+    ? orgs
+        .map(
+          (o) => `<tr>
+      <td><strong>${esc(o.name)}</strong>${
+            o.subdomain ? `<br><span class="muted" style="font-size:11px">${esc(o.subdomain)}</span>` : ""
+          }</td>
+      <td>${esc(o.plan)}</td>
+      <td>${modePill(o.billingMode)}</td>
+      <td class="muted">${esc(o.subscriptionStatus)}</td>
+      <td class="muted" style="font-size:12px">${o._count.brands} brands · ${o._count.cards} cards · ${o._count.leads} leads</td>
+      <td style="white-space:nowrap"><a class="btn secondary" href="/admin/clients/${esc(o.id)}/settings">Edit</a>
+      <form method="POST" action="/admin/clients/${esc(o.id)}/enter" style="display:inline"><button class="btn secondary" type="submit">Manage</button></form></td>
+    </tr>`
+        )
+        .join("")
+    : `<tr><td colspan="6" class="muted">No client workspaces yet.</td></tr>`;
+  const body = `
+  <p class="muted">Signed in as ${esc(p.name)} · <strong>OpenCard staff</strong></p>
+  <div class="topbar"><h2>Clients</h2><div><a class="btn secondary" href="/admin/security">Security</a> <a class="btn" href="/admin/clients/new">+ New client</a></div></div>
+  <p class="muted">Every workspace in the system. “Manage” administers a client's brands, cards, leads and SSO; “Edit” sets its plan and seat allowance.</p>
+  <table>
+    <tr><th>Client</th><th>Plan</th><th>Mode</th><th>Status</th><th>Usage</th><th></th></tr>
+    ${rows}
+  </table>`;
+  return shell("Clients", body);
+}
+
+// Create/edit a client (OpenCard staff): name, plan tier, billing type, seats.
+export function clientForm(org?: any): string {
+  const o = org || {};
+  const action = org ? `/admin/clients/${esc(o.id)}/settings` : "/admin/clients";
+  const planOpts = PLAN_ORDER.map((k) => `<option value="${k}" ${o.plan === k ? "selected" : ""}>${k}</option>`).join("");
+  const modeOpts = [
+    ["free", "Free"],
+    ["standard", "Paid"],
+    ["demo", "Trial"],
+  ]
+    .map(([v, l]) => `<option value="${v}" ${o.billingMode === v ? "selected" : ""}>${l}</option>`)
+    .join("");
+  const seatVal = o.seatLimit == null ? "" : o.seatLimit < 0 ? "unlimited" : String(o.seatLimit);
+  const body = `
+  <h2>${org ? "Edit client" : "New client"}</h2>
+  <form class="editor" method="POST" action="${action}" style="max-width:560px">
+    <label>Client name</label><input name="name" value="${esc(o.name)}" required />
+    <label style="margin-top:10px">Plan tier <span class="muted">(feature set)</span></label>
+    <select name="plan">${planOpts}</select>
+    <label style="margin-top:10px">Billing type</label>
+    <select name="billingMode">${modeOpts}</select>
+    <label style="margin-top:10px">User allowance <span class="muted">(blank = plan default · "unlimited" = per-seat billing · or a number)</span></label>
+    <input name="seatLimit" value="${esc(seatVal)}" placeholder="e.g. 50, or unlimited" />
+    <p style="margin-top:14px"><button class="btn" type="submit">${org ? "Save client" : "Create client"}</button>
+    <a class="btn secondary" href="/admin/clients">Cancel</a></p>
+  </form>`;
+  return shell(org ? "Edit client" : "New client", body);
+}
+
 export function dashboard(
   brands: BrandWithLocations[],
   p: AdminPrincipal,
-  t: Terminology = GENERAL_TERMINOLOGY
+  t: Terminology = GENERAL_TERMINOLOGY,
+  actingClientName?: string
 ): string {
   const canManage = (brandId: string) =>
     p.global || (p.role === "brand_admin" && p.brandIds.includes(brandId));
   const topActions = `
-    <a class="btn secondary" href="/admin/billing">Plan</a>
+    ${showsBilling(p) ? `<a class="btn secondary" href="/admin/billing">Plan</a>` : ""}
     <a class="btn secondary" href="/admin/security">Security</a>
     ${p.super ? `<a class="btn secondary" href="/admin/admins">Admins</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/integrations">Integrations</a>` : ""}
     ${p.global ? `<a class="btn" href="/admin/brands/new">+ New ${lower(t.brandSingular)}</a>` : ""}`;
+  const banner = actingClientName
+    ? `<div class="stat" style="border:1px solid #2563eb;background:#eff6ff;margin-bottom:12px">Managing client <strong>${esc(
+        actingClientName
+      )}</strong> · <a href="/admin/clients/exit">← back to all clients</a></div>`
+    : "";
   const body = `
+  ${banner}
   <p class="muted">Signed in as ${esc(p.name)} · <strong>${esc(ROLE_LABELS[p.role])}</strong></p>
   <div class="topbar"><h2>${esc(t.brandPlural)} &amp; ${esc(lower(t.locationPlural))}</h2><div>${topActions}</div></div>
   ${

@@ -37,3 +37,17 @@ test("every role has a human label", () => {
     assert.ok(ROLE_LABELS[r] && ROLE_LABELS[r].length > 0, r);
   }
 });
+
+import { isConsole, showsBilling } from "./roles";
+
+test("isConsole: only platform admins without a selected client", () => {
+  assert.equal(isConsole({ platform: true, actingOrgId: null }), true);
+  assert.equal(isConsole({ platform: true, actingOrgId: "org1" }), false); // managing a client
+  assert.equal(isConsole({ platform: false, actingOrgId: null }), false); // a client user
+});
+
+test("showsBilling: clients always, platform only while managing a client", () => {
+  assert.equal(showsBilling({ platform: false, actingOrgId: null }), true); // client
+  assert.equal(showsBilling({ platform: true, actingOrgId: null }), false); // console — no billing
+  assert.equal(showsBilling({ platform: true, actingOrgId: "org1" }), true); // managing client's plan
+});

@@ -56,3 +56,32 @@ test("plans are ordered and each has a label + price", () => {
     assert.ok(PLANS[key].price.length > 0, key);
   }
 });
+
+import { effectiveCardLimit, withinSeatLimit } from "./plans";
+
+test("effectiveCardLimit: seat allowance overrides the plan", () => {
+  // starter plan cards limit is 25
+  assert.equal(effectiveCardLimit(null, "starter"), 25); // fall back to plan
+  assert.equal(effectiveCardLimit(100, "starter"), 100); // explicit cap
+  assert.equal(effectiveCardLimit(-1, "starter"), -1); // unlimited
+});
+
+test("withinSeatLimit: caps, unlimited, and plan fallback", () => {
+  assert.equal(withinSeatLimit(3, "enterprise", 2), true); // under seat cap 3
+  assert.equal(withinSeatLimit(3, "enterprise", 3), false); // at cap
+  assert.equal(withinSeatLimit(-1, "starter", 9999), true); // unlimited seats
+  assert.equal(withinSeatLimit(null, "starter", 25), false); // plan cap (25) reached
+  assert.equal(withinSeatLimit(null, "starter", 10), true); // under plan cap
+});
+
+import { parseSeatLimit } from "./plans";
+
+test("parseSeatLimit parses blank/unlimited/number", () => {
+  assert.equal(parseSeatLimit(""), null);
+  assert.equal(parseSeatLimit("default"), null);
+  assert.equal(parseSeatLimit("unlimited"), -1);
+  assert.equal(parseSeatLimit("-1"), -1);
+  assert.equal(parseSeatLimit("50"), 50);
+  assert.equal(parseSeatLimit("0"), 0);
+  assert.equal(parseSeatLimit("abc"), null);
+});

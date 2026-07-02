@@ -33,6 +33,19 @@ export interface RoleFlags {
   super: boolean; // destructive actions, integrations, and admin management
 }
 
+// A platform (OpenCard) admin who hasn't drilled into a client sees the clients
+// CONSOLE; everyone else (clients, or platform admins managing a client) sees the
+// normal management dashboard.
+export function isConsole(p: { platform: boolean; actingOrgId: string | null }): boolean {
+  return p.platform && !p.actingOrgId;
+}
+
+// Billing/plan UI is a client concern: shown to clients, and to platform admins
+// only while managing a specific client — never on the OpenCard clients console.
+export function showsBilling(p: { platform: boolean; actingOrgId: string | null }): boolean {
+  return !p.platform || !!p.actingOrgId;
+}
+
 export function roleFlags(role: Role): RoleFlags {
   const platform = role === "platform_owner" || role === "super_admin";
   const global = platform || role === "org_owner" || role === "org_admin" || role === "general_admin";

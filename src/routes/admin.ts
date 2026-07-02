@@ -14,6 +14,8 @@ import { buildSignatureModel, renderSignatureHtml, renderSignatureText } from ".
 import { signatureBlock } from "../views/signature-view";
 import { parseCampaignRoutingLines } from "../routing";
 import { LEAD_STATUSES, canTransition } from "../leadstatus";
+import { isConsole } from "../roles";
+import { isPlanKey, parseSeatLimit } from "../plans";
 import { redirectTargetUrl, offboardCardUpdate, replacementCardData } from "../turnover";
 import { assetTypeLabel } from "../assets";
 import { generateApiKey } from "../apiauth";
@@ -166,9 +168,80 @@ function asArray(v: any): string[] {
 }
 
 // ---------- dashboard ----------
+// OpenCard staff console: list every client workspace. Drill in to manage one.
+adminRouter.get("/clients", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.platform) return forbidden(res);
+  const orgs = await prisma.org.findMany({
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true, name: true, subdomain: true, plan: true, billingMode: true, subscriptionStatus: true,
+      _count: { select: { brands: true, cards: true, leads: true } },
+    },
+  });
+  res.send(V.clientsConsole(orgs, p));
+});
+
+const VALID_MODES = ["free", "standard", "demo"];
+
+adminRouter.get("/clients/new", (req, res) => {
+  if (!reqAdmin(req).platform) return forbidden(res);
+  res.send(V.clientForm());
+});
+
+adminRouter.post("/clients", async (req, res) => {
+  if (!reqAdmin(req).platform) return forbidden(res);
+  const b = req.body;
+  const name = clean(b.name);
+  if (!name) return res.redirect("/admin/clients/new");
+  await prisma.org.create({
+    data: {
+      name,
+      plan: isPlanKey(b.plan) ? b.plan : "starter",
+      billingMode: VALID_MODES.includes(b.billingMode) ? b.billingMode : "standard",
+      seatLimit: parseSeatLimit(b.seatLimit),
+    },
+  });
+  res.redirect("/admin/clients");
+});
+
+adminRouter.get("/clients/:orgId/settings", async (req, res) => {
+  if (!reqAdmin(req).platform) return forbidden(res);
+  const org = await prisma.org.findUnique({ where: { id: req.params.orgId } });
+  if (!org) return res.status(404).send("Client not found");
+  res.send(V.clientForm(org));
+});
+
+adminRouter.post("/clients/:orgId/settings", async (req, res) => {
+  if (!reqAdmin(req).platform) return forbidden(res);
+  const b = req.body;
+  const data: any = { seatLimit: parseSeatLimit(b.seatLimit) };
+  if (clean(b.name)) data.name = clean(b.name);
+  if (isPlanKey(b.plan)) data.plan = b.plan;
+  if (VALID_MODES.includes(b.billingMode)) data.billingMode = b.billingMode;
+  await prisma.org.update({ where: { id: req.params.orgId }, data });
+  res.redirect("/admin/clients");
+});
+
+adminRouter.post("/clients/:orgId/enter", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.platform) return forbidden(res);
+  const org = await prisma.org.findUnique({ where: { id: req.params.orgId }, select: { id: true } });
+  if (!org) return res.status(404).send("Client not found");
+  res.cookie("oc_actorg", org.id, cookieOptions(12 * 60 * 60 * 1000));
+  res.redirect("/admin");
+});
+
+adminRouter.get("/clients/exit", (_req, res) => {
+  res.clearCookie("oc_actorg", clearCookieOptions());
+  res.redirect("/admin");
+});
+
 adminRouter.get("/", async (req, res) => {
   const p = reqAdmin(req);
   const t = await currentTerminology();
+  // OpenCard staff who haven't drilled into a client see the clients console.
+  if (isConsole(p)) return res.redirect("/admin/clients");
   const brandIds = await RBAC.accessibleBrandIds(p);
   const locFilter = p.global ? undefined : { id: { in: await RBAC.accessibleLocationIds(p) } };
   const brands = await prisma.brand.findMany({
@@ -182,7 +255,13 @@ adminRouter.get("/", async (req, res) => {
       },
     },
   });
-  res.send(V.dashboard(brands as any, p, t));
+  // When a platform admin has drilled into a client, show whose workspace this is.
+  let actingClientName: string | undefined;
+  if (p.actingOrgId) {
+    const org = await prisma.org.findUnique({ where: { id: p.actingOrgId }, select: { name: true } });
+    actingClientName = org?.name;
+  }
+  res.send(V.dashboard(brands as any, p, t, actingClientName));
 });
 
 // ---------- security (per-account two-factor) ----------

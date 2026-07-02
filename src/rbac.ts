@@ -19,17 +19,21 @@ export interface AdminPrincipal {
   super: boolean; // destructive actions, integrations, and admin management
   brandIds: string[]; // brand_admin scope
   locationIds: string[]; // location_admin scope
+  // Set when a platform (OpenCard) admin has drilled into a specific client org
+  // to manage it; their `orgId` is switched to that client while this is set.
+  actingOrgId: string | null;
 }
 
 // Resolve the current admin from the request, or null if not an admin.
 export async function getAdmin(req: Request): Promise<AdminPrincipal | null> {
   const cookies = (req as any).cookies || {};
+  let p: AdminPrincipal | null = null;
 
   // 1) Break-glass platform owner via ADMIN_TOKEN (cookie or bearer).
   const header = req.headers.authorization || "";
   const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
   if (bearer === config.adminToken || cookies.oc_admin === config.adminToken) {
-    return {
+    p = {
       email: null,
       name: "Platform owner (token)",
       role: "platform_owner",
@@ -39,29 +43,41 @@ export async function getAdmin(req: Request): Promise<AdminPrincipal | null> {
       super: true,
       brandIds: [],
       locationIds: [],
+      actingOrgId: null,
+    };
+  } else {
+    // 2) SSO / password session (signed email cookie) mapped to an AdminUser.
+    const email = verifyEmail(cookies.oc_emp);
+    if (!email) return null;
+    const au = await prisma.adminUser.findUnique({ where: { email }, include: { scopes: true } });
+    if (!au || !au.active) return null;
+    const role = au.role as Role;
+    const f = roleFlags(role);
+    p = {
+      email: au.email,
+      name: au.name || au.email,
+      role,
+      // Platform admins have no home org; operate against the default org by default.
+      orgId: au.orgId ?? (await defaultOrgId()),
+      platform: f.platform,
+      global: f.global,
+      super: f.super,
+      brandIds: au.scopes.map((s) => s.brandId).filter((x): x is string => !!x),
+      locationIds: au.scopes.map((s) => s.locationId).filter((x): x is string => !!x),
+      actingOrgId: null,
     };
   }
 
-  // 2) SSO / password session (signed email cookie) mapped to an AdminUser.
-  const email = verifyEmail(cookies.oc_emp);
-  if (!email) return null;
-  const au = await prisma.adminUser.findUnique({ where: { email }, include: { scopes: true } });
-  if (!au || !au.active) return null;
-
-  const role = au.role as Role;
-  const f = roleFlags(role);
-  return {
-    email: au.email,
-    name: au.name || au.email,
-    role,
-    // Platform admins have no home org; operate against the default org by default.
-    orgId: au.orgId ?? (await defaultOrgId()),
-    platform: f.platform,
-    global: f.global,
-    super: f.super,
-    brandIds: au.scopes.map((s) => s.brandId).filter((x): x is string => !!x),
-    locationIds: au.scopes.map((s) => s.locationId).filter((x): x is string => !!x),
-  };
+  // Platform admins can drill into a specific client org (cookie set by the
+  // clients console). Their operating orgId switches to that client while set.
+  if (p.platform && cookies.oc_actorg) {
+    const org = await prisma.org.findUnique({ where: { id: cookies.oc_actorg }, select: { id: true } });
+    if (org) {
+      p.orgId = org.id;
+      p.actingOrgId = org.id;
+    }
+  }
+  return p;
 }
 
 // ---- coarse permissions ----
