@@ -1648,17 +1648,51 @@ export function webhookDetailView(data: {
 
 export function analyticsView(stats: {
   totals: Record<string, number>;
+  leadCount: number;
+  conversion: number;
+  assetScans: number;
+  leaderboard: { id: string; name: string; views: number; leads: number; conv: number }[];
   topCards: { name: string; slug: string; views: number }[];
+  range: { key: string; label: string };
+  ranges: [string, string][];
 }): string {
   const t = stats.totals;
+  const rangeTabs = stats.ranges
+    .map(
+      ([k, label]) =>
+        `<a class="btn ${k === stats.range.key ? "" : "secondary"}" href="/admin/analytics?range=${esc(k)}" style="padding:6px 12px">${esc(
+          label
+        )}</a>`
+    )
+    .join(" ");
+  const board = stats.leaderboard.length
+    ? stats.leaderboard
+        .map(
+          (r) =>
+            `<tr><td>${esc(r.name)}</td><td>${r.views}</td><td>${r.leads}</td><td>${r.conv}%</td></tr>`
+        )
+        .join("")
+    : `<tr><td colspan="4" class="muted">No rooftop activity in this range.</td></tr>`;
   const body = `
-  <h2>Analytics</h2>
+  <div class="topbar"><h2>Analytics</h2><a class="btn secondary" href="/admin">← Back</a></div>
+  <p class="muted">${esc(stats.range.label)} · <a href="/admin/leads">view leads</a></p>
+  <div style="margin:8px 0 18px">${rangeTabs}</div>
+
   <div class="cards-grid">
     <div class="stat"><div class="n">${t.view || 0}</div><div class="muted">Card views</div></div>
     <div class="stat"><div class="n">${t.vcard || 0}</div><div class="muted">Contacts saved</div></div>
     <div class="stat"><div class="n">${t.click || 0}</div><div class="muted">Link clicks</div></div>
-    <div class="stat"><div class="n">${t.connect || 0}</div><div class="muted">Leads captured</div></div>
+    <div class="stat"><div class="n">${stats.leadCount}</div><div class="muted">Leads captured</div></div>
+    <div class="stat"><div class="n">${stats.conversion}%</div><div class="muted">View → lead rate</div></div>
+    <div class="stat"><div class="n">${stats.assetScans}</div><div class="muted">QR asset scans <span style="font-size:10px">(all-time)</span></div></div>
   </div>
+
+  <h3 style="margin-top:24px">Rooftop leaderboard</h3>
+  <table>
+    <tr><th>Rooftop</th><th>Views</th><th>Leads</th><th>Conv.</th></tr>
+    ${board}
+  </table>
+
   <h3 style="margin-top:24px">Top cards by views</h3>
   <table>
     <tr><th>Card</th><th>Views</th><th></th></tr>

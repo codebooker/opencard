@@ -20,6 +20,7 @@ import { normalizeHost } from "../branding";
 import { parseFieldMapLines } from "../crmsync";
 import { sendTestSync, retrySync } from "../crmsync-dispatch";
 import { isGaId, isGtmId, normalizeCampaignCode } from "../marketing";
+import { resolveRange, conversionPct, sortLeaderboard, ANALYTICS_RANGES } from "../analytics";
 import { promises as dns } from "dns";
 import { evaluateDomain, CNAME_TARGET } from "../domainstatus";
 
@@ -1258,26 +1259,76 @@ adminRouter.get("/cards/:id/analytics", async (req, res) => {
 });
 
 adminRouter.get("/analytics", async (req, res) => {
-  const ids = await accessibleCardIds(reqAdmin(req));
-  const cf = ids ? { cardId: { in: ids } } : {};
-  const grouped = await prisma.analyticsEvent.groupBy({ by: ["type"], where: cf, _count: { _all: true } });
+  const p = reqAdmin(req);
+  const range = resolveRange(req.query.range);
+  const cardIds = await accessibleCardIds(p); // null = all orgs (platform console)
+  const cardFilter = cardIds ? { cardId: { in: cardIds } } : {};
+  const dateFilter = range.since ? { createdAt: { gte: range.since } } : {};
+  const whereEvents = { ...cardFilter, ...dateFilter };
+
+  // Event totals by type (views, vcard saves, clicks, connects) in range.
+  const grouped = await prisma.analyticsEvent.groupBy({ by: ["type"], where: whereEvents, _count: { _all: true } });
   const totals: Record<string, number> = {};
   grouped.forEach((g) => (totals[g.type] = g._count._all));
 
-  const views = await prisma.analyticsEvent.groupBy({
+  // Leads captured (cards + assets) in scope + range.
+  const leadScope = await leadScopeWhere(p);
+  const leadWhere = { ...leadScope, ...(range.since ? { createdAt: { gte: range.since } } : {}) };
+  const leadCount = await prisma.lead.count({ where: leadWhere });
+
+  // Rooftop leaderboard: views + leads per location, resolving card/asset -> location.
+  const locIds = await RBAC.accessibleLocationIds(p);
+  const [locations, cards, assets, viewsByCard, leadsInRange, scanAgg] = await Promise.all([
+    prisma.location.findMany({ where: { id: { in: locIds } }, select: { id: true, name: true } }),
+    prisma.card.findMany({ where: { locationId: { in: locIds } }, select: { id: true, locationId: true } }),
+    prisma.asset.findMany({ where: { locationId: { in: locIds } }, select: { id: true, locationId: true } }),
+    prisma.analyticsEvent.groupBy({ by: ["cardId"], where: { type: "view", ...whereEvents }, _count: { _all: true } }),
+    prisma.lead.findMany({ where: leadWhere, select: { cardId: true, assetId: true } }),
+    prisma.asset.aggregate({ where: { locationId: { in: locIds } }, _sum: { scanCount: true } }),
+  ]);
+  const cardLoc = new Map(cards.map((c) => [c.id, c.locationId]));
+  const assetLoc = new Map(assets.map((a) => [a.id, a.locationId]));
+  const per = new Map<string, { views: number; leads: number }>();
+  locations.forEach((l) => per.set(l.id, { views: 0, leads: 0 }));
+  viewsByCard.forEach((v) => {
+    const loc = cardLoc.get(v.cardId);
+    if (loc && per.has(loc)) per.get(loc)!.views += v._count._all;
+  });
+  leadsInRange.forEach((l) => {
+    const loc = (l.cardId && cardLoc.get(l.cardId)) || (l.assetId && assetLoc.get(l.assetId));
+    if (loc && per.has(loc)) per.get(loc)!.leads++;
+  });
+  const leaderboard = sortLeaderboard(
+    locations.map((l) => ({ id: l.id, name: l.name, views: per.get(l.id)!.views, leads: per.get(l.id)!.leads }))
+  );
+
+  // Top cards by views (in range).
+  const topViews = await prisma.analyticsEvent.groupBy({
     by: ["cardId"],
-    where: { type: "view", ...cf },
+    where: { type: "view", ...whereEvents },
     _count: { _all: true },
     orderBy: { _count: { cardId: "desc" } },
     take: 10,
   });
-  const cards = await prisma.card.findMany({ where: { id: { in: views.map((v) => v.cardId) } } });
-  const byId = new Map(cards.map((c) => [c.id, c]));
-  const topCards = views.map((v) => {
+  const topCardRows = await prisma.card.findMany({ where: { id: { in: topViews.map((v) => v.cardId) } } });
+  const byId = new Map(topCardRows.map((c) => [c.id, c]));
+  const topCards = topViews.map((v) => {
     const c = byId.get(v.cardId);
     return { name: c ? `${c.firstName} ${c.lastName}` : "—", slug: c?.slug || "", views: v._count._all };
   });
-  res.send(V.analyticsView({ totals, topCards }));
+
+  res.send(
+    V.analyticsView({
+      totals,
+      leadCount,
+      conversion: conversionPct(leadCount, totals["view"] || 0),
+      assetScans: scanAgg._sum.scanCount || 0,
+      leaderboard,
+      topCards,
+      range: { key: range.key, label: range.label },
+      ranges: ANALYTICS_RANGES,
+    })
+  );
 });
 
 // ---------- leads ----------
