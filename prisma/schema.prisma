@@ -65,6 +65,9 @@ model Org {
 model TenantDomain {
   id         String    @id @default(cuid())
   host       String    @unique // fully-qualified, lowercased (e.g. cards.mullinaxford.com)
+  // Which portal this host lands on: "user" (employee /me) or "admin" (/admin).
+  // Both surfaces stay reachable; kind just sets the default landing for the root.
+  kind       String    @default("user")
   org        Org       @relation(fields: [orgId], references: [id])
   orgId      String
   brand      Brand?    @relation(fields: [brandId], references: [id], onDelete: Cascade)

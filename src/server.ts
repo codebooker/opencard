@@ -12,7 +12,7 @@ import { apiRouter } from "./routes/api";
 import { previewRouter } from "./routes/preview";
 import { handleStripeWebhook } from "./stripe";
 import { qrPng } from "./qr";
-import { isDomainApproved } from "./tenant-resolver";
+import { isDomainApproved, domainKindForHost, requestHost } from "./tenant-resolver";
 import { uploadDir } from "./upload";
 import {
   securityHeaders,
@@ -101,7 +101,12 @@ app.get("/tls/authorize", async (req, res) => {
   res.status(ok ? 200 : 403).end();
 });
 
-app.get("/", (_req, res) => res.redirect("/admin"));
+// The root lands on the portal this custom domain is for (employee vs admin);
+// both surfaces stay reachable by path. Unregistered hosts default to /admin.
+app.get("/", async (req, res) => {
+  const kind = await domainKindForHost(requestHost(req));
+  res.redirect(kind === "user" ? "/me" : "/admin");
+});
 
 app.use("/scim/v2", scimLimiter, scimRouter);
 app.use("/api/v1", apiLimiter, apiRouter);

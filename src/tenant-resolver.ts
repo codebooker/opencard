@@ -2,7 +2,7 @@ import { Request } from "express";
 import { prisma } from "./db";
 import { defaultOrgId } from "./tenant";
 import { parseHost, requestHost } from "./host";
-import { LoginBranding, loginBranding, normalizeHost } from "./branding";
+import { LoginBranding, loginBranding, normalizeHost, normalizeDomainKind, DomainKind } from "./branding";
 
 export { requestHost };
 
@@ -19,6 +19,15 @@ export async function loginBrandingForHost(host: string): Promise<LoginBranding 
   if (!d) return null;
   if (d.location) return loginBranding(d.location.brand, d.location);
   return loginBranding(d.brand, null);
+}
+
+// Which portal a custom domain lands on (admin vs employee), or null if the host
+// isn't a registered client domain. Used to redirect the domain root.
+export async function domainKindForHost(host: string): Promise<DomainKind | null> {
+  const h = normalizeHost(host);
+  if (!h) return null;
+  const d = await prisma.tenantDomain.findUnique({ where: { host: h }, select: { kind: true } });
+  return d ? normalizeDomainKind(d.kind) : null;
 }
 
 // Is `host` approved for on-demand TLS issuance? (Caddy asks before getting a

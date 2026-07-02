@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeHost, safeColor, loginBranding } from "./branding";
+import { normalizeHost, safeColor, loginBranding, normalizeDomainKind } from "./branding";
+
+test("normalizeDomainKind: only 'admin' is admin, everything else is user", () => {
+  assert.equal(normalizeDomainKind("admin"), "admin");
+  assert.equal(normalizeDomainKind("user"), "user");
+  assert.equal(normalizeDomainKind("bogus"), "user");
+  assert.equal(normalizeDomainKind(undefined), "user");
+});
 
 test("normalizeHost lowercases and strips port + trailing dot", () => {
   assert.equal(normalizeHost("Cards.MullinaxFord.com:443"), "cards.mullinaxford.com");

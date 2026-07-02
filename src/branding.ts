@@ -19,6 +19,14 @@ export function normalizeHost(raw: string | null | undefined): string {
     .replace(/\.$/, "");
 }
 
+export type DomainKind = "admin" | "user";
+
+// A custom domain lands on the admin portal or the employee portal. Anything
+// that isn't explicitly "admin" is treated as the employee ("user") side.
+export function normalizeDomainKind(v: unknown): DomainKind {
+  return v === "admin" ? "admin" : "user";
+}
+
 // Only allow a safe CSS color (hex) to be interpolated into an inline <style>.
 export function safeColor(v: string | null | undefined, fallback = "#1F5BEA"): string {
   return v && /^#[0-9a-fA-F]{3,8}$/.test(v) ? v : fallback;

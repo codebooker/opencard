@@ -49,8 +49,12 @@ export function loginPage(error?: string, info?: string, branding?: LoginBrandin
           <input name="password" type="password" autocomplete="current-password" placeholder="••••••••" />
           <button class="btn auth-submit" type="submit">Sign in</button>
         </form>
-        <div class="auth-divider"><span>or</span></div>
-        <a class="btn secondary auth-sso" href="/me/login">Sign in with SSO</a>
+        ${
+          branding
+            ? `<div class="auth-divider"><span>or</span></div>
+        <a class="btn secondary auth-sso" href="/me/login">Sign in with SSO</a>`
+            : ""
+        }
         <p class="auth-foot">New here? <a href="/signup">Create an account</a></p>
         <details class="auth-breakglass">
           <summary>Break-glass token</summary>
