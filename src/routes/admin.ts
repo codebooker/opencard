@@ -1471,12 +1471,15 @@ adminRouter.post("/crm", async (req, res) => {
   if (!(await ensureFeature(res, p.orgId, "crmSync", "CRM sync"))) return;
   const b = req.body || {};
   const name = clean(b.name);
-  const provider = b.provider === "hubspot" ? "hubspot" : "zapier";
-  const endpoint = clean(b.endpoint);
-  const token = clean(b.token);
+  const provider = ["hubspot", "salesforce"].includes(b.provider) ? b.provider : "zapier";
+  const endpoint = clean(b.endpoint); // zapier webhook URL
+  const token = clean(b.token); // hubspot private-app token
+  const sfOid = clean(b.sfOid); // salesforce org id (oid)
+  const sfUrl = clean(b.sfUrl); // salesforce submission URL override (optional)
   if (!name) return res.redirect("/admin/integrations");
   if (provider === "zapier" && !endpoint) return res.redirect("/admin/integrations");
   if (provider === "hubspot" && !token) return res.redirect("/admin/integrations");
+  if (provider === "salesforce" && !sfOid) return res.redirect("/admin/integrations");
   // Scope to a rooftop the admin can reach, or all rooftops in the org.
   let locationId: string | null = null;
   if (b.locationId) {
@@ -1488,8 +1491,10 @@ adminRouter.post("/crm", async (req, res) => {
       orgId: p.orgId,
       provider,
       name,
-      endpoint: provider === "zapier" ? endpoint : null,
-      token: provider === "hubspot" ? token : null,
+      // endpoint = zapier webhook, or salesforce optional URL override.
+      endpoint: provider === "zapier" ? endpoint : provider === "salesforce" ? sfUrl || null : null,
+      // token = hubspot token, or salesforce oid.
+      token: provider === "hubspot" ? token : provider === "salesforce" ? sfOid : null,
       fieldMap: parseFieldMapLines(b.fieldMap) as any,
       locationId,
       enabled: true,

@@ -2,7 +2,9 @@
 // properties (default mapping or a custom field map), with the values coerced to
 // the strings HubSpot's Contacts API expects. The dispatcher does the HTTP upsert.
 
-import { sanitizeFieldMap } from "./crmsync";
+import { sanitizeFieldMap, splitName } from "./crmsync";
+
+export { splitName };
 
 export const HUBSPOT_BASE = "https://api.hubapi.com";
 export const HUBSPOT_CONTACTS_URL = `${HUBSPOT_BASE}/crm/v3/objects/contacts`;
@@ -10,14 +12,6 @@ export const HUBSPOT_CONTACTS_URL = `${HUBSPOT_BASE}/crm/v3/objects/contacts`;
 // URL to update a contact by email (idProperty=email), for the upsert fallback.
 export function hubspotContactByEmailUrl(email: string): string {
   return `${HUBSPOT_CONTACTS_URL}/${encodeURIComponent(email)}?idProperty=email`;
-}
-
-// Split a full name into HubSpot's firstname / lastname. Last token is lastname.
-export function splitName(full: string | null | undefined): { firstname?: string; lastname?: string } {
-  const parts = String(full || "").trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return {};
-  if (parts.length === 1) return { firstname: parts[0] };
-  return { firstname: parts.slice(0, -1).join(" "), lastname: parts[parts.length - 1] };
 }
 
 function toPropString(v: unknown): string | null {

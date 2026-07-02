@@ -62,6 +62,15 @@ export function fieldMapToLines(v: unknown): string {
     .join("\n");
 }
 
+// Split a full name into first / last (last token = last name). Shared by the
+// HubSpot and Salesforce connectors.
+export function splitName(full: string | null | undefined): { firstname?: string; lastname?: string } {
+  const parts = String(full || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return {};
+  if (parts.length === 1) return { firstname: parts[0] };
+  return { firstname: parts.slice(0, -1).join(" "), lastname: parts[parts.length - 1] };
+}
+
 function leadValue(lead: any, field: string): unknown {
   const v = lead?.[field];
   return v === undefined ? null : v;

@@ -1324,6 +1324,8 @@ export function integrationsView(data: {
           }<br><span class="muted" style="font-size:12px">→ ${
             c.provider === "hubspot"
               ? `HubSpot contact upsert ${c.token ? `<span class="pill on">token set</span>` : `<span class="pill off">no token</span>`}`
+              : c.provider === "salesforce"
+              ? `Salesforce Web-to-Lead ${c.token ? `<span class="pill on">oid set</span>` : `<span class="pill off">no oid</span>`}`
               : `<code>${esc(String(c.endpoint || "").slice(0, 60))}</code>`
           } · ${esc(scope)}</span></div>
           <div style="white-space:nowrap">
@@ -1351,6 +1353,7 @@ export function integrationsView(data: {
     <select name="provider" id="crm-provider">
       <option value="zapier">Zapier / Make / generic webhook</option>
       <option value="hubspot">HubSpot (contact upsert)</option>
+      <option value="salesforce">Salesforce (Web-to-Lead)</option>
     </select>
     <div class="crm-zapier">
       <label style="margin-top:10px">Webhook URL <span class="muted">(Zapier/Make catch hook or any endpoint)</span></label>
@@ -1361,19 +1364,27 @@ export function integrationsView(data: {
       <input name="token" type="password" placeholder="pat-na1-..." autocomplete="off" />
       <p class="muted" style="font-size:12px;margin:4px 0 0">In HubSpot: Settings → Integrations → Private Apps → create an app with the <code>crm.objects.contacts.write</code> scope, then paste its token here. We upsert a contact by email on every captured lead.</p>
     </div>
+    <div class="crm-salesforce" style="display:none">
+      <label style="margin-top:10px">Salesforce Org ID (oid)</label>
+      <input name="sfOid" placeholder="00Dxx0000001abc" autocomplete="off" />
+      <label style="margin-top:8px">Submission URL override <span class="muted">(optional; blank = standard Web-to-Lead)</span></label>
+      <input name="sfUrl" type="url" placeholder="https://webto.salesforce.com/..." />
+      <p class="muted" style="font-size:12px;margin:4px 0 0">Find your Org ID in Salesforce Setup → Company Information. Each captured lead creates a Salesforce Lead via Web-to-Lead. Note: Salesforce returns no delivery confirmation, so a "sent" status means it was accepted for processing.</p>
+    </div>
     <label style="margin-top:10px">Applies to</label>
     <select name="locationId">${crmScopeOptions}</select>
     <label style="margin-top:10px">Field mapping <span class="muted">(optional, one per line: <code>targetKey = leadField</code>; blank = default mapping)</span></label>
     <textarea name="fieldMap" rows="3" placeholder="firstname = name&#10;email = email&#10;phone = phone"></textarea>
-    <p class="muted" style="font-size:12px;margin:6px 0 0"><span class="crm-hubspot" style="display:none">For HubSpot, target keys are contact property names (firstname, lastname, email, phone, company, or a custom property). </span>Lead fields: ${crmFieldHelp}</p>
+    <p class="muted" style="font-size:12px;margin:6px 0 0"><span class="crm-hubspot" style="display:none">For HubSpot, target keys are contact property names (firstname, lastname, email, phone, company, or a custom property). </span><span class="crm-salesforce" style="display:none">For Salesforce, target keys are Web-to-Lead field names (first_name, last_name, email, phone, company, or a custom field id like 00N…). </span>Lead fields: ${crmFieldHelp}</p>
     <p style="margin-top:10px"><button class="btn" type="submit">Add integration</button></p>
     <script>(function(){
       var f=document.getElementById('crm-add'); if(!f) return;
       var sel=document.getElementById('crm-provider');
-      function sync(){ var h=sel.value==='hubspot';
-        f.querySelectorAll('.crm-hubspot').forEach(function(e){e.style.display=h?'':'none';});
-        f.querySelectorAll('.crm-zapier').forEach(function(e){e.style.display=h?'none':'';});
-      }
+      var provs=['zapier','hubspot','salesforce'];
+      function sync(){ provs.forEach(function(pv){
+        var show=sel.value===pv;
+        f.querySelectorAll('.crm-'+pv).forEach(function(e){e.style.display=show?'':'none';});
+      }); }
       sel.addEventListener('change',sync); sync();
     })();</script>
   </form>`;

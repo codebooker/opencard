@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { buildCrmPayload, nextSyncStatus, httpOk } from "./crmsync";
 import { hubspotProperties, hubspotEmail, HUBSPOT_CONTACTS_URL, hubspotContactByEmailUrl } from "./hubspot";
+import { salesforceBody, salesforceUrl } from "./salesforce";
 
 // DB + HTTP side of CRM sync (the pure mapping/state logic lives in crmsync.ts).
 // Fire-and-forget on capture; never throws into the caller.
@@ -19,6 +20,25 @@ async function httpSend(
       method,
       headers: { "content-type": "application/json", ...extraHeaders },
       body: JSON.stringify(body),
+      signal: ac.signal,
+    });
+    return { code: res.status, error: httpOk(res.status) ? null : `HTTP ${res.status}` };
+  } catch (e: any) {
+    return { code: null, error: String(e?.message || e).slice(0, 300) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Form-urlencoded POST (Salesforce Web-to-Lead).
+async function httpForm(url: string, body: string, timeoutMs = 8000): Promise<{ code: number | null; error: string | null }> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
       signal: ac.signal,
     });
     return { code: res.status, error: httpOk(res.status) ? null : `HTTP ${res.status}` };
@@ -68,6 +88,15 @@ async function attempt(
       } else {
         ({ code, error } = created);
       }
+    }
+  } else if (integration.provider === "salesforce") {
+    // Web-to-Lead: the org id (oid) is stored in `token`; `endpoint` optionally
+    // overrides the submission URL (e.g. a sandbox host).
+    if (!integration.token) {
+      error = "no Salesforce Org ID (oid) configured";
+    } else {
+      const body = salesforceBody(lead, integration.token, integration.fieldMap);
+      ({ code, error } = await httpForm(salesforceUrl(integration.endpoint), body));
     }
   } else {
     error = `provider "${integration.provider}" not yet supported`;
