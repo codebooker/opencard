@@ -70,6 +70,17 @@ test("banner renders only within the signature when provided", () => {
   assert.doesNotMatch(noBanner, /Summer Sales Event/);
 });
 
+test("campaign banner auto-generates a QR from its link", () => {
+  const m = buildSignatureModel(card, { cardBaseUrl: "https://tapshare.cards", banner: { text: "Summer", href: "https://x/summer" } });
+  assert.ok(m.banner);
+  assert.match(m.banner!.qrUrl!, /\/qr\.png\?data=https%3A%2F%2Fx%2Fsummer/);
+  assert.match(renderSignatureHtml(m), /\/qr\.png\?data=/);
+  // a banner with no link has no QR
+  const m2 = buildSignatureModel(card, { cardBaseUrl: "https://tapshare.cards", banner: { text: "Promo", href: null } });
+  assert.equal(m2.banner!.qrUrl, null);
+  assert.doesNotMatch(renderSignatureHtml(m2), /qr\.png/);
+});
+
 test("activeCampaignBanner respects the start/end window", () => {
   const brand = {
     signatureBannerText: "Summer Sales Event",

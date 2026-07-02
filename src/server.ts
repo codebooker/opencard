@@ -11,6 +11,7 @@ import { signupRouter } from "./routes/signup";
 import { apiRouter } from "./routes/api";
 import { previewRouter } from "./routes/preview";
 import { handleStripeWebhook } from "./stripe";
+import { qrPng } from "./qr";
 import { uploadDir } from "./upload";
 import {
   securityHeaders,
@@ -72,6 +73,25 @@ app.use(
 );
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
+
+// Generic QR image for an arbitrary https URL. Used by email signatures to render
+// a campaign QR (auto-generated from the campaign banner link). Public + cached.
+app.get("/qr.png", rateLimit({ name: "qr", windowMs: 60_000, max: 120 }), async (req, res) => {
+  const data = String(req.query.data || "");
+  if (!/^https?:\/\/\S{1,600}$/i.test(data)) return res.status(400).send("bad data");
+  const c = String(req.query.color || "");
+  const color = /^#?[0-9a-fA-F]{6}$/.test(c) ? (c.startsWith("#") ? c : "#" + c) : "#111827";
+  try {
+    const buf = await qrPng(data, color);
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.send(buf);
+  } catch {
+    res.status(400).send("bad data");
+  }
+});
+
 app.get("/", (_req, res) => res.redirect("/admin"));
 
 app.use("/scim/v2", scimLimiter, scimRouter);

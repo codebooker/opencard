@@ -50,7 +50,8 @@ export type SignatureModel = {
   qrUrl: string;
   ctas: SignatureCta[];
   disclaimer: string | null;
-  banner: { text: string; href: string | null } | null;
+  // qrUrl: auto-generated QR of the banner link, shown while a campaign is active.
+  banner: { text: string; href: string | null; qrUrl: string | null } | null;
   primary: string;
   theme: SignatureTheme;
   locks: string[];
@@ -128,8 +129,16 @@ export function buildSignatureModel(
   const base = (ctx.cardBaseUrl || "").replace(/\/+$/, "");
   const cardUrl = `${base}/c/${card.slug}`;
   const locks = asLockList(loc.signatureLocks);
-  const banner =
+  const rawBanner =
     ctx.banner !== undefined ? ctx.banner : activeCampaignBanner(brand, ctx.now || new Date());
+  // Auto-generate a campaign QR from the banner link (hosted, email-client-safe).
+  const banner = rawBanner
+    ? {
+        text: rawBanner.text,
+        href: rawBanner.href,
+        qrUrl: rawBanner.href ? `${base}/qr.png?data=${encodeURIComponent(rawBanner.href)}` : null,
+      }
+    : null;
   return {
     fullName: [card.firstName, card.lastName].filter(Boolean).join(" "),
     title: card.title ?? null,
@@ -165,11 +174,19 @@ function ctaButtons(m: SignatureModel, p: string): string {
 
 function bannerRow(m: SignatureModel, p: string): string {
   if (!m.banner) return "";
-  const open = m.banner.href ? `<a href="${esc(m.banner.href)}" style="text-decoration:none">` : "";
-  const close = m.banner.href ? `</a>` : "";
-  return `<tr><td colspan="2" style="padding:8px 0 0">${open}<div style="background:${p};color:#fff;font:bold 12px Arial,Helvetica,sans-serif;padding:8px 12px;border-radius:4px">${esc(
-    m.banner.text
-  )}</div>${close}</td></tr>`;
+  const b = m.banner;
+  const open = b.href ? `<a href="${esc(b.href)}" style="text-decoration:none">` : "";
+  const close = b.href ? `</a>` : "";
+  const textCell = `${open}<div style="background:${p};color:#fff;font:bold 12px Arial,Helvetica,sans-serif;padding:8px 12px;border-radius:4px">${esc(
+    b.text
+  )}</div>${close}`;
+  if (!b.qrUrl) return `<tr><td colspan="2" style="padding:8px 0 0">${textCell}</td></tr>`;
+  const qr = `<img src="${esc(b.qrUrl)}" alt="Scan for this offer" width="76" height="76" style="display:block;border:0;width:76px;height:76px" />`;
+  return `<tr><td colspan="2" style="padding:8px 0 0">
+    <table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tbody><tr>
+      <td valign="middle">${textCell}</td>
+      <td valign="middle" style="padding:0 0 0 10px">${qr}</td>
+    </tr></tbody></table></td></tr>`;
 }
 
 function disclaimerRow(m: SignatureModel): string {
@@ -281,7 +298,10 @@ function renderMinimal(m: SignatureModel): string {
         m.banner.href
           ? `<a href="${esc(m.banner.href)}" style="color:${p};font-weight:bold;text-decoration:none">${esc(m.banner.text)}</a>`
           : `<span style="font-weight:bold;color:${p}">${esc(m.banner.text)}</span>`
-      )
+      ) +
+      (m.banner.qrUrl
+        ? `<div style="margin-top:4px"><img src="${esc(m.banner.qrUrl)}" alt="Scan for this offer" width="76" height="76" style="display:block;border:0;width:76px;height:76px" /></div>`
+        : "")
     : "";
   return `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tbody>
 <tr><td style="font:13px Arial,Helvetica,sans-serif;color:#333;line-height:1.5">
