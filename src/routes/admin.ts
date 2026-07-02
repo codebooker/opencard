@@ -264,46 +264,18 @@ adminRouter.get("/", async (req, res) => {
 });
 
 // ---------- security (per-account two-factor) ----------
-function securityShell(inner: string): string {
-  return page({
-    title: "Security",
-    body: `<main class="card" style="max-width:560px"><section class="ident"><h1>Security</h1></section>${inner}<p style="margin-top:18px"><a class="btn secondary" href="/admin">Back to admin</a></p></main>`,
-  });
-}
-
 adminRouter.get("/security", async (req, res) => {
   const p = reqAdmin(req);
-  if (!p.email) {
-    return res.send(
-      securityShell(
-        `<p class="company">You're signed in with the break-glass token, which has no stored account. Two-factor applies to email/password admin accounts.</p>`
-      )
-    );
-  }
+  const note =
+    req.query.mfa === "on"
+      ? `<p style="color:#15803d">Two-factor is now enabled.</p>`
+      : req.query.mfa === "off"
+      ? `<p class="muted">Two-factor disabled.</p>`
+      : "";
+  if (!p.email) return res.send(V.securityView({ email: null, on: false, note }));
   const au = await prisma.adminUser.findUnique({ where: { email: p.email } });
-  const on = !!au?.mfaEnabled;
-  const note = req.query.mfa === "on" ? `<p style="color:#15803d">Two-factor is now enabled.</p>` : req.query.mfa === "off" ? `<p style="color:#6b7280">Two-factor disabled.</p>` : "";
-  const action = on
-    ? `<p class="company">Two-factor authentication is <strong>on</strong> for ${esc(p.email)}.</p>
-       <form method="POST" action="/admin/security/mfa/disable"><button class="btn danger" type="submit">Turn off two-factor</button></form>`
-    : `<p class="company">Two-factor authentication is <strong>off</strong>. Add an authenticator app for an extra layer of protection.</p>
-       <form method="POST" action="/admin/security/mfa/start"><button class="btn" type="submit">Set up two-factor</button></form>`;
-  res.send(securityShell(note + action));
+  res.send(V.securityView({ email: p.email, on: !!au?.mfaEnabled, note }));
 });
-
-function mfaSetupView(uri: string, secret: string, qr: string, error?: string): string {
-  return securityShell(
-    `${error ? `<p style="color:#b91c1c">${esc(error)}</p>` : ""}
-     <p class="company">Scan this with your authenticator app, then enter a code to confirm.</p>
-     <p style="text-align:center"><img src="${esc(qr)}" alt="QR code" width="200" height="200" /></p>
-     <p class="muted" style="text-align:center;word-break:break-all">Or enter the key manually: <code>${esc(secret)}</code></p>
-     <form method="POST" action="/admin/security/mfa/enable">
-       <label>Confirmation code</label>
-       <input name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456" autofocus />
-       <p style="margin-top:12px"><button class="btn" type="submit">Confirm &amp; enable</button></p>
-     </form>`
-  );
-}
 
 adminRouter.post("/security/mfa/start", async (req, res) => {
   const p = reqAdmin(req);
@@ -311,7 +283,7 @@ adminRouter.post("/security/mfa/start", async (req, res) => {
   const secret = generateTotpSecret();
   await prisma.adminUser.update({ where: { email: p.email }, data: { mfaSecret: secret, mfaEnabled: false } });
   const uri = totpUri(secret, p.email);
-  res.send(mfaSetupView(uri, secret, await qrDataUrl(uri, "#111827")));
+  res.send(V.mfaSetupView(await qrDataUrl(uri, "#111827"), secret));
 });
 
 adminRouter.post("/security/mfa/enable", async (req, res) => {
@@ -319,8 +291,7 @@ adminRouter.post("/security/mfa/enable", async (req, res) => {
   if (!p.email) return forbidden(res);
   const au = await prisma.adminUser.findUnique({ where: { email: p.email } });
   if (!au?.mfaSecret || !verifyTotp(au.mfaSecret, String(req.body?.code || ""))) {
-    const uri = totpUri(au?.mfaSecret || "", p.email);
-    return res.status(401).send(mfaSetupView(uri, au?.mfaSecret || "", await qrDataUrl(uri, "#111827"), "Incorrect code, try again."));
+    return res.status(401).send(V.mfaSetupView(await qrDataUrl(totpUri(au?.mfaSecret || "", p.email), "#111827"), au?.mfaSecret || "", "Incorrect code, try again."));
   }
   await prisma.adminUser.update({ where: { email: p.email }, data: { mfaEnabled: true } });
   res.redirect("/admin/security?mfa=on");

@@ -700,6 +700,42 @@ export function turnoverForm(opts: { card: any; rooftop: any; otherCards: any[];
   return shell("Turn over", body);
 }
 
+// Security (two-factor) settings, in the standard admin layout.
+export function securityView(opts: { email: string | null; on: boolean; note?: string }): string {
+  const inner = !opts.email
+    ? `<p class="muted">You're signed in with the break-glass token, which has no stored account. Two-factor applies to email/password admin accounts.</p>`
+    : opts.on
+    ? `<p>Two-factor authentication is <strong>on</strong> for ${esc(opts.email)}.</p>
+       <form method="POST" action="/admin/security/mfa/disable" style="margin-top:8px"><button class="btn danger" type="submit">Turn off two-factor</button></form>`
+    : `<p>Two-factor authentication is <strong>off</strong>. Add an authenticator app for an extra layer of protection.</p>
+       <form method="POST" action="/admin/security/mfa/start" style="margin-top:8px"><button class="btn" type="submit">Set up two-factor</button></form>`;
+  const body = `
+  <h2>Security</h2>
+  ${opts.note || ""}
+  <div class="stat" style="max-width:560px">${inner}</div>
+  <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;
+  return shell("Security", body);
+}
+
+// Two-factor enrollment (QR + confirm), in the standard admin layout.
+export function mfaSetupView(qr: string, secret: string, error?: string): string {
+  const body = `
+  <h2>Set up two-factor</h2>
+  <div class="stat" style="max-width:520px">
+    ${error ? `<p style="color:#b91c1c">${esc(error)}</p>` : ""}
+    <p class="muted">Scan this with your authenticator app (Google Authenticator, 1Password, Authy…), then enter the 6-digit code to confirm.</p>
+    <p style="text-align:center;margin:12px 0"><img src="${esc(qr)}" alt="QR code" width="200" height="200" style="background:#fff;padding:8px;border:1px solid #e5e7eb;border-radius:8px" /></p>
+    <p class="muted" style="text-align:center;word-break:break-all">Or enter the key manually: <code>${esc(secret)}</code></p>
+    <form class="editor" method="POST" action="/admin/security/mfa/enable" style="margin-top:8px">
+      <label>Confirmation code</label>
+      <input name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456" autofocus style="max-width:160px" />
+      <p style="margin-top:12px"><button class="btn" type="submit">Confirm &amp; enable</button>
+      <a class="btn secondary" href="/admin/security">Cancel</a></p>
+    </form>
+  </div>`;
+  return shell("Set up two-factor", body);
+}
+
 // Admin email-signature preview page (block rendered by the route).
 export function signaturePreviewView(fullName: string, cardId: string, block: string): string {
   return shell(
