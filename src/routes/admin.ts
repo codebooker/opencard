@@ -1055,7 +1055,10 @@ adminRouter.post("/cards/:id/turnover", async (req, res) => {
 
 // Card ids the principal may see (null = no restriction, i.e. global admin).
 async function accessibleCardIds(p: RBAC.AdminPrincipal): Promise<string[] | null> {
-  if (p.global) return null;
+  // null == "no card filter" (every org). Only the platform console sees all;
+  // an org-global admin (incl. a platform admin drilled into a client) is scoped
+  // to their org via accessibleLocationIds, which already filters by orgId.
+  if (RBAC.seesAllOrgs(p)) return null;
   const locIds = await RBAC.accessibleLocationIds(p);
   const cards = await prisma.card.findMany({ where: { locationId: { in: locIds } }, select: { id: true } });
   return cards.map((c) => c.id);
@@ -1239,7 +1242,7 @@ adminRouter.get("/leads.csv", async (req, res) => {
 // ---------- integrations: API keys + webhooks + SCIM ----------
 // API keys and webhooks are per-org; only platform owners see across orgs.
 async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: string | null = null, newScimToken: string | null = null) {
-  const orgFilter = p.platform ? {} : { orgId: p.orgId };
+  const orgFilter = RBAC.seesAllOrgs(p) ? {} : { orgId: p.orgId };
   const [keys, endpoints, saml, org] = await Promise.all([
     prisma.apiKey.findMany({ where: orgFilter, orderBy: { createdAt: "desc" } }),
     prisma.webhookEndpoint.findMany({
@@ -1299,7 +1302,7 @@ adminRouter.post("/api-keys/:id/revoke", async (req, res) => {
   if (!RBAC.canManageIntegrations(p)) return forbidden(res);
   // updateMany scoped by org so an admin can't revoke another org's key.
   await prisma.apiKey.updateMany({
-    where: p.platform ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
+    where: RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
     data: { revoked: true },
   });
   res.redirect("/admin/integrations");
@@ -1323,7 +1326,7 @@ adminRouter.post("/webhooks/:id/delete", async (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canManageIntegrations(p)) return forbidden(res);
   await prisma.webhookEndpoint.deleteMany({
-    where: p.platform ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
+    where: RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
   });
   res.redirect("/admin/integrations");
 });
@@ -1333,7 +1336,7 @@ adminRouter.get("/webhooks/:id", async (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canManageIntegrations(p)) return forbidden(res);
   const endpoint = await prisma.webhookEndpoint.findFirst({
-    where: p.platform ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
+    where: RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
   });
   if (!endpoint) return res.status(404).send("Webhook not found.");
   const filter = req.query.filter === "failed" ? "failed" : "all";
@@ -1358,7 +1361,7 @@ adminRouter.post("/deliveries/:id/replay", async (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canManageIntegrations(p)) return forbidden(res);
   const d = await prisma.webhookDelivery.findFirst({
-    where: p.platform ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
+    where: RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
     select: { endpointId: true, orgId: true },
   });
   if (!d) return res.status(404).send("Delivery not found.");
@@ -1427,7 +1430,7 @@ async function manageableAdmin(p: RBAC.AdminPrincipal, id: string) {
   // The client Admins form never touches OpenCard-staff (platform) accounts —
   // those are managed only in the Staff console.
   if (isPlatformRole(admin.role)) return null;
-  if (!p.platform && admin.orgId !== p.orgId) return null;
+  if (!RBAC.seesAllOrgs(p) && admin.orgId !== p.orgId) return null;
   return admin;
 }
 
@@ -1436,7 +1439,7 @@ adminRouter.get("/admins", async (req, res) => {
   if (!RBAC.canManageAdmins(p)) return forbidden(res);
   // Only org-level admins here; platform accounts live in the Staff console.
   const admins = await prisma.adminUser.findMany({
-    where: { ...(p.platform ? {} : { orgId: p.orgId }), role: { notIn: PLATFORM_ROLES_ALL } },
+    where: { ...(RBAC.seesAllOrgs(p) ? {} : { orgId: p.orgId }), role: { notIn: PLATFORM_ROLES_ALL } },
     orderBy: { createdAt: "asc" },
     include: { scopes: true },
   });
@@ -1445,7 +1448,7 @@ adminRouter.get("/admins", async (req, res) => {
 adminRouter.get("/admins/new", async (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canManageAdmins(p)) return forbidden(res);
-  const orgFilter = p.platform ? {} : { orgId: p.orgId };
+  const orgFilter = RBAC.seesAllOrgs(p) ? {} : { orgId: p.orgId };
   const [brands, locations] = await Promise.all([
     prisma.brand.findMany({ where: orgFilter, orderBy: { name: "asc" } }),
     prisma.location.findMany({ where: orgFilter, orderBy: { name: "asc" }, include: { brand: true } }),
@@ -1457,7 +1460,7 @@ adminRouter.get("/admins/:id/edit", async (req, res) => {
   if (!RBAC.canManageAdmins(p)) return forbidden(res);
   const admin = await manageableAdmin(p, req.params.id);
   if (!admin) return res.status(404).send("Not found");
-  const orgFilter = p.platform ? {} : { orgId: p.orgId };
+  const orgFilter = RBAC.seesAllOrgs(p) ? {} : { orgId: p.orgId };
   const [brands, locations] = await Promise.all([
     prisma.brand.findMany({ where: orgFilter, orderBy: { name: "asc" } }),
     prisma.location.findMany({ where: orgFilter, orderBy: { name: "asc" }, include: { brand: true } }),

@@ -83,6 +83,11 @@ export async function getAdmin(req: Request): Promise<AdminPrincipal | null> {
   return p;
 }
 
+// True only for a platform admin on the clients console (not drilled into a
+// client). Use this — not `p.platform` — to decide "show/act across ALL orgs":
+// once acting inside a client, a platform admin must be confined to that org.
+export const seesAllOrgs = (p: AdminPrincipal) => p.platform && !p.actingOrgId;
+
 // ---- coarse permissions ----
 export const canCreateBrand = (p: AdminPrincipal) => p.global;
 export const canDeleteBrand = (p: AdminPrincipal) => p.super;
@@ -91,7 +96,7 @@ export const canManageAdmins = (p: AdminPrincipal) => p.super;
 
 // ---- scope resolution (always confined to the admin's org unless platform) ----
 export async function accessibleBrandIds(p: AdminPrincipal): Promise<string[]> {
-  if (p.platform) return (await prisma.brand.findMany({ select: { id: true } })).map((b) => b.id);
+  if (p.platform && !p.actingOrgId) return (await prisma.brand.findMany({ select: { id: true } })).map((b) => b.id);
   if (p.global)
     return (await prisma.brand.findMany({ where: { orgId: p.orgId }, select: { id: true } })).map((b) => b.id);
   const set = new Set<string>();
@@ -110,7 +115,7 @@ export async function accessibleBrandIds(p: AdminPrincipal): Promise<string[]> {
 }
 
 export async function accessibleLocationIds(p: AdminPrincipal): Promise<string[]> {
-  if (p.platform) return (await prisma.location.findMany({ select: { id: true } })).map((l) => l.id);
+  if (p.platform && !p.actingOrgId) return (await prisma.location.findMany({ select: { id: true } })).map((l) => l.id);
   if (p.global)
     return (await prisma.location.findMany({ where: { orgId: p.orgId }, select: { id: true } })).map((l) => l.id);
   const set = new Set<string>();
@@ -137,7 +142,7 @@ export function canManageBrand(p: AdminPrincipal, brandId: string): boolean {
 }
 
 export async function canAccessBrand(p: AdminPrincipal, brandId: string): Promise<boolean> {
-  if (p.platform) return true;
+  if (p.platform && !p.actingOrgId) return true;
   if (p.global) return (await prisma.brand.count({ where: { id: brandId, orgId: p.orgId } })) > 0;
   if (p.brandIds.includes(brandId)) return true;
   if (p.locationIds.length) {
@@ -147,7 +152,7 @@ export async function canAccessBrand(p: AdminPrincipal, brandId: string): Promis
 }
 
 export async function canAccessLocation(p: AdminPrincipal, locationId: string): Promise<boolean> {
-  if (p.platform) return true;
+  if (p.platform && !p.actingOrgId) return true;
   if (p.global) return (await prisma.location.count({ where: { id: locationId, orgId: p.orgId } })) > 0;
   if (p.locationIds.includes(locationId)) return true;
   if (p.brandIds.length) {
@@ -157,7 +162,7 @@ export async function canAccessLocation(p: AdminPrincipal, locationId: string): 
 }
 
 export async function canAccessCard(p: AdminPrincipal, cardId: string): Promise<boolean> {
-  if (p.platform) return true;
+  if (p.platform && !p.actingOrgId) return true;
   const card = await prisma.card.findUnique({ where: { id: cardId }, select: { locationId: true, orgId: true } });
   if (!card || card.orgId !== p.orgId) return false;
   if (p.global) return true;
