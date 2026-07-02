@@ -77,6 +77,12 @@ model Brand {
   // Brand-default lead form: which fields show + consent/privacy text.
   leadFields    Json?
   leadConsentText String?
+  // Signature campaign banner (Phase 6.2): brand-wide promo that auto-appears in
+  // every rooftop's signatures between the start/end window (either bound optional).
+  signatureBannerText  String?
+  signatureBannerHref  String?
+  signatureBannerStart DateTime?
+  signatureBannerEnd   DateTime?
   locations    Location[]
   templates    Template[]
   createdAt    DateTime   @default(now())
@@ -105,6 +111,11 @@ model Location {
   // Lead routing: a rooftop lead inbox (BDC/sales) + campaign->email overrides.
   leadEmail       String?
   campaignRouting Json? // { "campaign-name": "email@dealer.com" }
+  // Email-signature design + governance (Phase 6.2), per rooftop (each rooftop
+  // has its own logo, so its own signature look / disclaimer / element locks).
+  signatureTheme      String  @default("classic") // classic | compact | modern | minimal
+  signatureDisclaimer String? // per-rooftop legal disclaimer appended to signatures
+  signatureLocks      Json    @default("[]") // element keys employees can't change, e.g. ["banner","disclaimer","ctas"]
   users        User[]
   cards        Card[]
   departments  Department[]

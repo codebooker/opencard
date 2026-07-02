@@ -30,6 +30,7 @@ import { ASSET_TYPES, ASSET_DEST_TYPES, assetTypeLabel } from "../assets";
 import { LEAD_FIELDS, DEFAULT_LEAD_FIELDS } from "../leadform";
 import { campaignRoutingToLines } from "../routing";
 import { LEAD_STATUSES, STATUS_LABELS, nextStatuses } from "../leadstatus";
+import { SIGNATURE_THEMES, SIGNATURE_ELEMENTS, asLockList, SignatureTheme } from "../signature";
 
 // Shared lead-form config block for the template + brand editors.
 function leadFormConfig(opts: {
@@ -303,6 +304,15 @@ export function dashboard(
 
 const LAYOUTS = ["classic", "banner", "minimal", "wave"];
 
+// Format a Date/ISO string for a <input type="datetime-local"> value (UTC-based
+// "YYYY-MM-DDTHH:mm"), or "" when empty.
+function dtLocal(v: Date | string | null | undefined): string {
+  if (!v) return "";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 16);
+}
+
 export function brandForm(
   brand?: any,
   stats?: { locations: number; cards: number },
@@ -348,6 +358,17 @@ export function brandForm(
       inherit: b.leadFields == null,
     })}
 
+    <h3 style="margin-top:16px">Signature campaign banner</h3>
+    <p class="muted">A promo banner that appears in every rooftop's email signatures during the date window. Leave the text blank for no banner; leave a date blank for open-ended.</p>
+    <label>Banner text</label>
+    <input name="signatureBannerText" value="${esc(b.signatureBannerText)}" placeholder="Summer Sales Event — 0% APR for 60 months" />
+    <label style="margin-top:8px">Link URL <span class="muted">(optional)</span></label>
+    <input name="signatureBannerHref" value="${esc(b.signatureBannerHref)}" placeholder="https://acmeford.com/summer" />
+    <div class="grid2">
+      <div><label>Start <span class="muted">(optional)</span></label><input type="datetime-local" name="signatureBannerStart" value="${dtLocal(b.signatureBannerStart)}" /></div>
+      <div><label>End <span class="muted">(optional)</span></label><input type="datetime-local" name="signatureBannerEnd" value="${dtLocal(b.signatureBannerEnd)}" /></div>
+    </div>
+
     <p style="margin-top:16px"><button class="btn" type="submit">Save brand</button>
     <a class="btn secondary" href="/admin">Cancel</a></p>
   </form>
@@ -377,6 +398,83 @@ export function brandForm(
   }
   ${designScripts()}`;
   return shell("Brand", body);
+}
+
+// Schematic thumbnails for each email-signature theme (mirrors card layout thumbs).
+const SIGNATURE_THEME_THUMBS: Record<SignatureTheme, string> = {
+  classic: `<svg viewBox="0 0 60 40"><rect x="4" y="8" width="14" height="14" rx="2" fill="currentColor" opacity="0.25"/><rect x="22" y="8" width="2" height="20" fill="currentColor"/><rect x="27" y="9" width="26" height="3" rx="1.5" fill="#334155"/><rect x="27" y="15" width="20" height="2" rx="1" fill="currentColor"/><rect x="27" y="20" width="24" height="2" rx="1" fill="#cbd5e1"/><rect x="27" y="24" width="16" height="2" rx="1" fill="#cbd5e1"/></svg>`,
+  compact: `<svg viewBox="0 0 60 40"><rect x="6" y="14" width="30" height="3" rx="1.5" fill="#334155"/><rect x="40" y="14" width="14" height="3" rx="1.5" fill="currentColor"/><rect x="6" y="21" width="20" height="2" rx="1" fill="#cbd5e1"/><rect x="30" y="21" width="24" height="2" rx="1" fill="#cbd5e1"/></svg>`,
+  modern: `<svg viewBox="0 0 60 40"><rect x="4" y="6" width="52" height="10" rx="2" fill="currentColor"/><rect x="8" y="9" width="24" height="4" rx="2" fill="#fff"/><rect x="4" y="18" width="52" height="16" rx="2" fill="currentColor" opacity="0.12"/><rect x="8" y="22" width="20" height="2" rx="1" fill="#64748b"/><rect x="8" y="27" width="30" height="4" rx="2" fill="currentColor"/></svg>`,
+  minimal: `<svg viewBox="0 0 60 40"><rect x="8" y="9" width="24" height="3" rx="1.5" fill="#334155"/><rect x="8" y="15" width="18" height="2" rx="1" fill="#94a3b8"/><rect x="8" y="20" width="30" height="2" rx="1" fill="#94a3b8"/><rect x="8" y="25" width="22" height="2" rx="1" fill="currentColor"/></svg>`,
+};
+
+// Per-rooftop email-signature design + governance controls, with a live preview
+// iframe (like the card design editor). Only meaningful for a saved rooftop.
+function signatureDesignSection(l: any): string {
+  if (!l || !l.id) {
+    return `<h3>Email signature design</h3>
+    <p class="muted">Save this rooftop first, then reopen it to choose a signature theme, set a disclaimer, and lock elements.</p>`;
+  }
+  const theme = (SIGNATURE_THEMES.some(([k]) => k === l.signatureTheme) ? l.signatureTheme : "classic") as SignatureTheme;
+  const primary = l.primaryColor || "#1f6f43";
+  const locks = new Set(asLockList(l.signatureLocks));
+  const disclaimer = l.signatureDisclaimer || "";
+  const previewSrc = (th: string) =>
+    `/preview/signature?theme=${encodeURIComponent(th)}&primary=${encodeURIComponent(primary)}` +
+    (l.logoUrl ? `&logo=${encodeURIComponent(l.logoUrl)}` : "") +
+    (disclaimer ? `&disclaimer=${encodeURIComponent(disclaimer)}` : "");
+  const thumbs = SIGNATURE_THEMES.map(
+    ([k, label]) => `<label class="layout-thumb ${k === theme ? "sel" : ""}">
+      <input type="radio" name="signatureTheme" value="${k}" ${k === theme ? "checked" : ""} />
+      ${SIGNATURE_THEME_THUMBS[k]}<span>${esc(label)}</span></label>`
+  ).join("");
+  const lockBoxes = SIGNATURE_ELEMENTS.map(
+    ([k, label]) => `<label class="chk"><input type="checkbox" name="signatureLocks" value="${k}" ${
+      locks.has(k) ? "checked" : ""
+    } /> ${esc(label)}</label>`
+  ).join("");
+  return `
+    <h3>Email signature design</h3>
+    <p class="muted">Choose how this rooftop's employee email signatures look. Applies to every card at this ${esc(
+      "rooftop"
+    )}.</p>
+    <div class="sig-design" data-primary="${esc(primary)}"${l.logoUrl ? ` data-logo="${esc(l.logoUrl)}"` : ""}>
+      <div class="layout-thumbs">${thumbs}</div>
+      <div class="design-preview-wrap" style="margin-top:10px">
+        <iframe id="sig-preview" src="${esc(previewSrc(theme))}" title="Signature preview"
+          style="width:100%;min-height:150px;border:1px solid #e5e7eb;border-radius:8px;background:#fff"></iframe>
+        <p class="muted">Live preview with sample data — updates as you pick a theme.</p>
+      </div>
+    </div>
+    <label style="margin-top:8px">Rooftop disclaimer <span class="muted">(overrides the template disclaimer for this rooftop's signatures)</span></label>
+    <textarea id="sig-disclaimer" name="signatureDisclaimer" rows="2" placeholder="Prices exclude tax, title, and license.">${esc(
+      disclaimer
+    )}</textarea>
+    <label style="margin-top:8px">Locked elements <span class="muted">(employees can't remove these from their signature)</span></label>
+    <div class="self-fields">${lockBoxes}</div>
+    <script>(function(){
+      var wrap=document.querySelector('.sig-design'); if(!wrap) return;
+      var iframe=document.getElementById('sig-preview');
+      var disc=document.getElementById('sig-disclaimer');
+      var primary=wrap.getAttribute('data-primary')||'#1f6f43';
+      var logo=wrap.getAttribute('data-logo')||'';
+      function refresh(){
+        var r=wrap.querySelector('input[name=signatureTheme]:checked');
+        var th=r?r.value:'classic';
+        var u='/preview/signature?theme='+encodeURIComponent(th)+'&primary='+encodeURIComponent(primary);
+        if(logo) u+='&logo='+encodeURIComponent(logo);
+        if(disc && disc.value) u+='&disclaimer='+encodeURIComponent(disc.value.slice(0,400));
+        iframe.src=u;
+      }
+      wrap.querySelectorAll('input[name=signatureTheme]').forEach(function(el){
+        el.addEventListener('change', function(){
+          wrap.querySelectorAll('.layout-thumb').forEach(function(t){t.classList.remove('sel');});
+          el.closest('.layout-thumb').classList.add('sel');
+          refresh();
+        });
+      });
+      if(disc){ var tmr; disc.addEventListener('input', function(){ clearTimeout(tmr); tmr=setTimeout(refresh,400); }); }
+    })();</script>`;
 }
 
 export function locationForm(
@@ -442,6 +540,8 @@ export function locationForm(
     <textarea name="campaignRouting" rows="2" placeholder="summer | summer-team@dealer.com">${esc(
       campaignRoutingToLines(l.campaignRouting)
     )}</textarea>
+
+    ${signatureDesignSection(l)}
 
     <p style="margin-top:16px"><button class="btn" type="submit">Save ${esc(lower(t.locationSingular))}</button>
     <a class="btn secondary" href="/admin">Cancel</a>

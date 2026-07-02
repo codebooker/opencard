@@ -10,7 +10,7 @@ import { uniqueSlug, uniqueAssetSlug } from "../slug";
 import { upload, uploadedUrl } from "../upload";
 import { emitEvent, cardPayload, WEBHOOK_EVENTS, replayDelivery, sendTestEvent } from "../webhooks";
 import { parseOemBrands, parseCtaLines, rooftopCtas, ctasFromJson, mergeCtas } from "../dealership";
-import { buildSignatureModel, renderSignatureHtml, renderSignatureText } from "../signature";
+import { buildSignatureModel, renderSignatureHtml, renderSignatureText, normalizeTheme, asLockList } from "../signature";
 import { signatureBlock } from "../views/signature-view";
 import { parseCampaignRoutingLines } from "../routing";
 import { LEAD_STATUSES, canTransition } from "../leadstatus";
@@ -165,6 +165,31 @@ function asArray(v: any): string[] {
   if (Array.isArray(v)) return v.map(String);
   if (v === undefined || v === null || v === "") return [];
   return [String(v)];
+}
+
+// Per-rooftop signature design + governance from the location edit form.
+function signatureConfig(b: any) {
+  return {
+    signatureTheme: normalizeTheme(b.signatureTheme),
+    signatureDisclaimer: clean(b.signatureDisclaimer) || null,
+    signatureLocks: asLockList(asArray(b.signatureLocks)),
+  };
+}
+
+// Brand-wide signature campaign banner (text + optional link + optional window).
+function campaignBanner(b: any) {
+  const dt = (v: any) => {
+    const s = clean(v);
+    if (!s) return null;
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+  };
+  return {
+    signatureBannerText: clean(b.signatureBannerText) || null,
+    signatureBannerHref: clean(b.signatureBannerHref) || null,
+    signatureBannerStart: dt(b.signatureBannerStart),
+    signatureBannerEnd: dt(b.signatureBannerEnd),
+  };
 }
 
 // ---------- dashboard ----------
@@ -485,6 +510,7 @@ adminRouter.post("/brands", upload.single("logoFile"), async (req, res) => {
       selfEditFields: asArray(b.selfEditFields),
       leadFields: b.leadDefault ? Prisma.DbNull : asArray(b.leadFields),
       leadConsentText: b.leadDefault ? null : clean(b.leadConsentText),
+      ...campaignBanner(b),
     },
   });
   res.redirect("/admin");
@@ -506,6 +532,7 @@ adminRouter.post("/brands/:id", upload.single("logoFile"), async (req, res) => {
       selfEditFields: asArray(b.selfEditFields),
       leadFields: b.leadDefault ? Prisma.DbNull : asArray(b.leadFields),
       leadConsentText: b.leadDefault ? null : clean(b.leadConsentText),
+      ...campaignBanner(b),
     },
   });
   res.redirect("/admin");
@@ -675,6 +702,7 @@ adminRouter.post("/locations/:id", upload.single("logoFile"), async (req, res) =
       layout: clean(b.layout),
       address: parseAddress(b) || undefined,
       ...rooftopProfile(b),
+      ...signatureConfig(b),
     },
   });
   res.redirect("/admin");
