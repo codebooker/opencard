@@ -72,6 +72,7 @@ model CrmIntegration {
   name        String
   enabled     Boolean      @default(true)
   endpoint    String? // webhook URL for the zapier/generic provider
+  token       String? // API auth for token providers (HubSpot private-app token)
   fieldMap    Json         @default("{}") // { targetKey: leadSourceField }
   locationId  String? // optional per-rooftop routing (null = all rooftops)
   maxAttempts Int          @default(5)

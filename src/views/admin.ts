@@ -1321,7 +1321,11 @@ export function integrationsView(data: {
         <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start">
           <div><strong>${esc(c.name)}</strong> <span class="pill">${esc(c.provider)}</span> ${
             c.enabled ? `<span class="pill on">enabled</span>` : `<span class="pill off">off</span>`
-          }<br><span class="muted" style="font-size:12px">→ <code>${esc(String(c.endpoint || "").slice(0, 60))}</code> · ${esc(scope)}</span></div>
+          }<br><span class="muted" style="font-size:12px">→ ${
+            c.provider === "hubspot"
+              ? `HubSpot contact upsert ${c.token ? `<span class="pill on">token set</span>` : `<span class="pill off">no token</span>`}`
+              : `<code>${esc(String(c.endpoint || "").slice(0, 60))}</code>`
+          } · ${esc(scope)}</span></div>
           <div style="white-space:nowrap">
             <form method="POST" action="/admin/crm/${esc(c.id)}/test" style="display:inline"><button class="btn secondary" type="submit">Send test</button></form>
             <form method="POST" action="/admin/crm/${esc(c.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this integration?')"><button class="btn danger" type="submit">Delete</button></form>
@@ -1340,17 +1344,38 @@ export function integrationsView(data: {
   <h3 style="margin-top:28px">CRM &amp; marketing sync</h3>
   <p class="muted">Push every captured lead to your CRM, Zapier, or Make in real time. Point it at a Zapier/Make "Catch Hook" (or any webhook) URL — we POST a normalized lead payload. Field mapping and per-rooftop routing are optional.</p>
   ${crmRows}
-  <form class="editor" method="POST" action="/admin/crm" style="margin-top:12px;max-width:620px">
+  <form class="editor" method="POST" action="/admin/crm" style="margin-top:12px;max-width:620px" id="crm-add">
     <label>Name</label>
-    <input name="name" placeholder="e.g. HubSpot via Zapier" required />
-    <label style="margin-top:10px">Webhook URL <span class="muted">(Zapier/Make catch hook or any endpoint)</span></label>
-    <input name="endpoint" type="url" placeholder="https://hooks.zapier.com/hooks/catch/..." required />
+    <input name="name" placeholder="e.g. HubSpot production" required />
+    <label style="margin-top:10px">Provider</label>
+    <select name="provider" id="crm-provider">
+      <option value="zapier">Zapier / Make / generic webhook</option>
+      <option value="hubspot">HubSpot (contact upsert)</option>
+    </select>
+    <div class="crm-zapier">
+      <label style="margin-top:10px">Webhook URL <span class="muted">(Zapier/Make catch hook or any endpoint)</span></label>
+      <input name="endpoint" type="url" placeholder="https://hooks.zapier.com/hooks/catch/..." />
+    </div>
+    <div class="crm-hubspot" style="display:none">
+      <label style="margin-top:10px">HubSpot private-app token</label>
+      <input name="token" type="password" placeholder="pat-na1-..." autocomplete="off" />
+      <p class="muted" style="font-size:12px;margin:4px 0 0">In HubSpot: Settings → Integrations → Private Apps → create an app with the <code>crm.objects.contacts.write</code> scope, then paste its token here. We upsert a contact by email on every captured lead.</p>
+    </div>
     <label style="margin-top:10px">Applies to</label>
     <select name="locationId">${crmScopeOptions}</select>
-    <label style="margin-top:10px">Field mapping <span class="muted">(optional, one per line: <code>targetKey = leadField</code>; blank = send all fields)</span></label>
+    <label style="margin-top:10px">Field mapping <span class="muted">(optional, one per line: <code>targetKey = leadField</code>; blank = default mapping)</span></label>
     <textarea name="fieldMap" rows="3" placeholder="firstname = name&#10;email = email&#10;phone = phone"></textarea>
-    <p class="muted" style="font-size:12px;margin:6px 0 0">Lead fields: ${crmFieldHelp}</p>
+    <p class="muted" style="font-size:12px;margin:6px 0 0"><span class="crm-hubspot" style="display:none">For HubSpot, target keys are contact property names (firstname, lastname, email, phone, company, or a custom property). </span>Lead fields: ${crmFieldHelp}</p>
     <p style="margin-top:10px"><button class="btn" type="submit">Add integration</button></p>
+    <script>(function(){
+      var f=document.getElementById('crm-add'); if(!f) return;
+      var sel=document.getElementById('crm-provider');
+      function sync(){ var h=sel.value==='hubspot';
+        f.querySelectorAll('.crm-hubspot').forEach(function(e){e.style.display=h?'':'none';});
+        f.querySelectorAll('.crm-zapier').forEach(function(e){e.style.display=h?'none':'';});
+      }
+      sel.addEventListener('change',sync); sync();
+    })();</script>
   </form>`;
 
   const body = `

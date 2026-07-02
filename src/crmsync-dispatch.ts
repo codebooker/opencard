@@ -1,16 +1,23 @@
 import { prisma } from "./db";
 import { buildCrmPayload, nextSyncStatus, httpOk } from "./crmsync";
+import { hubspotProperties, hubspotEmail, HUBSPOT_CONTACTS_URL, hubspotContactByEmailUrl } from "./hubspot";
 
 // DB + HTTP side of CRM sync (the pure mapping/state logic lives in crmsync.ts).
 // Fire-and-forget on capture; never throws into the caller.
 
-async function postJson(url: string, body: unknown, timeoutMs = 8000): Promise<{ code: number | null; error: string | null }> {
+async function httpSend(
+  url: string,
+  method: string,
+  body: unknown,
+  extraHeaders: Record<string, string> = {},
+  timeoutMs = 8000
+): Promise<{ code: number | null; error: string | null }> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
+      method,
+      headers: { "content-type": "application/json", ...extraHeaders },
       body: JSON.stringify(body),
       signal: ac.signal,
     });
@@ -38,12 +45,31 @@ async function attempt(
   ctx: { orgName: string | null; rooftop: string | null; sourceType: "card" | "asset"; sourceName: string | null },
   existing?: any
 ): Promise<void> {
-  const payload = buildCrmPayload(lead, ctx, integration.fieldMap);
   let code: number | null = null;
-  let error: string | null = "no endpoint configured";
-  if (integration.provider === "zapier" && integration.endpoint) {
-    ({ code, error } = await postJson(integration.endpoint, payload));
-  } else if (integration.provider !== "zapier") {
+  let error: string | null = "not configured";
+  if (integration.provider === "zapier") {
+    if (integration.endpoint) {
+      const payload = buildCrmPayload(lead, ctx, integration.fieldMap);
+      ({ code, error } = await httpSend(integration.endpoint, "POST", payload));
+    } else {
+      error = "no webhook URL configured";
+    }
+  } else if (integration.provider === "hubspot") {
+    if (!integration.token) {
+      error = "no HubSpot token configured";
+    } else {
+      const props = hubspotProperties(lead, integration.fieldMap);
+      const headers = { authorization: `Bearer ${integration.token}` };
+      // Create the contact; if it already exists (409), update it by email.
+      const created = await httpSend(HUBSPOT_CONTACTS_URL, "POST", { properties: props }, headers);
+      const email = hubspotEmail(lead, props);
+      if (created.code === 409 && email) {
+        ({ code, error } = await httpSend(hubspotContactByEmailUrl(email), "PATCH", { properties: props }, headers));
+      } else {
+        ({ code, error } = created);
+      }
+    }
+  } else {
     error = `provider "${integration.provider}" not yet supported`;
   }
   const ok = httpOk(code);

@@ -1471,8 +1471,12 @@ adminRouter.post("/crm", async (req, res) => {
   if (!(await ensureFeature(res, p.orgId, "crmSync", "CRM sync"))) return;
   const b = req.body || {};
   const name = clean(b.name);
+  const provider = b.provider === "hubspot" ? "hubspot" : "zapier";
   const endpoint = clean(b.endpoint);
-  if (!name || !endpoint) return res.redirect("/admin/integrations");
+  const token = clean(b.token);
+  if (!name) return res.redirect("/admin/integrations");
+  if (provider === "zapier" && !endpoint) return res.redirect("/admin/integrations");
+  if (provider === "hubspot" && !token) return res.redirect("/admin/integrations");
   // Scope to a rooftop the admin can reach, or all rooftops in the org.
   let locationId: string | null = null;
   if (b.locationId) {
@@ -1482,9 +1486,10 @@ adminRouter.post("/crm", async (req, res) => {
   await prisma.crmIntegration.create({
     data: {
       orgId: p.orgId,
-      provider: "zapier",
+      provider,
       name,
-      endpoint,
+      endpoint: provider === "zapier" ? endpoint : null,
+      token: provider === "hubspot" ? token : null,
       fieldMap: parseFieldMapLines(b.fieldMap) as any,
       locationId,
       enabled: true,
