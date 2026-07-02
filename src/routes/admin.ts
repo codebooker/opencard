@@ -552,7 +552,7 @@ adminRouter.get("/templates", async (req, res) => {
   const templates = await prisma.template.findMany({ where: { brandId }, orderBy: { createdAt: "asc" } });
   res.send(V.templatesGallery(brand.name, brandId, templates));
 });
-adminRouter.get("/templates/new", (req, res) => {
+adminRouter.get("/templates/new", async (req, res) => {
   const brandId = String(req.query.brandId || "");
   if (!await RBAC.canManageBrandScoped(reqAdmin(req),brandId)) return forbidden(res);
   res.send(V.templateForm(brandId));
