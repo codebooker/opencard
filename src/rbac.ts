@@ -17,6 +17,7 @@ export interface AdminPrincipal {
   platform: boolean; // cross-org: sees/manages every org (no org filter)
   global: boolean; // all brands/stores within their scope (platform or org owner/admin)
   super: boolean; // destructive actions, integrations, and admin management
+  staffAdmin: boolean; // may manage OpenCard staff accounts
   brandIds: string[]; // brand_admin scope
   locationIds: string[]; // location_admin scope
   // Set when a platform (OpenCard) admin has drilled into a specific client org
@@ -41,6 +42,7 @@ export async function getAdmin(req: Request): Promise<AdminPrincipal | null> {
       platform: true,
       global: true,
       super: true,
+      staffAdmin: true,
       brandIds: [],
       locationIds: [],
       actingOrgId: null,
@@ -62,6 +64,7 @@ export async function getAdmin(req: Request): Promise<AdminPrincipal | null> {
       platform: f.platform,
       global: f.global,
       super: f.super,
+      staffAdmin: f.staffAdmin,
       brandIds: au.scopes.map((s) => s.brandId).filter((x): x is string => !!x),
       locationIds: au.scopes.map((s) => s.locationId).filter((x): x is string => !!x),
       actingOrgId: null,

@@ -1,7 +1,7 @@
 import { esc, page } from "./html";
 import { Address } from "../types";
 import { AdminPrincipal, ROLE_LABELS } from "../rbac";
-import { showsBilling } from "../roles";
+import { showsBilling, canManageStaffTarget, Role } from "../roles";
 import { PLAN_ORDER } from "../plans";
 import { API_SCOPES, SCOPE_LABELS } from "../api-scopes";
 import { GENERAL_TERMINOLOGY, Terminology, lower } from "../terminology";
@@ -125,13 +125,76 @@ export function clientsConsole(orgs: any[], p: AdminPrincipal): string {
     : `<tr><td colspan="6" class="muted">No client workspaces yet.</td></tr>`;
   const body = `
   <p class="muted">Signed in as ${esc(p.name)} · <strong>OpenCard staff</strong></p>
-  <div class="topbar"><h2>Clients</h2><div><a class="btn secondary" href="/admin/security">Security</a> <a class="btn" href="/admin/clients/new">+ New client</a></div></div>
+  <div class="topbar"><h2>Clients</h2><div>${
+    p.staffAdmin ? `<a class="btn secondary" href="/admin/staff">Staff</a> ` : ""
+  }<a class="btn secondary" href="/admin/security">Security</a> <a class="btn" href="/admin/clients/new">+ New client</a></div></div>
   <p class="muted">Every workspace in the system. “Manage” administers a client's brands, cards, leads and SSO; “Edit” sets its plan and seat allowance.</p>
   <table>
     <tr><th>Client</th><th>Plan</th><th>Mode</th><th>Status</th><th>Usage</th><th></th></tr>
     ${rows}
   </table>`;
   return shell("Clients", body);
+}
+
+// OpenCard staff accounts (platform tiers). Owner/admin only.
+export function staffListView(staff: any[], p: AdminPrincipal): string {
+  const rows = staff.length
+    ? staff
+        .map((s) => {
+          const canEdit = canManageStaffTarget(p.role, s.role);
+          return `<tr>
+      <td><strong>${esc(s.name || s.email)}</strong><br><span class="muted" style="font-size:11px">${esc(s.email)}</span></td>
+      <td>${esc(ROLE_LABELS[s.role as Role] || s.role)}</td>
+      <td>${s.mfaEnabled ? `<span class="pill on">MFA on</span>` : `<span class="pill off">no MFA</span>`}</td>
+      <td>${s.active ? `<span class="pill on">active</span>` : `<span class="pill off">disabled</span>`}</td>
+      <td>${canEdit ? `<a class="btn secondary" href="/admin/staff/${esc(s.id)}/edit">Edit</a>` : `<span class="muted">—</span>`}</td>
+    </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="5" class="muted">No staff accounts yet.</td></tr>`;
+  const body = `
+  <div class="topbar"><h2>OpenCard staff</h2><a class="btn" href="/admin/staff/new">+ New staff</a></div>
+  <p class="muted"><strong>Owner</strong>: full control, incl. other owners. <strong>Admin</strong>: everything except managing owners. <strong>Staff</strong>: manage clients only (no staff/password admin).</p>
+  <table>
+    <tr><th>Person</th><th>Role</th><th>2FA</th><th>Status</th><th></th></tr>
+    ${rows}
+  </table>
+  <p style="margin-top:14px"><a class="btn secondary" href="/admin/clients">← Clients</a></p>`;
+  return shell("Staff", body);
+}
+
+export function staffForm(allowedRoles: string[], staff?: any): string {
+  const s = staff || {};
+  const action = staff ? `/admin/staff/${esc(s.id)}` : "/admin/staff";
+  const roleOpts = allowedRoles
+    .map((r) => `<option value="${esc(r)}" ${s.role === r ? "selected" : ""}>${esc(ROLE_LABELS[r as Role] || r)}</option>`)
+    .join("");
+  const body = `
+  <h2>${staff ? "Edit staff" : "New OpenCard staff"}</h2>
+  <form class="editor" method="POST" action="${action}" style="max-width:520px">
+    <label>Email</label><input name="email" type="email" value="${esc(s.email)}" ${staff ? "readonly" : "required"} />
+    <label style="margin-top:10px">Name</label><input name="name" value="${esc(s.name)}" />
+    <label style="margin-top:10px">Role</label>
+    <select name="role">${roleOpts}</select>
+    <label style="margin-top:10px">Password ${staff ? `<span class="muted">(leave blank to keep)</span>` : ""}</label>
+    <input name="password" type="password" autocomplete="new-password" />
+    ${
+      staff
+        ? `<label class="chk" style="margin-top:10px"><input type="checkbox" name="active" value="1" ${
+            s.active ? "checked" : ""
+          } /> Active</label>
+      <label class="chk"><input type="checkbox" name="resetMfa" value="1" /> Reset two-factor</label>`
+        : ""
+    }
+    <p style="margin-top:14px"><button class="btn" type="submit">${staff ? "Save" : "Create staff"}</button>
+    <a class="btn secondary" href="/admin/staff">Cancel</a></p>
+  </form>
+  ${
+    staff
+      ? `<form method="POST" action="/admin/staff/${esc(s.id)}/delete" style="margin-top:10px" onsubmit="return confirm('Delete this staff account?')"><button class="btn danger" type="submit">Delete staff account</button></form>`
+      : ""
+  }`;
+  return shell(staff ? "Edit staff" : "New staff", body);
 }
 
 // Create/edit a client (OpenCard staff): name, plan tier, billing type, seats.

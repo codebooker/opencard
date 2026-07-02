@@ -14,7 +14,8 @@ import { buildSignatureModel, renderSignatureHtml, renderSignatureText } from ".
 import { signatureBlock } from "../views/signature-view";
 import { parseCampaignRoutingLines } from "../routing";
 import { LEAD_STATUSES, canTransition } from "../leadstatus";
-import { isConsole } from "../roles";
+import { isConsole, isPlatformRole, PLATFORM_ROLES, assignableStaffRoles, canManageStaffTarget } from "../roles";
+const PLATFORM_ROLES_ALL = [...PLATFORM_ROLES, "super_admin"];
 import { redirectTargetUrl, offboardCardUpdate, replacementCardData } from "../turnover";
 import { assetTypeLabel } from "../assets";
 import { generateApiKey } from "../apiauth";
@@ -1423,6 +1424,9 @@ adminRouter.post("/saml-config", async (req, res) => {
 async function manageableAdmin(p: RBAC.AdminPrincipal, id: string) {
   const admin = await prisma.adminUser.findUnique({ where: { id }, include: { scopes: true } });
   if (!admin) return null;
+  // The client Admins form never touches OpenCard-staff (platform) accounts —
+  // those are managed only in the Staff console.
+  if (isPlatformRole(admin.role)) return null;
   if (!p.platform && admin.orgId !== p.orgId) return null;
   return admin;
 }
@@ -1430,8 +1434,9 @@ async function manageableAdmin(p: RBAC.AdminPrincipal, id: string) {
 adminRouter.get("/admins", async (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canManageAdmins(p)) return forbidden(res);
+  // Only org-level admins here; platform accounts live in the Staff console.
   const admins = await prisma.adminUser.findMany({
-    where: p.platform ? {} : { orgId: p.orgId },
+    where: { ...(p.platform ? {} : { orgId: p.orgId }), role: { notIn: PLATFORM_ROLES_ALL } },
     orderBy: { createdAt: "asc" },
     include: { scopes: true },
   });
@@ -1467,10 +1472,10 @@ function scopeRowsFromBody(b: any): { brandId?: string; locationId?: string }[] 
   return rows;
 }
 
-// Non-platform admins can only assign org-level roles, never platform_owner.
-function safeRole(p: RBAC.AdminPrincipal, role: string): string {
-  if (!p.platform && (role === "platform_owner" || role === "super_admin")) return "org_admin";
-  return role;
+// The client Admins form only assigns org-level roles — platform (OpenCard-staff)
+// roles are never grantable here; they're managed in the Staff console.
+function safeRole(_p: RBAC.AdminPrincipal, role: string): string {
+  return isPlatformRole(role) ? "org_admin" : role;
 }
 
 adminRouter.post("/admins", async (req, res) => {
@@ -1521,6 +1526,78 @@ adminRouter.post("/admins/:id/delete", async (req, res) => {
   if (!target) return res.status(404).send("Not found");
   await prisma.adminUser.delete({ where: { id: target.id } });
   res.redirect("/admin/admins");
+});
+
+// ---------- OpenCard staff (platform accounts; owner/admin only) ----------
+// A staff target this actor may manage (must be a platform account + within tier).
+async function manageableStaff(p: RBAC.AdminPrincipal, id: string) {
+  const s = await prisma.adminUser.findUnique({ where: { id } });
+  if (!s || !isPlatformRole(s.role) || !canManageStaffTarget(p.role, s.role)) return null;
+  return s;
+}
+
+adminRouter.get("/staff", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.staffAdmin) return forbidden(res);
+  const staff = await prisma.adminUser.findMany({
+    where: { role: { in: PLATFORM_ROLES_ALL } },
+    orderBy: { createdAt: "asc" },
+  });
+  res.send(V.staffListView(staff, p));
+});
+
+adminRouter.get("/staff/new", (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.staffAdmin) return forbidden(res);
+  res.send(V.staffForm(assignableStaffRoles(p.role)));
+});
+
+adminRouter.post("/staff", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.staffAdmin) return forbidden(res);
+  const b = req.body;
+  const email = String(b.email || "").toLowerCase().trim();
+  const allowed = assignableStaffRoles(p.role);
+  if (!email || !allowed.includes(b.role)) return res.redirect("/admin/staff/new");
+  const data: any = { email, name: clean(b.name), role: b.role, orgId: null };
+  if (b.password) data.passwordHash = hashPassword(String(b.password));
+  await prisma.adminUser.create({ data });
+  res.redirect("/admin/staff");
+});
+
+adminRouter.get("/staff/:id/edit", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.staffAdmin) return forbidden(res);
+  const s = await manageableStaff(p, req.params.id);
+  if (!s) return forbidden(res);
+  res.send(V.staffForm(assignableStaffRoles(p.role), s));
+});
+
+adminRouter.post("/staff/:id", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.staffAdmin) return forbidden(res);
+  const s = await manageableStaff(p, req.params.id);
+  if (!s) return forbidden(res);
+  const b = req.body;
+  const data: any = { name: clean(b.name), active: !!b.active };
+  if (assignableStaffRoles(p.role).includes(b.role)) data.role = b.role; // only grant assignable tiers
+  if (b.password) data.passwordHash = hashPassword(String(b.password));
+  if (b.resetMfa) {
+    data.mfaEnabled = false;
+    data.mfaSecret = null;
+  }
+  await prisma.adminUser.update({ where: { id: s.id }, data });
+  res.redirect("/admin/staff");
+});
+
+adminRouter.post("/staff/:id/delete", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.staffAdmin) return forbidden(res);
+  const s = await manageableStaff(p, req.params.id);
+  if (!s) return forbidden(res);
+  if (p.email && s.email === p.email) return res.status(400).send("You can't delete your own account.");
+  await prisma.adminUser.delete({ where: { id: s.id } });
+  res.redirect("/admin/staff");
 });
 
 // Friendly handling for upload errors (wrong type / too large) — instead of a
