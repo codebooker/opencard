@@ -17,6 +17,27 @@ import { LEAD_STATUSES, canTransition } from "../leadstatus";
 import { isConsole, isPlatformRole, PLATFORM_ROLES, assignableStaffRoles, canManageStaffTarget } from "../roles";
 import { loginBrandingForHost, requestHost } from "../tenant-resolver";
 import { normalizeHost } from "../branding";
+import { promises as dns } from "dns";
+import { evaluateDomain, CNAME_TARGET } from "../domainstatus";
+
+const SERVER_IPS = (process.env.SERVER_IPS || "").split(",").map((s) => s.trim()).filter(Boolean);
+
+// Best-effort DNS lookup for the domains hub (CNAME + A records).
+async function resolveDomainDns(host: string): Promise<{ cnames: string[]; addrs: string[] }> {
+  const cnames: string[] = [];
+  const addrs: string[] = [];
+  try {
+    (await dns.resolveCname(host)).forEach((c) => cnames.push(c));
+  } catch {
+    /* no CNAME */
+  }
+  try {
+    (await dns.resolve4(host)).forEach((a) => addrs.push(a));
+  } catch {
+    /* no A record */
+  }
+  return { cnames, addrs };
+}
 const PLATFORM_ROLES_ALL = [...PLATFORM_ROLES, "super_admin"];
 import { redirectTargetUrl, offboardCardUpdate, replacementCardData } from "../turnover";
 import { assetTypeLabel } from "../assets";
@@ -743,6 +764,90 @@ adminRouter.post("/locations/:id", upload.single("logoFile"), async (req, res) =
   await setTenantDomain(loc.orgId, { locationId: loc.id }, "admin", b.adminDomain);
   await setTenantDomain(loc.orgId, { locationId: loc.id }, "user", b.userDomain);
   res.redirect("/admin");
+});
+
+// ---------- custom domains hub (self-serve branded-login onboarding) ----------
+// Resolve the brand a domain belongs to (for permission checks).
+function domainBrandId(d: any): string | null {
+  return d.brandId || d.location?.brandId || null;
+}
+
+adminRouter.get("/domains", async (req, res) => {
+  const p = reqAdmin(req);
+  const orgWhere = RBAC.seesAllOrgs(p) ? {} : { orgId: p.orgId };
+  const all = await prisma.tenantDomain.findMany({
+    where: orgWhere,
+    include: { brand: true, location: { include: { brand: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+  // Non-global admins only see domains for brands/rooftops they can access.
+  const accessible = new Set(await RBAC.accessibleBrandIds(p));
+  const domains = p.global ? all : all.filter((d) => accessible.has(domainBrandId(d) || ""));
+  const brandIds = await RBAC.accessibleBrandIds(p);
+  const brands = await prisma.brand.findMany({
+    where: { id: { in: brandIds } },
+    include: { locations: { orderBy: { name: "asc" } } },
+    orderBy: { name: "asc" },
+  });
+  const flash =
+    typeof req.query.checked === "string"
+      ? `Checked ${req.query.checked}: ${req.query.msg || ""}`
+      : req.query.added
+      ? "Domain added. Create the DNS record below, then click Verify."
+      : null;
+  res.send(V.domainsView({ domains, brands, target: CNAME_TARGET, flash }));
+});
+
+adminRouter.post("/domains", async (req, res) => {
+  const p = reqAdmin(req);
+  const host = normalizeHost(req.body?.host);
+  const kind = req.body?.kind === "admin" ? "admin" : "user";
+  const [scopeType, scopeId] = String(req.body?.scope || "").split(":");
+  if (!host || !scopeId) return res.redirect("/admin/domains");
+  let orgId: string, brandForPerm: string, scope: { brandId?: string; locationId?: string };
+  if (scopeType === "location") {
+    const loc = await prisma.location.findUnique({ where: { id: scopeId } });
+    if (!loc) return res.status(404).send("Not found");
+    orgId = loc.orgId;
+    brandForPerm = loc.brandId;
+    scope = { locationId: loc.id };
+  } else {
+    const brand = await prisma.brand.findUnique({ where: { id: scopeId } });
+    if (!brand) return res.status(404).send("Not found");
+    orgId = brand.orgId;
+    brandForPerm = brand.id;
+    scope = { brandId: brand.id };
+  }
+  if (!(await RBAC.canManageBrandScoped(p, brandForPerm))) return forbidden(res);
+  await setTenantDomain(orgId, scope, kind as "admin" | "user", host);
+  res.redirect("/admin/domains?added=1");
+});
+
+adminRouter.post("/domains/:id/verify", async (req, res) => {
+  const p = reqAdmin(req);
+  const d = await prisma.tenantDomain.findUnique({
+    where: { id: req.params.id },
+    include: { location: true },
+  });
+  if (!d) return res.status(404).send("Not found");
+  const brandId = domainBrandId(d);
+  if (!brandId || !(await RBAC.canManageBrandScoped(p, brandId))) return forbidden(res);
+  const verdict = evaluateDomain(await resolveDomainDns(d.host), { cnameTarget: CNAME_TARGET, ips: SERVER_IPS });
+  await prisma.tenantDomain.update({
+    where: { id: d.id },
+    data: { verifyState: verdict.ok ? "verified" : "pending", verifiedAt: new Date() },
+  });
+  res.redirect(`/admin/domains?checked=${encodeURIComponent(d.host)}&msg=${encodeURIComponent(verdict.reason)}`);
+});
+
+adminRouter.post("/domains/:id/delete", async (req, res) => {
+  const p = reqAdmin(req);
+  const d = await prisma.tenantDomain.findUnique({ where: { id: req.params.id }, include: { location: true } });
+  if (!d) return res.redirect("/admin/domains");
+  const brandId = domainBrandId(d);
+  if (!brandId || !(await RBAC.canManageBrandScoped(p, brandId))) return forbidden(res);
+  await prisma.tenantDomain.delete({ where: { id: d.id } });
+  res.redirect("/admin/domains");
 });
 
 // ---------- departments (per rooftop) ----------

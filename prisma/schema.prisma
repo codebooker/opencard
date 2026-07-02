@@ -75,6 +75,10 @@ model TenantDomain {
   location   Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
   locationId String?
   approved   Boolean   @default(true) // allowlist for Caddy on-demand TLS
+  // Onboarding status shown in the self-serve domains hub: "pending" (DNS not
+  // yet pointing at us) or "verified" (DNS resolves to us; cert auto-issues).
+  verifyState String?  // null | pending | verified
+  verifiedAt  DateTime?
   createdAt  DateTime  @default(now())
 
   @@index([orgId])

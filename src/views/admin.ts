@@ -239,6 +239,7 @@ export function dashboard(
   const topActions = `
     ${showsBilling(p) ? `<a class="btn secondary" href="/admin/billing">Plan</a>` : ""}
     <a class="btn secondary" href="/admin/security">Security</a>
+    <a class="btn secondary" href="/admin/domains">Domains</a>
     ${p.super ? `<a class="btn secondary" href="/admin/admins">Admins</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/integrations">Integrations</a>` : ""}
     ${p.global ? `<a class="btn" href="/admin/brands/new">+ New ${lower(t.brandSingular)}</a>` : ""}`;
@@ -408,6 +409,64 @@ export function brandForm(
   }
   ${designScripts()}`;
   return shell("Brand", body);
+}
+
+// Self-serve custom-domain onboarding hub: list domains with copy-paste DNS
+// instructions + one-click Verify, plus an add form. Available to brand admins.
+export function domainsView(data: { domains: any[]; brands: any[]; target: string; flash: string | null }): string {
+  const { domains, brands, target } = data;
+  const badge = (d: any) =>
+    d.verifyState === "verified"
+      ? `<span class="pill on">✓ Verified</span>`
+      : d.verifyState === "pending"
+      ? `<span class="pill off">Awaiting DNS</span>`
+      : `<span class="pill">Not checked yet</span>`;
+  const rows = domains.length
+    ? domains
+        .map((d) => {
+          const purpose = d.kind === "admin" ? "Admin sign-in" : "Employee sign-in";
+          const scope = d.location ? esc(d.location.name) : esc(d.brand?.name || "");
+          return `<div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+        <div><strong>${esc(d.host)}</strong> ${badge(d)}<br><span class="muted">${purpose} · ${scope}</span></div>
+        <div>
+          <form method="POST" action="/admin/domains/${esc(d.id)}/verify" style="display:inline"><button class="btn secondary" type="submit">Verify</button></form>
+          <form method="POST" action="/admin/domains/${esc(d.id)}/delete" style="display:inline" onsubmit="return confirm('Remove ${esc(d.host)}?')"><button class="btn danger" type="submit">Remove</button></form>
+        </div>
+      </div>
+      <p class="muted" style="margin:10px 0 4px">At your domain provider, add this DNS record:</p>
+      <table class="usage" style="max-width:none"><tbody>
+        <tr><td style="width:120px">Type</td><td><code>CNAME</code></td></tr>
+        <tr><td>Name / Host</td><td><code>${esc(d.host)}</code></td></tr>
+        <tr><td>Value / Target</td><td><code>${esc(target)}</code></td></tr>
+      </tbody></table></div>`;
+        })
+        .join("")
+    : `<p class="muted">No custom domains yet — add one below.</p>`;
+  const scopeOptions = brands
+    .map((b) => {
+      const locs = (b.locations || [])
+        .map((l: any) => `<option value="location:${esc(l.id)}">${esc(b.name)} — ${esc(l.name)}</option>`)
+        .join("");
+      return `<option value="brand:${esc(b.id)}">${esc(b.name)} (whole brand)</option>${locs}`;
+    })
+    .join("");
+  const body = `
+  <div class="topbar"><h2>Custom domains</h2><a class="btn secondary" href="/admin">Back</a></div>
+  <p class="muted">Give your sign-in pages your own web address (e.g. <code>cards.yourco.com</code>). Add the domain, create the one DNS record shown, then click <strong>Verify</strong> — the secure certificate is set up automatically once DNS points to us.</p>
+  ${data.flash ? `<p class="auth-banner" style="max-width:none">${esc(data.flash)}</p>` : ""}
+  ${rows}
+  <h3 style="margin-top:18px">Add a domain</h3>
+  <form class="editor" method="POST" action="/admin/domains" style="max-width:560px">
+    <label>Hostname</label>
+    <input name="host" placeholder="cards.yourco.com" required />
+    <label style="margin-top:8px">Which sign-in?</label>
+    <select name="kind"><option value="user">Employee sign-in</option><option value="admin">Admin sign-in</option></select>
+    <label style="margin-top:8px">Applies to</label>
+    <select name="scope">${scopeOptions || `<option value="">(no brands available)</option>`}</select>
+    <p style="margin-top:12px"><button class="btn" type="submit">Add domain</button></p>
+  </form>`;
+  return shell("Custom domains", body);
 }
 
 // Schematic thumbnails for each email-signature theme (mirrors card layout thumbs).
