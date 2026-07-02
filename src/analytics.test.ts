@@ -1,6 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveRange, conversionPct, sortLeaderboard } from "./analytics";
+import { resolveRange, conversionPct, sortLeaderboard, buildFunnel, topGroups } from "./analytics";
+
+test("buildFunnel returns canonical status order with zeros filled", () => {
+  const f = buildFunnel({ new: 5, synced: 2 });
+  assert.deepEqual(f.map((s) => s.status), ["new", "sent", "synced", "failed", "archived"]);
+  assert.equal(f[0].count, 5);
+  assert.equal(f.find((s) => s.status === "sent")!.count, 0);
+  assert.equal(f.find((s) => s.status === "synced")!.count, 2);
+  assert.ok(f[0].label.length > 0);
+});
+
+test("topGroups sorts desc, drops blanks, limits N", () => {
+  const top = topGroups({ qr: 10, "": 99, email: 3, print: 10 }, 2);
+  assert.deepEqual(top, [
+    { key: "print", count: 10 }, // tie broken by key asc (print < qr)
+    { key: "qr", count: 10 },
+  ]);
+});
 
 const now = new Date("2026-07-02T00:00:00.000Z");
 

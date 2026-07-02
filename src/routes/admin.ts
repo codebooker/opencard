@@ -20,7 +20,7 @@ import { normalizeHost } from "../branding";
 import { parseFieldMapLines } from "../crmsync";
 import { sendTestSync, retrySync } from "../crmsync-dispatch";
 import { isGaId, isGtmId, normalizeCampaignCode } from "../marketing";
-import { resolveRange, conversionPct, sortLeaderboard, ANALYTICS_RANGES } from "../analytics";
+import { resolveRange, conversionPct, sortLeaderboard, buildFunnel, topGroups, ANALYTICS_RANGES } from "../analytics";
 import { promises as dns } from "dns";
 import { evaluateDomain, CNAME_TARGET } from "../domainstatus";
 
@@ -1276,31 +1276,66 @@ adminRouter.get("/analytics", async (req, res) => {
   const leadWhere = { ...leadScope, ...(range.since ? { createdAt: { gte: range.since } } : {}) };
   const leadCount = await prisma.lead.count({ where: leadWhere });
 
-  // Rooftop leaderboard: views + leads per location, resolving card/asset -> location.
+  // Rooftop leaderboard + breakdowns from a single lead fetch + entity maps.
   const locIds = await RBAC.accessibleLocationIds(p);
-  const [locations, cards, assets, viewsByCard, leadsInRange, scanAgg] = await Promise.all([
+  const [locations, cards, assets, departments, viewsByCard, leadsInRange, scanAgg] = await Promise.all([
     prisma.location.findMany({ where: { id: { in: locIds } }, select: { id: true, name: true } }),
-    prisma.card.findMany({ where: { locationId: { in: locIds } }, select: { id: true, locationId: true } }),
-    prisma.asset.findMany({ where: { locationId: { in: locIds } }, select: { id: true, locationId: true } }),
+    prisma.card.findMany({
+      where: { locationId: { in: locIds } },
+      select: { id: true, locationId: true, departmentId: true, firstName: true, lastName: true },
+    }),
+    prisma.asset.findMany({ where: { locationId: { in: locIds } }, select: { id: true, locationId: true, type: true } }),
+    prisma.department.findMany({ where: { orgId: p.orgId }, select: { id: true, name: true } }),
     prisma.analyticsEvent.groupBy({ by: ["cardId"], where: { type: "view", ...whereEvents }, _count: { _all: true } }),
-    prisma.lead.findMany({ where: leadWhere, select: { cardId: true, assetId: true } }),
+    prisma.lead.findMany({
+      where: leadWhere,
+      select: { cardId: true, assetId: true, status: true, campaign: true, utmCampaign: true, utmSource: true },
+    }),
     prisma.asset.aggregate({ where: { locationId: { in: locIds } }, _sum: { scanCount: true } }),
   ]);
   const cardLoc = new Map(cards.map((c) => [c.id, c.locationId]));
+  const cardName = new Map(cards.map((c) => [c.id, `${c.firstName} ${c.lastName}`.trim()]));
+  const cardDept = new Map(cards.map((c) => [c.id, c.departmentId]));
+  const deptName = new Map(departments.map((d) => [d.id, d.name]));
   const assetLoc = new Map(assets.map((a) => [a.id, a.locationId]));
+  const assetType = new Map(assets.map((a) => [a.id, a.type]));
+
   const per = new Map<string, { views: number; leads: number }>();
   locations.forEach((l) => per.set(l.id, { views: 0, leads: 0 }));
   viewsByCard.forEach((v) => {
     const loc = cardLoc.get(v.cardId);
     if (loc && per.has(loc)) per.get(loc)!.views += v._count._all;
   });
+  // Breakdown counters.
+  const statusCounts: Record<string, number> = {};
+  const campaignCounts: Record<string, number> = {};
+  const sourceCounts: Record<string, number> = {};
+  const employeeCounts: Record<string, number> = {};
+  const deptCounts: Record<string, number> = {};
+  const bump = (m: Record<string, number>, k: string) => (m[k] = (m[k] || 0) + 1);
   leadsInRange.forEach((l) => {
     const loc = (l.cardId && cardLoc.get(l.cardId)) || (l.assetId && assetLoc.get(l.assetId));
     if (loc && per.has(loc)) per.get(loc)!.leads++;
+    bump(statusCounts, l.status || "new");
+    const camp = l.campaign || l.utmCampaign;
+    if (camp) bump(campaignCounts, camp);
+    // Source channel: employee card vs the asset's type.
+    if (l.cardId) bump(sourceCounts, "Employee card");
+    else if (l.assetId) bump(sourceCounts, assetTypeLabel(assetType.get(l.assetId) || "campaign"));
+    // Employee (card owner).
+    if (l.cardId && cardName.get(l.cardId)) bump(employeeCounts, cardName.get(l.cardId)!);
+    // Department.
+    const dId = l.cardId ? cardDept.get(l.cardId) : null;
+    bump(deptCounts, (dId && deptName.get(dId)) || "No department");
   });
   const leaderboard = sortLeaderboard(
     locations.map((l) => ({ id: l.id, name: l.name, views: per.get(l.id)!.views, leads: per.get(l.id)!.leads }))
   );
+  const funnel = buildFunnel(statusCounts);
+  const sources = topGroups(sourceCounts, 20);
+  const campaigns = topGroups(campaignCounts, 10);
+  const employees = topGroups(employeeCounts, 10);
+  const deptPerf = topGroups(deptCounts, 20);
 
   // Top cards by views (in range).
   const topViews = await prisma.analyticsEvent.groupBy({
@@ -1325,6 +1360,11 @@ adminRouter.get("/analytics", async (req, res) => {
       assetScans: scanAgg._sum.scanCount || 0,
       leaderboard,
       topCards,
+      funnel,
+      sources,
+      campaigns,
+      employees,
+      deptPerf,
       range: { key: range.key, label: range.label },
       ranges: ANALYTICS_RANGES,
     })

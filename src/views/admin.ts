@@ -1653,10 +1653,29 @@ export function analyticsView(stats: {
   conversion?: number;
   assetScans?: number;
   leaderboard?: { id: string; name: string; views: number; leads: number; conv: number }[];
+  funnel?: { status: string; label: string; count: number }[];
+  sources?: { key: string; count: number }[];
+  campaigns?: { key: string; count: number }[];
+  employees?: { key: string; count: number }[];
+  deptPerf?: { key: string; count: number }[];
   range?: { key: string; label: string };
   ranges?: [string, string][];
 }): string {
   const t = stats.totals;
+  const kvTable = (title: string, rows: { key: string; count: number }[] | undefined, col: string) =>
+    rows
+      ? `<h3 style="margin-top:24px">${esc(title)}</h3>
+  <table><tr><th>${esc(col)}</th><th>Leads</th></tr>${
+        rows.length
+          ? rows.map((r) => `<tr><td>${esc(r.key)}</td><td>${r.count}</td></tr>`).join("")
+          : `<tr><td colspan="2" class="muted">None in this range.</td></tr>`
+      }</table>`
+      : "";
+  const funnelSection = stats.funnel
+    ? `<h3 style="margin-top:24px">Lead funnel</h3>
+  <table><tr>${stats.funnel.map((s) => `<th>${esc(s.label)}</th>`).join("")}</tr>
+  <tr>${stats.funnel.map((s) => `<td>${s.count}</td>`).join("")}</tr></table>`
+    : "";
   const leadCount = stats.leadCount ?? (t.connect || 0);
   const conversion = stats.conversion ?? 0;
   const assetScans = stats.assetScans ?? 0;
@@ -1697,6 +1716,11 @@ export function analyticsView(stats: {
   </div>
 
   ${leaderboardSection}
+  ${funnelSection}
+  ${kvTable("Source performance", stats.sources, "Source")}
+  ${kvTable("Campaign performance", stats.campaigns, "Campaign")}
+  ${kvTable("Top employees by leads", stats.employees, "Employee")}
+  ${kvTable("Department performance", stats.deptPerf, "Department")}
 
   <h3 style="margin-top:24px">Top cards by views</h3>
   <table>
