@@ -59,3 +59,28 @@ again. Add a Stripe webhook endpoint pointing at
 - `SEED_DEMO=0` in production, so no demo data is created — just a clean bootstrap
   org so the platform can start. Real customers self-sign-up.
 - Data lives in Docker volumes (`db_data`, `uploads_data`). Back these up.
+
+## Branded login on client custom domains
+
+Clients can have a login page carrying their own logo + colors on their own
+hostname (e.g. `cards.mullinaxford.com`), brand-wide or per rooftop.
+
+**How it works**
+
+1. In the admin, set the **Branded login domain** on a brand (brand-wide) or a
+   rooftop (override). This registers the host in `TenantDomain` (approved).
+2. The client adds a **CNAME**: `cards.mullinaxford.com → tenants.opencard.id`
+   (an A/AAAA record `tenants.opencard.id` must point at the production VM).
+3. On first HTTPS request, Caddy obtains a Let's Encrypt cert on demand, but only
+   after the app's `/tls/authorize?domain=` ask endpoint approves the host.
+4. The app reads the `Host` header, matches the `TenantDomain`, and renders the
+   branded `/admin/login` and `/me/login` (rooftop overrides brand).
+
+**Production requirements (not the current Cloudflare-fronted test box)**
+
+- Ports **80 and 443 must be reachable from the public internet** for the ACME
+  HTTP/TLS-ALPN challenge. The test box's firewall allows Cloudflare IPs only, so
+  on-demand TLS stays inert there; open 80/443 on the production VM.
+- Client domains must resolve **directly to the VM** (not proxied through the
+  client's own CDN), or ACME can't validate. If a client insists on fronting with
+  their own CDN, they terminate TLS and forward the `Host` header to us instead.

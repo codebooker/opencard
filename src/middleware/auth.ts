@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { getAdmin, AdminPrincipal } from "../rbac";
 import { page, esc, OC_FAVICON } from "../views/html";
+import { LoginBranding, brandLoginStyle } from "../branding";
 
 // Resolve the current admin principal and attach it as req.admin, or redirect to login.
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
@@ -26,15 +27,18 @@ export function forbidden(res: Response, msg = "You don't have permission to do 
   return res.status(403).send(page({ title: "Forbidden", body: `<main class="card"><section class="ident"><h1>403</h1><p class="company">${esc(msg)}</p></section><a class="cta" href="/admin">Back to admin</a></main>` }));
 }
 
-export function loginPage(error?: string, info?: string): string {
+export function loginPage(error?: string, info?: string, branding?: LoginBranding | null): string {
+  const logo = branding?.logoUrl || "/opencard-logo.svg";
+  const alt = branding?.name || "OpenCard";
+  const sub = branding ? `Sign in to ${branding.name}` : "Sign in to your admin workspace";
   return page({
-    title: "Admin sign in",
-    head: OC_FAVICON,
+    title: branding ? `${branding.name} — sign in` : "Admin sign in",
+    head: OC_FAVICON + (branding ? brandLoginStyle(branding) : ""),
     body: `<div class="auth">
       <div class="auth-card">
         <div class="auth-brand">
-          <img src="/opencard-logo.svg" alt="OpenCard" style="height:52px;width:auto;margin:0 auto 6px;display:block" />
-          <p class="auth-sub">Sign in to your admin workspace</p>
+          <img src="${esc(logo)}" alt="${esc(alt)}" style="height:52px;max-height:52px;width:auto;max-width:230px;margin:0 auto 6px;display:block" />
+          <p class="auth-sub">${esc(sub)}</p>
         </div>
         ${info ? `<p class="auth-banner">${esc(info)}</p>` : ""}
         ${error ? `<p class="auth-error">${esc(error)}</p>` : ""}

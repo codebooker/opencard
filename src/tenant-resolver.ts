@@ -2,8 +2,33 @@ import { Request } from "express";
 import { prisma } from "./db";
 import { defaultOrgId } from "./tenant";
 import { parseHost, requestHost } from "./host";
+import { LoginBranding, loginBranding, normalizeHost } from "./branding";
 
 export { requestHost };
+
+// Resolve client login-branding for a hostname via a registered TenantDomain.
+// A domain maps to a brand (brand-wide) or a rooftop (location override). Returns
+// null when the host isn't registered (caller then uses default OpenCard branding).
+export async function loginBrandingForHost(host: string): Promise<LoginBranding | null> {
+  const h = normalizeHost(host);
+  if (!h) return null;
+  const d = await prisma.tenantDomain.findUnique({
+    where: { host: h },
+    include: { brand: true, location: { include: { brand: true } } },
+  });
+  if (!d) return null;
+  if (d.location) return loginBranding(d.location.brand, d.location);
+  return loginBranding(d.brand, null);
+}
+
+// Is `host` approved for on-demand TLS issuance? (Caddy asks before getting a
+// cert, so we only auto-issue for hostnames a client admin registered.)
+export async function isDomainApproved(host: string): Promise<boolean> {
+  const h = normalizeHost(host);
+  if (!h) return false;
+  const d = await prisma.tenantDomain.findUnique({ where: { host: h }, select: { approved: true } });
+  return !!d?.approved;
+}
 
 // Tenant (Org) resolution for a request.
 //

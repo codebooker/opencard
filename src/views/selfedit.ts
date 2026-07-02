@@ -1,4 +1,5 @@
-import { esc, page } from "./html";
+import { esc, page, OC_FAVICON } from "./html";
+import { LoginBranding, brandLoginStyle } from "../branding";
 import {
   photoField,
   labeledRowsField,
@@ -10,6 +11,25 @@ import {
   WEB_LABELS,
 } from "./widgets";
 
+// A branded employee sign-in card (mirrors the admin `.auth` layout). Shows the
+// client's logo + palette when the request came in on a registered client domain.
+function authLogin(title: string, inner: string, branding?: LoginBranding | null): string {
+  const logo = branding?.logoUrl || "/opencard-logo.svg";
+  const alt = branding?.name || "OpenCard";
+  const sub = branding ? `Sign in to ${branding.name}` : "Sign in to your workspace";
+  return page({
+    title: branding ? `${branding.name} — sign in` : title,
+    head: OC_FAVICON + (branding ? brandLoginStyle(branding) : ""),
+    body: `<div class="auth"><div class="auth-card">
+      <div class="auth-brand">
+        <img src="${esc(logo)}" alt="${esc(alt)}" style="height:52px;max-height:52px;width:auto;max-width:230px;margin:0 auto 6px;display:block" />
+        <p class="auth-sub">${esc(sub)}</p>
+      </div>
+      ${inner}
+    </div></div>`,
+  });
+}
+
 function shell(title: string, body: string): string {
   return page({
     title,
@@ -20,29 +40,28 @@ function shell(title: string, body: string): string {
   });
 }
 
-export function notConfiguredPage(message: string): string {
-  return shell("Self-service", `<p class="muted">${esc(message)}</p>`);
+export function notConfiguredPage(message: string, branding?: LoginBranding | null): string {
+  return authLogin("Self-service", `<p class="muted" style="text-align:center">${esc(message)}</p>`, branding);
 }
 
-export function devLoginPage(): string {
-  return shell(
+export function devLoginPage(branding?: LoginBranding | null): string {
+  return authLogin(
     "Sign in",
-    `<form class="editor" method="POST" action="/me/devlogin" style="max-width:420px">
+    `<form class="auth-form" method="POST" action="/me/devlogin">
       <p class="muted">Developer sign-in (no SSO configured). Enter the email that matches your card's owner email.</p>
       <label>Email</label><input name="email" type="email" placeholder="you@yourco.com" required autofocus />
-      <p style="margin-top:14px"><button class="btn" type="submit">Sign in</button></p>
-    </form>`
+      <button class="btn auth-submit" type="submit">Sign in</button>
+    </form>`,
+    branding
   );
 }
 
-export function samlLoginPage(): string {
-  return shell(
+export function samlLoginPage(branding?: LoginBranding | null): string {
+  return authLogin(
     "Sign in",
-    `<div class="stat" style="max-width:420px">
-      <h2>Work account sign in</h2>
-      <p class="muted">Use your organization's SAML identity provider to continue.</p>
-      <p style="margin-top:14px"><a class="btn" href="/me/saml/login">Sign in with SAML</a></p>
-    </div>`
+    `<p class="muted" style="text-align:center">Use your organization's identity provider to continue.</p>
+     <a class="btn auth-submit" href="/me/saml/login" style="display:block;text-align:center;box-sizing:border-box">Sign in with SSO</a>`,
+    branding
   );
 }
 

@@ -53,7 +53,30 @@ model Org {
   departments       Department[]
   assets            Asset[]
   leadEvents        LeadEvent[]
+  domains           TenantDomain[]
   createdAt   DateTime @default(now())
+}
+
+// A hostname a client points at us (via CNAME) for a branded login. Maps a host
+// to a tenant scope: a brand (brand-wide branded login) or a specific rooftop
+// (location override). `approved` gates on-demand TLS certificate issuance so we
+// only auto-issue certs for hosts an admin has registered. Not RLS-scoped: it is
+// routing metadata resolved before authentication (like Org/AdminUser).
+model TenantDomain {
+  id         String    @id @default(cuid())
+  host       String    @unique // fully-qualified, lowercased (e.g. cards.mullinaxford.com)
+  org        Org       @relation(fields: [orgId], references: [id])
+  orgId      String
+  brand      Brand?    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  brandId    String?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  locationId String?
+  approved   Boolean   @default(true) // allowlist for Caddy on-demand TLS
+  createdAt  DateTime  @default(now())
+
+  @@index([orgId])
+  @@index([brandId])
+  @@index([locationId])
 }
 
 // A brand under the org — owns its default design + logo.
@@ -85,6 +108,7 @@ model Brand {
   signatureBannerEnd   DateTime?
   locations    Location[]
   templates    Template[]
+  domains      TenantDomain[]
   createdAt    DateTime   @default(now())
 }
 
@@ -120,6 +144,7 @@ model Location {
   cards        Card[]
   departments  Department[]
   assets       Asset[]
+  domains      TenantDomain[]
   createdAt    DateTime @default(now())
 
   @@unique([brandId, code])

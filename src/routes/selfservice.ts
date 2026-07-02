@@ -8,7 +8,7 @@ import { clean, parseLabeled, parseSocials } from "../parse";
 import { emitEvent, cardPayload } from "../webhooks";
 import { DEFAULT_SELF_FIELDS } from "../views/widgets";
 import { emailFromSamlProfile, getEnabledSamlForOrg } from "../saml";
-import { resolveOrgId, orgIdForHost, requestHost } from "../tenant-resolver";
+import { resolveOrgId, orgIdForHost, requestHost, loginBrandingForHost } from "../tenant-resolver";
 import { roleFlags, Role } from "../roles";
 import { effectiveSelfFields, asStringArray } from "../roletemplate";
 import { rooftopCtas, ctasFromJson, mergeCtas } from "../dealership";
@@ -79,12 +79,14 @@ selfRouter.get("/login", async (req, res) => {
     res.cookie("oc_nonce", nonce, cookieOptions(10 * 60 * 1000));
     return res.redirect(authorizeUrl(state, nonce));
   }
-  if (config.devLogin) return res.send(V.devLoginPage());
+  const branding = await loginBrandingForHost(requestHost(req));
+  if (config.devLogin) return res.send(V.devLoginPage(branding));
   const org = await orgForRequest(req);
-  if (org && (await getEnabledSamlForOrg(org))) return res.send(V.samlLoginPage());
+  if (org && (await getEnabledSamlForOrg(org))) return res.send(V.samlLoginPage(branding));
   return res.send(
     V.notConfiguredPage(
-      "Self-service sign-in isn't configured yet. Ask your admin to enable SAML SSO or Azure AD SSO."
+      "Self-service sign-in isn't configured yet. Ask your admin to enable SAML SSO or Azure AD SSO.",
+      branding
     )
   );
 });

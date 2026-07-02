@@ -12,6 +12,7 @@ import { apiRouter } from "./routes/api";
 import { previewRouter } from "./routes/preview";
 import { handleStripeWebhook } from "./stripe";
 import { qrPng } from "./qr";
+import { isDomainApproved } from "./tenant-resolver";
 import { uploadDir } from "./upload";
 import {
   securityHeaders,
@@ -90,6 +91,14 @@ app.get("/qr.png", rateLimit({ name: "qr", windowMs: 60_000, max: 120 }), async 
   } catch {
     res.status(400).send("bad data");
   }
+});
+
+// Caddy on-demand TLS allowlist check: Caddy asks here before issuing a cert for
+// a hostname, so we only auto-issue for client domains registered + approved in
+// our DB. 200 = allowed, 403 = not.
+app.get("/tls/authorize", async (req, res) => {
+  const ok = await isDomainApproved(String(req.query.domain || ""));
+  res.status(ok ? 200 : 403).end();
 });
 
 app.get("/", (_req, res) => res.redirect("/admin"));

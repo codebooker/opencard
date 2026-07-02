@@ -9,6 +9,16 @@
 # The real Host header is preserved so the app can resolve the tenant from the
 # subdomain (e.g. acme.opencard.id).
 
+{
+	# On-demand TLS for client custom domains (branded login). Before issuing a
+	# Let's Encrypt cert for a hostname, Caddy asks the app, which only approves
+	# hostnames a client registered (TenantDomain.approved). This prevents random
+	# hosts pointed at us from triggering unbounded cert issuance.
+	on_demand_tls {
+		ask http://web:3000/tls/authorize
+	}
+}
+
 (proxy) {
 	encode gzip
 	header -Server
@@ -32,5 +42,20 @@ tapshare.cards, www.tapshare.cards {
 }
 *.tapshare.cards {
 	tls /certs/tapshare.pem /certs/tapshare.key
+	import proxy
+}
+
+# Client custom domains for branded login (e.g. cards.mullinaxford.com), CNAME'd
+# to us. Any host not matched above falls here; Caddy obtains a Let's Encrypt cert
+# on demand, gated by the ask endpoint in the global block.
+#
+# PRODUCTION ONLY: this needs ports 80/443 reachable from the public internet for
+# the ACME challenge. The current box is firewalled to Cloudflare IPs only, so
+# this block stays inert here — client custom domains take effect on the
+# production VM once the firewall is opened and DNS points at it.
+https:// {
+	tls {
+		on_demand
+	}
 	import proxy
 }

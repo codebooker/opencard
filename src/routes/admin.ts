@@ -15,6 +15,8 @@ import { signatureBlock } from "../views/signature-view";
 import { parseCampaignRoutingLines } from "../routing";
 import { LEAD_STATUSES, canTransition } from "../leadstatus";
 import { isConsole, isPlatformRole, PLATFORM_ROLES, assignableStaffRoles, canManageStaffTarget } from "../roles";
+import { loginBrandingForHost, requestHost } from "../tenant-resolver";
+import { normalizeHost } from "../branding";
 const PLATFORM_ROLES_ALL = [...PLATFORM_ROLES, "super_admin"];
 import { redirectTargetUrl, offboardCardUpdate, replacementCardData } from "../turnover";
 import { assetTypeLabel } from "../assets";
@@ -48,17 +50,26 @@ async function ensureFeature(res: any, orgId: string, feature: Feature, label: s
 export const adminRouter = Router();
 
 // ---------- auth ----------
-adminRouter.get("/login", (req, res) =>
-  res.send(loginPage(undefined, req.query.welcome ? "Account created. Sign in to continue." : undefined))
+// Client-branded login when the request arrives on a registered client domain.
+const brandingFor = (req: any) => loginBrandingForHost(requestHost(req));
+
+adminRouter.get("/login", async (req, res) =>
+  res.send(
+    loginPage(
+      undefined,
+      req.query.welcome ? "Account created. Sign in to continue." : undefined,
+      await brandingFor(req)
+    )
+  )
 );
 
 // Super-admin break-glass token login.
-adminRouter.post("/login/token", (req, res) => {
+adminRouter.post("/login/token", async (req, res) => {
   if ((req.body?.token || "") === config.adminToken) {
     res.cookie("oc_admin", config.adminToken, cookieOptions(12 * 60 * 60 * 1000));
     return res.redirect("/admin");
   }
-  res.status(401).send(loginPage("Invalid token."));
+  res.status(401).send(loginPage("Invalid token.", undefined, await brandingFor(req)));
 });
 
 // Email + password. MFA is optional: if the account has it enabled we ask for a
@@ -69,7 +80,7 @@ adminRouter.post("/login", async (req, res) => {
   const password = String(req.body?.password || "");
   const au = await prisma.adminUser.findUnique({ where: { email } });
   if (!au || !au.active || !verifyPassword(password, au.passwordHash)) {
-    return res.status(401).send(loginPage("Invalid email or password."));
+    return res.status(401).send(loginPage("Invalid email or password.", undefined, await brandingFor(req)));
   }
   if (au.mfaEnabled && au.mfaSecret) {
     res.cookie("oc_pwauth", signEmail(email), cookieOptions(5 * 60 * 1000));
@@ -174,6 +185,21 @@ function signatureConfig(b: any) {
     signatureDisclaimer: clean(b.signatureDisclaimer) || null,
     signatureLocks: asLockList(asArray(b.signatureLocks)),
   };
+}
+
+// Register/update/clear the branded-login domain for a brand or a rooftop.
+// `scope` is exactly one of { brandId } or { locationId }. Host is normalized;
+// blank clears it. Approved so Caddy on-demand TLS may issue a cert.
+async function setTenantDomain(orgId: string, scope: { brandId?: string; locationId?: string }, rawHost: string) {
+  const host = normalizeHost(rawHost);
+  const where = scope.locationId ? { locationId: scope.locationId } : { brandId: scope.brandId, locationId: null };
+  await prisma.tenantDomain.deleteMany({ where });
+  if (!host) return;
+  await prisma.tenantDomain.upsert({
+    where: { host },
+    update: { orgId, brandId: scope.brandId ?? null, locationId: scope.locationId ?? null, approved: true },
+    create: { host, orgId, brandId: scope.brandId ?? null, locationId: scope.locationId ?? null, approved: true },
+  });
 }
 
 // Brand-wide signature campaign banner (text + optional link + optional window).
@@ -482,7 +508,7 @@ adminRouter.get("/brands/:id/edit", async (req, res) => {
   const t = await currentTerminology();
   const brand = await prisma.brand.findUnique({
     where: { id: req.params.id },
-    include: { locations: { include: { _count: { select: { cards: true } } } } },
+    include: { locations: { include: { _count: { select: { cards: true } } } }, domains: true },
   });
   if (!brand) return res.status(404).send("Not found");
   const stats = {
@@ -516,9 +542,10 @@ adminRouter.post("/brands", upload.single("logoFile"), async (req, res) => {
   res.redirect("/admin");
 });
 adminRouter.post("/brands/:id", upload.single("logoFile"), async (req, res) => {
-  if (!await RBAC.canManageBrandScoped(reqAdmin(req),req.params.id)) return forbidden(res);
+  const p = reqAdmin(req);
+  if (!await RBAC.canManageBrandScoped(p, req.params.id)) return forbidden(res);
   const b = req.body;
-  await prisma.brand.update({
+  const brand = await prisma.brand.update({
     where: { id: req.params.id },
     data: {
       name: b.name,
@@ -535,6 +562,7 @@ adminRouter.post("/brands/:id", upload.single("logoFile"), async (req, res) => {
       ...campaignBanner(b),
     },
   });
+  await setTenantDomain(brand.orgId, { brandId: brand.id }, b.loginDomain);
   res.redirect("/admin");
 });
 
@@ -662,7 +690,7 @@ adminRouter.get("/locations/new", async (req, res) => {
   res.send(V.locationForm(brandId, undefined, await currentTerminology()));
 });
 adminRouter.get("/locations/:id/edit", async (req, res) => {
-  const loc = await prisma.location.findUnique({ where: { id: req.params.id } });
+  const loc = await prisma.location.findUnique({ where: { id: req.params.id }, include: { domains: true } });
   if (!loc) return res.status(404).send("Not found");
   if (!await RBAC.canManageBrandScoped(reqAdmin(req),loc.brandId)) return forbidden(res);
   res.send(V.locationForm(loc.brandId, loc, await currentTerminology()));
@@ -705,6 +733,7 @@ adminRouter.post("/locations/:id", upload.single("logoFile"), async (req, res) =
       ...signatureConfig(b),
     },
   });
+  await setTenantDomain(loc.orgId, { locationId: loc.id }, b.loginDomain);
   res.redirect("/admin");
 });
 
