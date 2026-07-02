@@ -82,7 +82,7 @@ function shell(title: string, body: string): string {
     head: OC_FAVICON,
     body: `<div class="admin">
       <div class="topbar">
-        <h1 style="margin:0"><a href="/admin" aria-label="OpenCard" style="display:inline-block;text-decoration:none"><img src="/opencard-logo.svg" alt="OpenCard" style="height:32px;width:auto;display:block" /></a></h1>
+        <h1 style="margin:0"><a href="/admin" aria-label="OpenCard" style="display:inline-block;text-decoration:none"><img src="/opencard-logo.svg" alt="OpenCard" style="height:42px;width:auto;display:block" /></a></h1>
         <div>
           <a class="btn secondary" href="/admin/analytics">Analytics</a>
           <a class="btn secondary" href="/admin/leads">Leads</a>

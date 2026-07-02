@@ -197,6 +197,17 @@ form.editor input, form.editor textarea, form.editor select {
 .auth-breakglass summary { color:#9ca3af; font-size:13px; cursor:pointer; }
 .auth-breakglass input { width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:9px; box-sizing:border-box; }
 
+/* Login page palette — matches the OpenCard logo (blue -> cyan -> teal), scoped
+   to .auth so the rest of the app keeps its own accent color. */
+.auth .btn { background:linear-gradient(135deg,#1F5BEA 0%,#18AEE0 55%,#25D1B3 100%); color:#fff; border:0; }
+.auth .btn:hover { filter:brightness(0.96); }
+.auth .btn.secondary { background:#fff; color:#1F5BEA; border:1.5px solid #1F5BEA; }
+.auth .btn.secondary:hover { background:color-mix(in srgb,#1F5BEA 8%,#fff); filter:none; }
+.auth .auth-foot a, .auth .auth-brand a { color:#1F5BEA; }
+.auth .auth-form input:focus, .auth .auth-breakglass input:focus { border-color:#1F5BEA; box-shadow:0 0 0 3px color-mix(in srgb,#1F5BEA 20%,#fff); }
+.auth .auth-divider { color:#7c8aa5; }
+.auth .auth-banner { background:#eef4ff; color:#123A70; border-color:#c7d7fb; }
+
 /* ---------- plan & usage ---------- */
 .usage { border-collapse: collapse; width: 100%; max-width: 420px; margin-top: 8px; }
 .usage td { padding: 8px 10px; border-bottom: 1px solid #eef0f2; font-size: 14px; }
