@@ -19,6 +19,7 @@ import { loginBrandingForHost, requestHost } from "../tenant-resolver";
 import { normalizeHost } from "../branding";
 import { parseFieldMapLines } from "../crmsync";
 import { sendTestSync, retrySync } from "../crmsync-dispatch";
+import { isGaId, isGtmId, normalizeCampaignCode } from "../marketing";
 import { promises as dns } from "dns";
 import { evaluateDomain, CNAME_TARGET } from "../domainstatus";
 
@@ -1524,6 +1525,66 @@ adminRouter.post("/crm/logs/:id/retry", async (req, res) => {
   if (!RBAC.canManageIntegrations(p)) return forbidden(res);
   await retrySync(req.params.id, p.orgId);
   res.redirect("/admin/integrations");
+});
+
+// ---------- marketing: GA/GTM tags + campaign short links (Phase 7.4) ----------
+adminRouter.get("/marketing", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  const [org, campaigns] = await Promise.all([
+    prisma.org.findUnique({ where: { id: p.orgId }, select: { gaMeasurementId: true, gtmContainerId: true } }),
+    prisma.campaign.findMany({ where: { orgId: p.orgId }, orderBy: { createdAt: "desc" } }),
+  ]);
+  res.send(V.marketingView({ org: org || {}, campaigns, baseUrl: config.baseUrl }));
+});
+
+adminRouter.post("/marketing/tags", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  const ga = clean(req.body?.gaMeasurementId);
+  const gtm = clean(req.body?.gtmContainerId);
+  await prisma.org.update({
+    where: { id: p.orgId },
+    data: {
+      gaMeasurementId: ga && isGaId(ga) ? ga : null,
+      gtmContainerId: gtm && isGtmId(gtm) ? gtm : null,
+    },
+  });
+  res.redirect("/admin/marketing");
+});
+
+adminRouter.post("/marketing/campaigns", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  const b = req.body || {};
+  const name = clean(b.name);
+  const landingUrl = clean(b.landingUrl);
+  if (!name || !landingUrl || !/^https?:\/\//i.test(landingUrl)) return res.redirect("/admin/marketing");
+  let code = normalizeCampaignCode(b.code) || normalizeCampaignCode(name);
+  if (!code) code = "c" + Math.random().toString(36).slice(2, 8);
+  // Ensure the short code is globally unique.
+  if (await prisma.campaign.findUnique({ where: { code } })) code = `${code}-${Math.random().toString(36).slice(2, 6)}`;
+  await prisma.campaign.create({
+    data: {
+      orgId: p.orgId,
+      code,
+      name,
+      landingUrl,
+      utmSource: clean(b.utmSource) || null,
+      utmMedium: clean(b.utmMedium) || null,
+      utmCampaign: clean(b.utmCampaign) || null,
+    },
+  });
+  res.redirect("/admin/marketing");
+});
+
+adminRouter.post("/marketing/campaigns/:id/delete", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  await prisma.campaign.deleteMany({
+    where: RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
+  });
+  res.redirect("/admin/marketing");
 });
 
 adminRouter.post("/api-keys", async (req, res) => {

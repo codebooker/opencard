@@ -11,6 +11,7 @@ import { assembleLead } from "../leadform";
 import { emitEvent, leadPayload } from "../webhooks";
 import { notifyLead } from "../notify";
 import { syncLeadToCrm } from "../crmsync-dispatch";
+import { orgAnalyticsHead } from "../marketing-tags";
 import { findDuplicate } from "../leadstatus";
 
 export const assetsRouter = Router();
@@ -54,7 +55,8 @@ assetsRouter.get("/:slug", async (req, res) => {
   );
 
   if (dest.kind === "redirect") return res.redirect(302, dest.url);
-  if (dest.kind === "landing") return res.send(renderAssetLanding(asset, config.cardUrl, parseUtm(req.query as any)));
+  if (dest.kind === "landing")
+    return res.send(renderAssetLanding(asset, config.cardUrl, parseUtm(req.query as any), await orgAnalyticsHead(asset.orgId)));
   return notFound(res, "This code isn't set up yet.");
 });
 

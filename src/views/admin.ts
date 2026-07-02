@@ -243,6 +243,7 @@ export function dashboard(
     <a class="btn secondary" href="/admin/domains">Domains</a>
     ${p.super ? `<a class="btn secondary" href="/admin/admins">Admins</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/integrations">Integrations</a>` : ""}
+    ${p.super ? `<a class="btn secondary" href="/admin/marketing">Marketing</a>` : ""}
     ${p.global ? `<a class="btn" href="/admin/brands/new">+ New ${lower(t.brandSingular)}</a>` : ""}`;
   const banner = actingClientName
     ? `<div class="stat" style="border:1px solid #2563eb;background:#eff6ff;margin-bottom:12px">Managing client <strong>${esc(
@@ -410,6 +411,66 @@ export function brandForm(
   }
   ${designScripts()}`;
   return shell("Brand", body);
+}
+
+// Marketing: per-org GA4/GTM tags injected into public pages + trackable
+// campaign short links.
+export function marketingView(data: { org: any; campaigns: any[]; baseUrl: string }): string {
+  const org = data.org || {};
+  const rows = (data.campaigns || []).length
+    ? data.campaigns
+        .map((c) => {
+          const shortUrl = `${data.baseUrl}/k/${esc(c.code)}`;
+          const utm = [c.utmSource && `source=${c.utmSource}`, c.utmMedium && `medium=${c.utmMedium}`, c.utmCampaign && `campaign=${c.utmCampaign}`]
+            .filter(Boolean)
+            .join(" · ");
+          return `<tr>
+        <td><a href="${shortUrl}" target="_blank"><code>/k/${esc(c.code)}</code></a></td>
+        <td>${esc(c.name)}</td>
+        <td class="muted" style="max-width:240px;overflow:hidden;text-overflow:ellipsis"><code>${esc(c.landingUrl)}</code></td>
+        <td class="muted" style="font-size:12px">${esc(utm || "—")}</td>
+        <td>${c.clicks}</td>
+        <td><form method="POST" action="/admin/marketing/campaigns/${esc(c.id)}/delete" onsubmit="return confirm('Delete this campaign link?')"><button class="btn danger" type="submit">Delete</button></form></td>
+      </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="6" class="muted">No campaign links yet.</td></tr>`;
+  const body = `
+  <div class="topbar"><h2>Marketing</h2><a class="btn secondary" href="/admin">Back</a></div>
+
+  <h3>Analytics tags</h3>
+  <p class="muted">Injected into this account's public card and QR-landing pages, so scans and views land in your own Google Analytics / Tag Manager.</p>
+  <form class="editor" method="POST" action="/admin/marketing/tags" style="max-width:560px">
+    <label>GA4 Measurement ID</label>
+    <input name="gaMeasurementId" value="${esc(org.gaMeasurementId || "")}" placeholder="G-XXXXXXXXXX" />
+    <label style="margin-top:10px">Google Tag Manager container ID</label>
+    <input name="gtmContainerId" value="${esc(org.gtmContainerId || "")}" placeholder="GTM-XXXXXXX" />
+    <p class="muted" style="font-size:12px;margin:6px 0 0">Leave blank to disable. Invalid IDs are ignored.</p>
+    <p style="margin-top:10px"><button class="btn" type="submit">Save tags</button></p>
+  </form>
+
+  <h3 style="margin-top:28px">Campaign links</h3>
+  <p class="muted">Short, trackable links that redirect to a landing page with UTM parameters attached — great for print QR codes, ads, and events.</p>
+  <table>
+    <tr><th>Short link</th><th>Name</th><th>Landing</th><th>UTM</th><th>Clicks</th><th></th></tr>
+    ${rows}
+  </table>
+  <form class="editor" method="POST" action="/admin/marketing/campaigns" style="margin-top:12px;max-width:620px">
+    <label>Campaign name</label>
+    <input name="name" placeholder="Summer Sales Event" required />
+    <label style="margin-top:10px">Short code <span class="muted">(optional; auto-derived from the name)</span></label>
+    <input name="code" placeholder="summer" />
+    <label style="margin-top:10px">Landing URL</label>
+    <input name="landingUrl" type="url" placeholder="https://dealer.com/specials" required />
+    <div class="grid2">
+      <div><label style="margin-top:10px">UTM source</label><input name="utmSource" placeholder="qr" /></div>
+      <div><label style="margin-top:10px">UTM medium</label><input name="utmMedium" placeholder="print" /></div>
+    </div>
+    <label style="margin-top:10px">UTM campaign <span class="muted">(defaults to the short code)</span></label>
+    <input name="utmCampaign" placeholder="summer-2026" />
+    <p style="margin-top:10px"><button class="btn" type="submit">Add campaign link</button></p>
+  </form>`;
+  return shell("Marketing", body);
 }
 
 // Self-serve custom-domain onboarding hub: list domains with copy-paste DNS

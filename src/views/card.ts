@@ -68,7 +68,8 @@ export function renderCardPage(
   card: FullCard,
   qrDataUrl: string,
   baseUrl: string,
-  attribution: LeadAttribution = {}
+  attribution: LeadAttribution = {},
+  analyticsHead: string = ""
 ): string {
   const t = theme(card);
   // Role template: which fields to hide on the public card, QR behavior.
@@ -246,5 +247,5 @@ document.querySelectorAll('[data-track]').forEach(function (el) {
 });
 </script>
 `;
-  return page({ title: fullName + " — " + card.location.brand.name, body, bodyClass: "card-body" });
+  return page({ title: fullName + " — " + card.location.brand.name, body, bodyClass: "card-body", head: analyticsHead });
 }

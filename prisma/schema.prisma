@@ -19,6 +19,10 @@ model Org {
   // live these are simply unused metadata.
   subdomain    String? @unique
   customDomain String? @unique
+  // Marketing analytics (Phase 7.4): injected into this org's public card + asset
+  // landing pages so scans/views land in the customer's own GA4 / GTM.
+  gaMeasurementId String? // GA4 Measurement ID, e.g. G-XXXXXXXXXX
+  gtmContainerId  String? // Google Tag Manager container, e.g. GTM-XXXXXXX
   // Billing / plan state. `plan` keys into src/plans.ts. Stripe ids are set once
   // hosted checkout is wired; until then plans are assigned by a platform owner.
   plan                 String    @default("starter")
@@ -56,7 +60,27 @@ model Org {
   domains           TenantDomain[]
   crmIntegrations   CrmIntegration[]
   crmSyncLogs       CrmSyncLog[]
+  campaigns         Campaign[]
   createdAt   DateTime @default(now())
+}
+
+// A trackable campaign short link (Phase 7.4). Public URL /k/:code redirects to
+// `landingUrl` with the campaign's UTM params appended, and counts the click.
+model Campaign {
+  id          String   @id @default(cuid())
+  org         Org      @relation(fields: [orgId], references: [id])
+  orgId       String
+  code        String   @unique // short-link code used at /k/:code
+  name        String
+  landingUrl  String
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String? // defaults to `code` when blank
+  active      Boolean  @default(true)
+  clicks      Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([orgId])
 }
 
 // A per-org CRM / marketing sync target (Phase 7). Provider "zapier" is a generic

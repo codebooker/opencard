@@ -11,6 +11,7 @@ import { parseUtm } from "../attribution";
 import { assembleLead } from "../leadform";
 import { notifyLead } from "../notify";
 import { syncLeadToCrm } from "../crmsync-dispatch";
+import { orgAnalyticsHead } from "../marketing-tags";
 import { findDuplicate } from "../leadstatus";
 
 export const cardsRouter = Router();
@@ -70,7 +71,7 @@ cardsRouter.get("/:slug", async (req, res) => {
 
   const primary = cardPrimary(card);
   const qr = await qrDataUrl(`${config.cardUrl}/c/${card.slug}`, primary);
-  res.send(renderCardPage(card, qr, config.cardUrl, parseUtm(req.query as any)));
+  res.send(renderCardPage(card, qr, config.cardUrl, parseUtm(req.query as any), await orgAnalyticsHead(card.orgId)));
 });
 
 // vCard download (Add to Contacts)

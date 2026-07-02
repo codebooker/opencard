@@ -4,7 +4,7 @@ import { resolveLeadFields, resolveConsentText } from "../leadform";
 import { renderLeadForm, leadRefScript, LeadAttribution } from "./leadform-view";
 
 // A lightweight dealership landing page for a rooftop/department asset (no person).
-export function renderAssetLanding(asset: any, baseUrl: string, attribution: LeadAttribution = {}): string {
+export function renderAssetLanding(asset: any, baseUrl: string, attribution: LeadAttribution = {}, analyticsHead: string = ""): string {
   const loc = asset.location;
   const primary = loc.primaryColor || loc.brand?.primaryColor || "#1f6f43";
   const logo = loc.logoUrl || loc.brand?.logoUrl || null;
@@ -62,5 +62,5 @@ export function renderAssetLanding(asset: any, baseUrl: string, attribution: Lea
   <footer class="brand">${esc(loc.brand?.name || "")} · ${esc(loc.name)}</footer>
 </main>
 ${leadRefScript}`;
-  return page({ title: `${loc.name} — ${asset.name}`, body, bodyClass: "card-body" });
+  return page({ title: `${loc.name} — ${asset.name}`, body, bodyClass: "card-body", head: analyticsHead });
 }
