@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { getAdmin, AdminPrincipal } from "../rbac";
-import { page, esc } from "../views/html";
+import { page, esc, OC_FAVICON } from "../views/html";
 
 // Resolve the current admin principal and attach it as req.admin, or redirect to login.
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
@@ -29,11 +29,11 @@ export function forbidden(res: Response, msg = "You don't have permission to do 
 export function loginPage(error?: string, info?: string): string {
   return page({
     title: "Admin sign in",
+    head: OC_FAVICON,
     body: `<div class="auth">
       <div class="auth-card">
         <div class="auth-brand">
-          <span class="auth-logo">OC</span>
-          <h1>OpenCard</h1>
+          <img src="/opencard-logo.svg" alt="OpenCard" style="height:52px;width:auto;margin:0 auto 6px;display:block" />
           <p class="auth-sub">Sign in to your admin workspace</p>
         </div>
         ${info ? `<p class="auth-banner">${esc(info)}</p>` : ""}
@@ -63,6 +63,7 @@ export function loginPage(error?: string, info?: string): string {
 export function mfaPage(error?: string): string {
   return page({
     title: "Two-factor",
+    head: OC_FAVICON,
     body: `<div class="login">
       <h1>Two-factor code</h1>
       <p class="muted">Enter the 6-digit code from your authenticator app.</p>
@@ -78,6 +79,7 @@ export function mfaPage(error?: string): string {
 export function enrollPage(otpUri: string, secret: string, qr: string, error?: string): string {
   return page({
     title: "Set up two-factor",
+    head: OC_FAVICON,
     body: `<div class="login" style="max-width:440px">
       <h1>Set up two-factor</h1>
       <p class="muted">Two-factor is required for admins. Scan this with Google Authenticator, 1Password, Authy, etc., then enter a code to confirm.</p>

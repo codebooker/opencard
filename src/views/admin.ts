@@ -1,4 +1,4 @@
-import { esc, page } from "./html";
+import { esc, page, OC_FAVICON } from "./html";
 import { Address } from "../types";
 import { AdminPrincipal, ROLE_LABELS } from "../rbac";
 import { showsBilling, canManageStaffTarget, Role } from "../roles";
@@ -78,9 +78,10 @@ function selfFieldChecks(allowed: string[], opts: { name: string; includeInherit
 function shell(title: string, body: string): string {
   return page({
     title,
+    head: OC_FAVICON,
     body: `<div class="admin">
       <div class="topbar">
-        <h1><a href="/admin" style="text-decoration:none;color:#111827">OpenCard admin</a></h1>
+        <h1 style="margin:0"><a href="/admin" aria-label="OpenCard" style="display:inline-block;text-decoration:none"><img src="/opencard-logo.svg" alt="OpenCard" style="height:32px;width:auto;display:block" /></a></h1>
         <div>
           <a class="btn secondary" href="/admin/analytics">Analytics</a>
           <a class="btn secondary" href="/admin/leads">Leads</a>
