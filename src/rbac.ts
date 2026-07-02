@@ -136,9 +136,18 @@ export async function accessibleLocationIds(p: AdminPrincipal): Promise<string[]
   return [...set];
 }
 
-// Edit brand settings + manage templates: brand_admin (scoped) and above; NOT store admins.
+// Role-only check: brand_admin (scoped) and above may edit brands; NOT store admins.
+// NOTE: this does NOT verify the brand belongs to the admin's org — use
+// `canManageBrandScoped` in routes so an admin can't touch another tenant's brand.
 export function canManageBrand(p: AdminPrincipal, brandId: string): boolean {
   return p.global || (p.role === "brand_admin" && p.brandIds.includes(brandId));
+}
+
+// Route guard: the admin has the brand-management role AND the brand lives in the
+// org they're operating in (or they're the platform console seeing all orgs).
+// This is the check every brand-mutating route must use for tenant isolation.
+export async function canManageBrandScoped(p: AdminPrincipal, brandId: string): Promise<boolean> {
+  return canManageBrand(p, brandId) && (await canAccessBrand(p, brandId));
 }
 
 export async function canAccessBrand(p: AdminPrincipal, brandId: string): Promise<boolean> {

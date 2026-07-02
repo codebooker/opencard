@@ -453,7 +453,7 @@ adminRouter.get("/brands/new", async (req, res) => {
   res.send(V.brandForm(undefined, undefined, await currentTerminology()));
 });
 adminRouter.get("/brands/:id/edit", async (req, res) => {
-  if (!RBAC.canManageBrand(reqAdmin(req), req.params.id)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),req.params.id)) return forbidden(res);
   const t = await currentTerminology();
   const brand = await prisma.brand.findUnique({
     where: { id: req.params.id },
@@ -490,7 +490,7 @@ adminRouter.post("/brands", upload.single("logoFile"), async (req, res) => {
   res.redirect("/admin");
 });
 adminRouter.post("/brands/:id", upload.single("logoFile"), async (req, res) => {
-  if (!RBAC.canManageBrand(reqAdmin(req), req.params.id)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),req.params.id)) return forbidden(res);
   const b = req.body;
   await prisma.brand.update({
     where: { id: req.params.id },
@@ -546,7 +546,7 @@ adminRouter.post("/brands/:id/delete", async (req, res) => {
 // ---------- templates ----------
 adminRouter.get("/templates", async (req, res) => {
   const brandId = String(req.query.brandId || "");
-  if (!RBAC.canManageBrand(reqAdmin(req), brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),brandId)) return forbidden(res);
   const brand = await prisma.brand.findUnique({ where: { id: brandId } });
   if (!brand) return res.status(404).send("Brand not found");
   const templates = await prisma.template.findMany({ where: { brandId }, orderBy: { createdAt: "asc" } });
@@ -554,13 +554,13 @@ adminRouter.get("/templates", async (req, res) => {
 });
 adminRouter.get("/templates/new", (req, res) => {
   const brandId = String(req.query.brandId || "");
-  if (!RBAC.canManageBrand(reqAdmin(req), brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),brandId)) return forbidden(res);
   res.send(V.templateForm(brandId));
 });
 adminRouter.get("/templates/:id/edit", async (req, res) => {
   const tpl = await prisma.template.findUnique({ where: { id: req.params.id } });
   if (!tpl) return res.status(404).send("Not found");
-  if (!RBAC.canManageBrand(reqAdmin(req), tpl.brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),tpl.brandId)) return forbidden(res);
   res.send(V.templateForm(tpl.brandId, tpl));
 });
 
@@ -589,7 +589,7 @@ function templateData(b: any) {
 
 adminRouter.post("/templates", async (req, res) => {
   const b = req.body;
-  if (!RBAC.canManageBrand(reqAdmin(req), b.brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),b.brandId)) return forbidden(res);
   if (b.isDefault) await prisma.template.updateMany({ where: { brandId: b.brandId }, data: { isDefault: false } });
   await prisma.template.create({ data: { brandId: b.brandId, orgId: await orgIdForBrand(b.brandId), ...templateData(b) } });
   res.redirect(`/admin/templates?brandId=${b.brandId}`);
@@ -598,7 +598,7 @@ adminRouter.post("/templates/:id", async (req, res) => {
   const b = req.body;
   const tpl = await prisma.template.findUnique({ where: { id: req.params.id } });
   if (!tpl) return res.status(404).send("Not found");
-  if (!RBAC.canManageBrand(reqAdmin(req), tpl.brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),tpl.brandId)) return forbidden(res);
   if (b.isDefault) await prisma.template.updateMany({ where: { brandId: tpl.brandId }, data: { isDefault: false } });
   await prisma.template.update({ where: { id: req.params.id }, data: templateData(b) });
   res.redirect(`/admin/templates?brandId=${tpl.brandId}`);
@@ -606,7 +606,7 @@ adminRouter.post("/templates/:id", async (req, res) => {
 adminRouter.post("/templates/:id/delete", async (req, res) => {
   const tpl = await prisma.template.findUnique({ where: { id: req.params.id } });
   if (!tpl) return res.status(404).send("Not found");
-  if (!RBAC.canManageBrand(reqAdmin(req), tpl.brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),tpl.brandId)) return forbidden(res);
   await prisma.$transaction([
     prisma.card.updateMany({ where: { templateId: tpl.id }, data: { templateId: null } }),
     prisma.template.delete({ where: { id: tpl.id } }),
@@ -631,19 +631,19 @@ function rooftopProfile(b: any) {
 
 adminRouter.get("/locations/new", async (req, res) => {
   const brandId = String(req.query.brandId || "");
-  if (!RBAC.canManageBrand(reqAdmin(req), brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),brandId)) return forbidden(res);
   res.send(V.locationForm(brandId, undefined, await currentTerminology()));
 });
 adminRouter.get("/locations/:id/edit", async (req, res) => {
   const loc = await prisma.location.findUnique({ where: { id: req.params.id } });
   if (!loc) return res.status(404).send("Not found");
-  if (!RBAC.canManageBrand(reqAdmin(req), loc.brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),loc.brandId)) return forbidden(res);
   res.send(V.locationForm(loc.brandId, loc, await currentTerminology()));
 });
 adminRouter.post("/locations", upload.single("logoFile"), async (req, res) => {
   const p = reqAdmin(req);
   const b = req.body;
-  if (!RBAC.canManageBrand(p, b.brandId)) return forbidden(res);
+  if (!(await RBAC.canManageBrandScoped(p, b.brandId))) return forbidden(res);
   if (!(await canAdd(p.orgId, "locations"))) return limitReached(res, "location");
   await prisma.location.create({
     data: {
@@ -664,7 +664,7 @@ adminRouter.post("/locations/:id", upload.single("logoFile"), async (req, res) =
   const b = req.body;
   const loc = await prisma.location.findUnique({ where: { id: req.params.id } });
   if (!loc) return res.status(404).send("Not found");
-  if (!RBAC.canManageBrand(reqAdmin(req), loc.brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),loc.brandId)) return forbidden(res);
   await prisma.location.update({
     where: { id: req.params.id },
     data: {
@@ -688,7 +688,7 @@ async function locationForDept(id: string) {
 adminRouter.get("/locations/:id/departments", async (req, res) => {
   const loc = await locationForDept(req.params.id);
   if (!loc) return res.status(404).send("Not found");
-  if (!RBAC.canManageBrand(reqAdmin(req), loc.brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),loc.brandId)) return forbidden(res);
   const departments = await prisma.department.findMany({
     where: { locationId: loc.id },
     orderBy: { name: "asc" },
@@ -699,7 +699,7 @@ adminRouter.get("/locations/:id/departments", async (req, res) => {
 adminRouter.post("/locations/:id/departments", async (req, res) => {
   const loc = await locationForDept(req.params.id);
   if (!loc) return res.status(404).send("Not found");
-  if (!RBAC.canManageBrand(reqAdmin(req), loc.brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),loc.brandId)) return forbidden(res);
   const ctas = parseCtaLines(req.body?.ctas);
   const leadEmail = clean(req.body?.leadEmail);
   const deptId = clean(req.body?.departmentId);
@@ -725,7 +725,7 @@ adminRouter.post("/departments/:id/delete", async (req, res) => {
     include: { location: { select: { id: true, brandId: true } } },
   });
   if (!dept) return res.status(404).send("Not found");
-  if (!RBAC.canManageBrand(reqAdmin(req), dept.location.brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),dept.location.brandId)) return forbidden(res);
   await prisma.department.delete({ where: { id: dept.id } });
   res.redirect(`/admin/locations/${dept.location.id}/departments`);
 });
@@ -748,7 +748,7 @@ function assetDataFromBody(b: any) {
 adminRouter.get("/locations/:id/assets", async (req, res) => {
   const loc = await locationForDept(req.params.id);
   if (!loc) return res.status(404).send("Not found");
-  if (!RBAC.canManageBrand(reqAdmin(req), loc.brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),loc.brandId)) return forbidden(res);
   const [assets, cards] = await Promise.all([
     prisma.asset.findMany({ where: { locationId: loc.id }, orderBy: { createdAt: "desc" } }),
     prisma.card.findMany({
@@ -763,7 +763,7 @@ adminRouter.get("/locations/:id/assets", async (req, res) => {
 adminRouter.post("/locations/:id/assets", async (req, res) => {
   const loc = await locationForDept(req.params.id);
   if (!loc) return res.status(404).send("Not found");
-  if (!RBAC.canManageBrand(reqAdmin(req), loc.brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),loc.brandId)) return forbidden(res);
   const data = assetDataFromBody(req.body);
   // Resolve + validate the destination card against this rooftop.
   let destinationCardId: string | null = null;
@@ -795,7 +795,7 @@ adminRouter.post("/assets/:id/delete", async (req, res) => {
     include: { location: { select: { id: true, brandId: true } } },
   });
   if (!asset) return res.status(404).send("Not found");
-  if (!RBAC.canManageBrand(reqAdmin(req), asset.location.brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(reqAdmin(req),asset.location.brandId)) return forbidden(res);
   await prisma.asset.delete({ where: { id: asset.id } });
   res.redirect(`/admin/locations/${asset.location.id}/assets`);
 });
