@@ -10,6 +10,7 @@ import { emitEvent, leadPayload } from "../webhooks";
 import { parseUtm } from "../attribution";
 import { assembleLead } from "../leadform";
 import { notifyLead } from "../notify";
+import { findDuplicate } from "../leadstatus";
 
 export const cardsRouter = Router();
 
@@ -126,7 +127,13 @@ cardsRouter.post("/:slug/connect", async (req, res) => {
   if (!b.name) return res.status(400).send("Name required");
   const data = assembleLead(b, req.headers["user-agent"] as string);
   const lead = await runWithOrg(card.orgId, async (db) => {
-    const created = await db.lead.create({ data: { cardId: card.id, orgId: card.orgId, ...data } });
+    // Duplicate detection: match a recent lead on this card by email/phone.
+    const recent = await db.lead.findMany({
+      where: { cardId: card.id, createdAt: { gte: new Date(Date.now() - 30 * 864e5) } },
+      select: { id: true, email: true, phone: true },
+    });
+    const duplicateOfId = findDuplicate({ email: data.email, phone: data.phone }, recent);
+    const created = await db.lead.create({ data: { cardId: card.id, orgId: card.orgId, duplicateOfId, ...data } });
     await db.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "connect", ip: clientIp(req) } });
     return created;
   });

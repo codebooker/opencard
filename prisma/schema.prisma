@@ -49,6 +49,7 @@ model Org {
   samlConfig        SamlConfig?
   departments       Department[]
   assets            Asset[]
+  leadEvents        LeadEvent[]
   createdAt   DateTime @default(now())
 }
 
@@ -301,6 +302,12 @@ model Lead {
   appointmentRequest Boolean @default(false)
   consent            Boolean @default(false)
   status             String  @default("new") // new | sent | synced | failed | archived
+  assignedTo         String? // email of the person currently handling the lead
+  // Duplicate detection: points to the earlier lead this one duplicates.
+  duplicateOf        Lead?   @relation("LeadDup", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicateOfId      String?
+  duplicates         Lead[]  @relation("LeadDup")
+  events             LeadEvent[]
   // Attribution / source tracking.
   campaign    String?
   utmSource   String?
@@ -314,6 +321,26 @@ model Lead {
   @@index([assetId])
   @@index([orgId])
   @@index([status])
+  @@index([duplicateOfId])
+}
+
+// Lead lifecycle / handoff history: an append-only trail of status changes,
+// reassignments, and notes on a lead.
+model LeadEvent {
+  id        String   @id @default(cuid())
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  leadId    String
+  org       Org      @relation(fields: [orgId], references: [id])
+  orgId     String
+  type      String // status | assign | note
+  fromValue String?
+  toValue   String?
+  actor     String? // admin email who made the change
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt])
+  @@index([orgId])
 }
 
 // An admin account with a role. Self-service (card owners) are NOT stored here;

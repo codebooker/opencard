@@ -63,9 +63,14 @@ assetsRouter.post("/:slug/connect", async (req, res) => {
   const b = req.body || {};
   if (!b.name) return res.status(400).send("Name required");
   const data = assembleLead(b, req.headers["user-agent"] as string);
-  const lead = await runWithOrg(asset.orgId, (db) =>
-    db.lead.create({ data: { assetId: asset.id, orgId: asset.orgId, ...data } })
-  );
+  const lead = await runWithOrg(asset.orgId, async (db) => {
+    const recent = await db.lead.findMany({
+      where: { assetId: asset.id, createdAt: { gte: new Date(Date.now() - 30 * 864e5) } },
+      select: { id: true, email: true, phone: true },
+    });
+    const duplicateOfId = findDuplicate({ email: data.email, phone: data.phone }, recent);
+    return db.lead.create({ data: { assetId: asset.id, orgId: asset.orgId, duplicateOfId, ...data } });
+  });
   emitEvent("lead.captured", leadPayload(lead, { asset }));
   notifyLead(lead, { asset });
   res.send(

@@ -11,6 +11,7 @@ import { upload, uploadedUrl } from "../upload";
 import { emitEvent, cardPayload, WEBHOOK_EVENTS, replayDelivery, sendTestEvent } from "../webhooks";
 import { parseOemBrands, parseCtaLines } from "../dealership";
 import { parseCampaignRoutingLines } from "../routing";
+import { LEAD_STATUSES, canTransition } from "../leadstatus";
 import { redirectTargetUrl, offboardCardUpdate, replacementCardData } from "../turnover";
 import { assetTypeLabel } from "../assets";
 import { generateApiKey } from "../apiauth";
@@ -1044,19 +1045,85 @@ async function leadScopeWhere(p: RBAC.AdminPrincipal) {
   return { OR: [{ cardId: { in: cardIds } }, { assetId: { in: assets.map((a) => a.id) } }] };
 }
 
+function leadStatusFilter(req: any): string {
+  const s = String(req.query.status || "");
+  return (LEAD_STATUSES as readonly string[]).includes(s) ? s : "";
+}
+
 adminRouter.get("/leads", async (req, res) => {
+  const status = leadStatusFilter(req);
+  const scope = await leadScopeWhere(reqAdmin(req));
   const leads = await prisma.lead.findMany({
-    where: await leadScopeWhere(reqAdmin(req)),
+    where: { ...scope, ...(status ? { status } : {}) },
     orderBy: { createdAt: "desc" },
     include: { card: true, asset: true },
     take: 500,
   });
-  res.send(V.leadsView(leads));
+  res.send(V.leadsView(leads, status));
+});
+
+// Lead detail + lifecycle history.
+adminRouter.get("/leads/:id", async (req, res) => {
+  const lead = await prisma.lead.findFirst({
+    where: { id: req.params.id, ...(await leadScopeWhere(reqAdmin(req))) },
+    include: { card: true, asset: true },
+  });
+  if (!lead) return res.status(404).send("Lead not found");
+  const events = await prisma.leadEvent.findMany({ where: { leadId: lead.id }, orderBy: { createdAt: "desc" } });
+  res.send(V.leadDetailView({ lead, events }));
+});
+
+async function scopedLead(req: any, id: string) {
+  return prisma.lead.findFirst({ where: { id, ...(await leadScopeWhere(reqAdmin(req))) } });
+}
+
+adminRouter.post("/leads/:id/status", async (req, res) => {
+  const p = reqAdmin(req);
+  const lead = await scopedLead(req, req.params.id);
+  if (!lead) return res.status(404).send("Not found");
+  const to = clean(req.body?.status) || "";
+  if (!canTransition(lead.status, to)) return res.status(400).send("Invalid status transition.");
+  await prisma.$transaction([
+    prisma.lead.update({ where: { id: lead.id }, data: { status: to } }),
+    prisma.leadEvent.create({
+      data: { leadId: lead.id, orgId: lead.orgId, type: "status", fromValue: lead.status, toValue: to, actor: p.email || "admin" },
+    }),
+  ]);
+  res.redirect(`/admin/leads/${lead.id}`);
+});
+
+adminRouter.post("/leads/:id/assign", async (req, res) => {
+  const p = reqAdmin(req);
+  const lead = await scopedLead(req, req.params.id);
+  if (!lead) return res.status(404).send("Not found");
+  const to = clean(req.body?.assignedTo);
+  await prisma.$transaction([
+    prisma.lead.update({ where: { id: lead.id }, data: { assignedTo: to } }),
+    prisma.leadEvent.create({
+      data: { leadId: lead.id, orgId: lead.orgId, type: "assign", fromValue: lead.assignedTo, toValue: to, actor: p.email || "admin" },
+    }),
+  ]);
+  res.redirect(`/admin/leads/${lead.id}`);
+});
+
+adminRouter.post("/leads/:id/note", async (req, res) => {
+  const p = reqAdmin(req);
+  const lead = await scopedLead(req, req.params.id);
+  if (!lead) return res.status(404).send("Not found");
+  const note = clean(req.body?.note);
+  if (note) {
+    await prisma.leadEvent.create({
+      data: { leadId: lead.id, orgId: lead.orgId, type: "note", note, actor: p.email || "admin" },
+    });
+  }
+  res.redirect(`/admin/leads/${lead.id}`);
 });
 
 adminRouter.get("/leads.csv", async (req, res) => {
+  const status = leadStatusFilter(req);
+  const scope = await leadScopeWhere(reqAdmin(req));
   const leads = await prisma.lead.findMany({
-    where: await leadScopeWhere(reqAdmin(req)),
+    where: { ...scope, ...(status ? { status } : {}) },
     orderBy: { createdAt: "desc" },
     include: { card: true, asset: true },
   });
@@ -1064,7 +1131,7 @@ adminRouter.get("/leads.csv", async (req, res) => {
     [
       "created", "name", "email", "phone", "company", "note",
       "preferred_contact", "vehicle_interest", "trade_in", "service_need", "appointment", "consent",
-      "status", "campaign", "utm_source", "utm_medium", "utm_campaign", "referrer", "device",
+      "status", "assigned_to", "duplicate_of", "campaign", "utm_source", "utm_medium", "utm_campaign", "referrer", "device",
       "from_card", "department",
     ],
     ...leads.map((l) => [
@@ -1081,6 +1148,8 @@ adminRouter.get("/leads.csv", async (req, res) => {
       l.appointmentRequest ? "yes" : "",
       l.consent ? "yes" : "",
       l.status || "new",
+      l.assignedTo || "",
+      l.duplicateOfId || "",
       l.campaign || "",
       l.utmSource || "",
       l.utmMedium || "",

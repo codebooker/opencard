@@ -27,6 +27,7 @@ import { HIDEABLE_FIELDS, SIGNATURE_TOKENS, ROLE_SUGGESTIONS, asStringArray } fr
 import { ASSET_TYPES, ASSET_DEST_TYPES, assetTypeLabel } from "../assets";
 import { LEAD_FIELDS, DEFAULT_LEAD_FIELDS } from "../leadform";
 import { campaignRoutingToLines } from "../routing";
+import { LEAD_STATUSES, STATUS_LABELS, nextStatuses } from "../leadstatus";
 
 // Shared lead-form config block for the template + brand editors.
 function leadFormConfig(opts: {
@@ -1140,7 +1141,7 @@ export function analyticsView(stats: {
   return shell("Analytics", body);
 }
 
-export function leadsView(leads: any[]): string {
+export function leadsView(leads: any[], statusFilter = ""): string {
   const flags = (l: any) => {
     const f: string[] = [];
     if (l.tradeIn) f.push("trade-in");
@@ -1152,10 +1153,18 @@ export function leadsView(leads: any[]): string {
     const parts = [l.campaign, l.utmSource, l.device].filter(Boolean);
     return parts.length ? esc(parts.join(" · ")) : `<span class="muted">—</span>`;
   };
+  const filterLink = (val: string, label: string) =>
+    `<a class="btn secondary" href="/admin/leads${val ? `?status=${esc(val)}` : ""}" ${
+      statusFilter === val ? 'style="font-weight:700"' : ""
+    }>${esc(label)}</a>`;
   const body = `
-  <div class="topbar"><h2>Captured leads</h2><a class="btn" href="/admin/leads.csv">Export CSV</a></div>
+  <div class="topbar"><h2>Captured leads</h2><a class="btn" href="/admin/leads.csv${
+    statusFilter ? `?status=${esc(statusFilter)}` : ""
+  }">Export CSV</a></div>
+  <p style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="muted">Filter:</span>
+    ${filterLink("", "All")}${LEAD_STATUSES.map((s) => filterLink(s, STATUS_LABELS[s])).join("")}</p>
   <table>
-    <tr><th>When</th><th>Name</th><th>Contact</th><th>Interest</th><th>Source</th><th>Status</th><th>From card</th></tr>
+    <tr><th>When</th><th>Name</th><th>Contact</th><th>Interest</th><th>Source</th><th>Status</th><th>From</th></tr>
     ${
       leads.length
         ? leads
@@ -1164,7 +1173,9 @@ export function leadsView(leads: any[]): string {
         <td class="muted" style="white-space:nowrap">${esc(
           new Date(l.createdAt).toISOString().slice(0, 16).replace("T", " ")
         )}</td>
-        <td>${esc(l.name)}${l.company ? `<br><span class="muted" style="font-size:11px">${esc(l.company)}</span>` : ""}</td>
+        <td><a href="/admin/leads/${esc(l.id)}">${esc(l.name)}</a>${
+                l.duplicateOfId ? ` <span class="pill off" style="font-size:10px">dup</span>` : ""
+              }${l.company ? `<br><span class="muted" style="font-size:11px">${esc(l.company)}</span>` : ""}</td>
         <td style="font-size:12px">${esc(l.email || "")}${l.email && l.phone ? "<br>" : ""}${esc(l.phone || "")}${
                 l.preferredContact ? `<br><span class="muted">prefers ${esc(l.preferredContact)}</span>` : ""
               }</td>
@@ -1172,7 +1183,9 @@ export function leadsView(leads: any[]): string {
                 (l.vehicleInterest || l.serviceNeed) && flags(l) ? "<br>" : ""
               }${flags(l)}</td>
         <td style="font-size:12px">${source(l)}</td>
-        <td><span class="pill ${l.status === "new" ? "on" : "off"}">${esc(l.status || "new")}</span></td>
+        <td><span class="pill ${l.status === "new" ? "on" : "off"}">${esc(STATUS_LABELS[l.status] || l.status || "new")}</span>${
+                l.assignedTo ? `<br><span class="muted" style="font-size:11px">${esc(l.assignedTo)}</span>` : ""
+              }</td>
         <td>${
           l.card
             ? `<a href="/c/${esc(l.card.slug)}" target="_blank">${esc(l.card.firstName)} ${esc(l.card.lastName)}</a>${
@@ -1189,4 +1202,91 @@ export function leadsView(leads: any[]): string {
   </table>
   <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;
   return shell("Leads", body);
+}
+
+// Lead detail: full record + lifecycle controls (status/assign/note) + history.
+export function leadDetailView(data: { lead: any; events: any[] }): string {
+  const l = data.lead;
+  const src = l.card
+    ? `<a href="/c/${esc(l.card.slug)}" target="_blank">${esc(l.card.firstName)} ${esc(l.card.lastName)}</a> (card)`
+    : l.asset
+    ? `<a href="/a/${esc(l.asset.slug)}" target="_blank">${esc(l.asset.name)}</a> (asset)`
+    : "—";
+  const nexts = nextStatuses(l.status);
+  const field = (label: string, val: any) =>
+    val ? `<p style="margin:2px 0"><span class="muted">${esc(label)}:</span> ${esc(String(val))}</p>` : "";
+  const when = (d: any) => esc(new Date(d).toISOString().slice(0, 16).replace("T", " "));
+  const eventRows = data.events.length
+    ? data.events
+        .map((e) => {
+          const desc =
+            e.type === "status"
+              ? `Status ${esc(e.fromValue || "—")} → <strong>${esc(e.toValue || "—")}</strong>`
+              : e.type === "assign"
+              ? `Assigned to <strong>${esc(e.toValue || "(unassigned)")}</strong>`
+              : `Note: ${esc(e.note || "")}`;
+          return `<tr><td class="muted" style="white-space:nowrap">${when(e.createdAt)}</td><td>${desc}</td><td class="muted">${esc(
+            e.actor || ""
+          )}</td></tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="3" class="muted">No history yet.</td></tr>`;
+
+  const body = `
+  <h2>Lead — ${esc(l.name)}</h2>
+  ${
+    l.duplicateOfId
+      ? `<div class="stat" style="border:1px solid #d97706;background:#fffbeb;margin-bottom:12px"><strong>Possible duplicate</strong> of an earlier lead — <a href="/admin/leads/${esc(
+          l.duplicateOfId
+        )}">view original</a>.</div>`
+      : ""
+  }
+  <div class="stat" style="margin-bottom:14px">
+    <p style="margin:0 0 6px">Status: <span class="pill ${l.status === "new" ? "on" : "off"}">${esc(
+    STATUS_LABELS[l.status] || l.status
+  )}</span>${l.assignedTo ? ` · assigned to <strong>${esc(l.assignedTo)}</strong>` : ""}</p>
+    <p class="muted" style="margin:0">From: ${src} · ${when(l.createdAt)}</p>
+  </div>
+
+  <div class="grid2" style="max-width:820px">
+    <div class="stat"><strong>Contact</strong>
+      ${field("Email", l.email)}${field("Phone", l.phone)}${field("Preferred", l.preferredContact)}${field("Company", l.company)}
+      ${field("Vehicle interest", l.vehicleInterest)}${l.tradeIn ? field("Trade-in", "yes") : ""}${field("Service need", l.serviceNeed)}${
+    l.appointmentRequest ? field("Appointment", "requested") : ""
+  }${field("Note", l.note)}${field("Consent", l.consent ? "given" : "not given")}
+    </div>
+    <div class="stat"><strong>Attribution</strong>
+      ${field("Campaign", l.campaign)}${field("UTM source", l.utmSource)}${field("UTM medium", l.utmMedium)}${field(
+    "Device",
+    l.device
+  )}${field("Referrer", l.referrer)}
+    </div>
+  </div>
+
+  <div class="grid2" style="max-width:820px;margin-top:14px">
+    <form class="editor" method="POST" action="/admin/leads/${esc(l.id)}/status">
+      <label>Change status</label>
+      <select name="status">${
+        nexts.length
+          ? nexts.map((s) => `<option value="${esc(s)}">${esc(STATUS_LABELS[s] || s)}</option>`).join("")
+          : `<option value="">(no transitions)</option>`
+      }</select>
+      <p style="margin-top:8px"><button class="btn" type="submit" ${nexts.length ? "" : "disabled"}>Update status</button></p>
+    </form>
+    <form class="editor" method="POST" action="/admin/leads/${esc(l.id)}/assign">
+      <label>Assign to (handoff)</label>
+      <input name="assignedTo" type="email" value="${esc(l.assignedTo)}" placeholder="rep@dealer.com" />
+      <p style="margin-top:8px"><button class="btn secondary" type="submit">Assign</button></p>
+    </form>
+  </div>
+  <form class="editor" method="POST" action="/admin/leads/${esc(l.id)}/note" style="max-width:820px;margin-top:8px">
+    <label>Add a note</label>
+    <textarea name="note" rows="2" required></textarea>
+    <p style="margin-top:8px"><button class="btn secondary" type="submit">Add note</button></p>
+  </form>
+
+  <h3 style="margin-top:20px">History</h3>
+  <table><tr><th>When</th><th>Event</th><th>By</th></tr>${eventRows}</table>
+  <p style="margin-top:14px"><a class="btn secondary" href="/admin/leads">← Leads</a></p>`;
+  return shell("Lead", body);
 }
