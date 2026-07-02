@@ -55,14 +55,18 @@ export function loginPage(error?: string, info?: string, branding?: LoginBrandin
         <a class="btn secondary auth-sso" href="/me/login">Sign in with SSO</a>`
             : ""
         }
-        <p class="auth-foot">New here? <a href="/signup">Create an account</a></p>
+        ${
+          branding
+            ? ""
+            : `<p class="auth-foot">New here? <a href="/signup">Create an account</a></p>
         <details class="auth-breakglass">
           <summary>Break-glass token</summary>
           <form method="POST" action="/admin/login/token" style="margin-top:8px">
             <input name="token" type="password" placeholder="ADMIN_TOKEN" />
             <button class="btn secondary" type="submit" style="margin-top:8px">Use token</button>
           </form>
-        </details>
+        </details>`
+        }
       </div>
     </div>`,
   });
