@@ -439,6 +439,7 @@ export function domainsView(data: { domains: any[]; brands: any[]; target: strin
         <tr><td style="width:120px">Type</td><td><code>CNAME</code></td></tr>
         <tr><td>Name / Host</td><td><code>${esc(d.host)}</code></td></tr>
         <tr><td>Value / Target</td><td><code>${esc(target)}</code></td></tr>
+        <tr><td>Proxy (Cloudflare)</td><td><strong>DNS only</strong> — grey cloud, not proxied</td></tr>
       </tbody></table></div>`;
         })
         .join("")
@@ -454,6 +455,9 @@ export function domainsView(data: { domains: any[]; brands: any[]; target: strin
   const body = `
   <div class="topbar"><h2>Custom domains</h2><a class="btn secondary" href="/admin">Back</a></div>
   <p class="muted">Give your sign-in pages your own web address (e.g. <code>cards.yourco.com</code>). Add the domain, create the one DNS record shown, then click <strong>Verify</strong> — the secure certificate is set up automatically once DNS points to us.</p>
+  <p style="border-left:4px solid #d97706;background:#fffbeb;color:#7c2d12;padding:10px 12px;border-radius:6px;font-size:14px;max-width:none">
+    <strong>Using Cloudflare for your DNS?</strong> Set this record to <strong>DNS only</strong> (grey cloud) — <em>not</em> Proxied (orange cloud). A proxied record blocks our automatic certificate and the page will show an SSL error (525). You can switch it back to proxied only if you install your own Cloudflare Origin Certificate.
+  </p>
   ${data.flash ? `<p class="auth-banner" style="max-width:none">${esc(data.flash)}</p>` : ""}
   ${rows}
   <h3 style="margin-top:18px">Add a domain</h3>
