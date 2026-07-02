@@ -9,7 +9,9 @@ import { page, esc } from "../views/html";
 import { uniqueSlug, uniqueAssetSlug } from "../slug";
 import { upload, uploadedUrl } from "../upload";
 import { emitEvent, cardPayload, WEBHOOK_EVENTS, replayDelivery, sendTestEvent } from "../webhooks";
-import { parseOemBrands, parseCtaLines } from "../dealership";
+import { parseOemBrands, parseCtaLines, rooftopCtas, ctasFromJson, mergeCtas } from "../dealership";
+import { buildSignatureModel, renderSignatureHtml, renderSignatureText } from "../signature";
+import { signatureBlock } from "../views/signature-view";
 import { parseCampaignRoutingLines } from "../routing";
 import { LEAD_STATUSES, canTransition } from "../leadstatus";
 import { redirectTargetUrl, offboardCardUpdate, replacementCardData } from "../turnover";
@@ -908,6 +910,24 @@ adminRouter.post("/cards/:id/delete", async (req, res) => {
   await prisma.card.delete({ where: { id: req.params.id } });
   if (card) emitEvent("card.deleted", { id: card.id, slug: card.slug });
   res.redirect(`/admin/cards?locationId=${card?.locationId || ""}`);
+});
+
+// ---------- email signature ----------
+adminRouter.get("/cards/:id/signature", async (req, res) => {
+  const card = await prisma.card.findUnique({
+    where: { id: req.params.id },
+    include: { location: { include: { brand: true } }, template: true, dept: true },
+  });
+  if (!card) return res.status(404).send("Not found");
+  if (!(await RBAC.canAccessLocation(reqAdmin(req), card.locationId))) return forbidden(res);
+  const dealer = mergeCtas(
+    mergeCtas(ctasFromJson((card.dept as any)?.ctas), ctasFromJson((card.template as any)?.roleCtas)),
+    rooftopCtas(card.location as any)
+  );
+  const ctas = dealer.slice(0, 2).map((c) => ({ label: c.label, href: c.href }));
+  const model = buildSignatureModel(card, { cardBaseUrl: config.cardUrl, ctas });
+  const block = signatureBlock(renderSignatureHtml(model), renderSignatureText(model));
+  res.send(V.signaturePreviewView([card.firstName, card.lastName].filter(Boolean).join(" "), card.id, block));
 });
 
 // ---------- turnover / offboarding ----------

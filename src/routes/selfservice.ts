@@ -10,7 +10,10 @@ import { DEFAULT_SELF_FIELDS } from "../views/widgets";
 import { emailFromSamlProfile, getEnabledSamlForOrg } from "../saml";
 import { resolveOrgId, orgIdForHost, requestHost } from "../tenant-resolver";
 import { roleFlags, Role } from "../roles";
-import { effectiveSelfFields, asStringArray, renderSignature } from "../roletemplate";
+import { effectiveSelfFields, asStringArray } from "../roletemplate";
+import { rooftopCtas, ctasFromJson, mergeCtas } from "../dealership";
+import { buildSignatureModel, renderSignatureHtml, renderSignatureText } from "../signature";
+import { signatureBlock } from "../views/signature-view";
 import {
   signEmail,
   verifyEmail,
@@ -41,7 +44,7 @@ async function orgForRequest(req: any) {
 async function loadOwnCard(email: string, orgId: string) {
   return prisma.card.findFirst({
     where: { ownerEmail: { equals: email, mode: "insensitive" }, active: true, orgId },
-    include: { location: { include: { brand: true } }, template: true },
+    include: { location: { include: { brand: true } }, template: true, dept: true },
   });
 }
 
@@ -56,21 +59,15 @@ function allowedFields(card: any): string[] {
   return effectiveSelfFields(cardSelf, brandSelf, locked, DEFAULT_SELF_FIELDS);
 }
 
-// Rendered email signature for the cardholder (role template), or "".
-function cardSignature(card: any): string {
-  const phones = Array.isArray(card.phones) ? (card.phones as any[]) : [];
-  const emails = Array.isArray(card.emails) ? (card.emails as any[]) : [];
-  return renderSignature(card.template?.emailSignature, {
-    fullName: [card.firstName, card.lastName].filter(Boolean).join(" "),
-    firstName: card.firstName,
-    lastName: card.lastName,
-    title: card.title,
-    department: card.department,
-    company: card.company || card.location?.brand?.name,
-    phone: phones[0]?.value,
-    email: emails[0]?.value || card.ownerEmail,
-    cardUrl: `${config.cardUrl}/c/${card.slug}`,
-  });
+// Branded email-signature block (preview + copy) for the cardholder.
+function cardSignatureBlock(card: any): string {
+  const dealer = mergeCtas(
+    mergeCtas(ctasFromJson(card.dept?.ctas), ctasFromJson(card.template?.roleCtas)),
+    rooftopCtas(card.location)
+  );
+  const ctas = dealer.slice(0, 2).map((c) => ({ label: c.label, href: c.href }));
+  const model = buildSignatureModel(card, { cardBaseUrl: config.cardUrl, ctas });
+  return signatureBlock(renderSignatureHtml(model), renderSignatureText(model));
 }
 
 // ---- sign in ----
@@ -174,7 +171,7 @@ selfRouter.get("/", async (req, res) => {
   if (!email) return res.redirect("/me/login");
   const card = await loadOwnCard(email, await resolveOrgId(req));
   if (!card) return res.send(V.noCardPage(email));
-  res.send(V.selfEditPage(card, new Set(allowedFields(card)), email, req.query.saved === "1", cardSignature(card)));
+  res.send(V.selfEditPage(card, new Set(allowedFields(card)), email, req.query.saved === "1", cardSignatureBlock(card)));
 });
 
 const selfUploads = upload.fields([{ name: "photoFile", maxCount: 1 }]);

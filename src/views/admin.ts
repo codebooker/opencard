@@ -571,6 +571,7 @@ export function cardForm(opts: {
       <button class="btn" type="submit">Save ${esc(lower(t.cardSingular))}</button>
       ${opts.card ? `<a class="btn secondary" href="/c/${esc(opts.card.slug)}" target="_blank">Preview</a>` : ""}
       <a class="btn secondary" href="/admin/cards?locationId=${esc(opts.locationId)}">Cancel</a>
+      ${opts.card ? `<a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/signature">Email signature</a>` : ""}
       ${opts.card ? `<a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/turnover">Turn over</a>` : ""}
     </p>
   </form>
@@ -626,6 +627,18 @@ export function turnoverForm(opts: { card: any; rooftop: any; otherCards: any[];
     </p>
   </form>`;
   return shell("Turn over", body);
+}
+
+// Admin email-signature preview page (block rendered by the route).
+export function signaturePreviewView(fullName: string, cardId: string, block: string): string {
+  return shell(
+    "Email signature",
+    `
+  <h2>Email signature — ${esc(fullName)}</h2>
+  <p class="muted">A branded signature generated from this card. Paste it into Gmail / Outlook signature settings.</p>
+  ${block}
+  <p style="margin-top:14px"><a class="btn secondary" href="/admin/cards/${esc(cardId)}/edit">← Back to card</a></p>`
+  );
 }
 
 const pq = (s: any) => encodeURIComponent(s || "");
