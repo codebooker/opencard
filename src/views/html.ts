@@ -14,6 +14,10 @@ export function esc(s: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
+// Bump when styles.css changes so browsers/CDN refetch instead of serving a
+// stale cached copy (the stylesheet URL becomes a new cache key).
+export const ASSET_VER = "20260702a";
+
 export function page(opts: {
   title: string;
   body: string;
@@ -26,7 +30,7 @@ export function page(opts: {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${esc(opts.title)}</title>
-<link rel="stylesheet" href="/styles.css" />
+<link rel="stylesheet" href="/styles.css?v=${ASSET_VER}" />
 ${opts.head || ""}
 </head>
 <body class="${opts.bodyClass || ""}">
