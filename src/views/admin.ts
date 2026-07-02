@@ -320,7 +320,9 @@ export function brandForm(
 ): string {
   const b = brand || {};
   const action = brand ? `/admin/brands/${brand.id}` : "/admin/brands";
-  const loginDomain = ((b.domains as any[]) || []).find((d) => !d.locationId)?.host || "";
+  const brandDomains = (b.domains as any[]) || [];
+  const adminDomain = brandDomains.find((d) => !d.locationId && d.kind === "admin")?.host || "";
+  const userDomain = brandDomains.find((d) => !d.locationId && d.kind !== "admin")?.host || "";
   const body = `
   <h2>${brand ? "Edit" : "New"} ${esc(lower(t.brandSingular))}</h2>
   <form class="editor" method="POST" action="${action}" enctype="multipart/form-data">
@@ -370,9 +372,12 @@ export function brandForm(
       <div><label>End <span class="muted">(optional)</span></label><input type="datetime-local" name="signatureBannerEnd" value="${dtLocal(b.signatureBannerEnd)}" /></div>
     </div>
 
-    <h3 style="margin-top:16px">Branded login domain</h3>
-    <p class="muted">Point a hostname at OpenCard (add a CNAME to <code>tenants.opencard.id</code>) to give this brand a login page with its own logo &amp; colors. Rooftops can override with their own domain. Leave blank for none.</p>
-    <input name="loginDomain" value="${esc(loginDomain)}" placeholder="cards.yourbrand.com" />
+    <h3 style="margin-top:16px">Branded login domains</h3>
+    <p class="muted">Point hostnames at OpenCard (CNAME to <code>tenants.opencard.id</code>) for login pages with this brand's logo &amp; colors. Use separate hosts for the employee and admin portals — visiting each lands on the right sign-in. Rooftops can override. Leave blank for none.</p>
+    <div class="grid2">
+      <div><label>Employee login domain</label><input name="userDomain" value="${esc(userDomain)}" placeholder="cards.yourbrand.com" /></div>
+      <div><label>Admin login domain</label><input name="adminDomain" value="${esc(adminDomain)}" placeholder="cardadmin.yourbrand.com" /></div>
+    </div>
 
     <p style="margin-top:16px"><button class="btn" type="submit">Save brand</button>
     <a class="btn secondary" href="/admin">Cancel</a></p>
@@ -490,7 +495,9 @@ export function locationForm(
   const l = location || {};
   const addr = (l.address as Address) || {};
   const action = location ? `/admin/locations/${location.id}` : "/admin/locations";
-  const loginDomain = ((l.domains as any[]) || []).find((d) => d.locationId)?.host || "";
+  const locDomains = (l.domains as any[]) || [];
+  const locAdminDomain = locDomains.find((d) => d.locationId && d.kind === "admin")?.host || "";
+  const locUserDomain = locDomains.find((d) => d.locationId && d.kind !== "admin")?.host || "";
   const body = `
   <h2>${location ? "Edit" : "New"} ${esc(lower(t.locationSingular))}</h2>
   <form class="editor" method="POST" action="${action}" enctype="multipart/form-data">
@@ -551,9 +558,12 @@ export function locationForm(
 
     ${
       l.id
-        ? `<h3>Branded login domain (this ${esc(lower(t.locationSingular))})</h3>
-    <p class="muted">Overrides the brand's login domain for this rooftop — its own hostname, logo &amp; colors. Point a CNAME at <code>tenants.opencard.id</code>. Leave blank to use the brand's.</p>
-    <input name="loginDomain" value="${esc(loginDomain)}" placeholder="cards.thisrooftop.com" />`
+        ? `<h3>Branded login domains (this ${esc(lower(t.locationSingular))})</h3>
+    <p class="muted">Overrides the brand's domains for this rooftop — its own hostnames, logo &amp; colors (CNAME to <code>tenants.opencard.id</code>). Leave blank to use the brand's.</p>
+    <div class="grid2">
+      <div><label>Employee login domain</label><input name="userDomain" value="${esc(locUserDomain)}" placeholder="cards.thisrooftop.com" /></div>
+      <div><label>Admin login domain</label><input name="adminDomain" value="${esc(locAdminDomain)}" placeholder="cardadmin.thisrooftop.com" /></div>
+    </div>`
         : ""
     }
 

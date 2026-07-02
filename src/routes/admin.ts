@@ -187,18 +187,24 @@ function signatureConfig(b: any) {
   };
 }
 
-// Register/update/clear the branded-login domain for a brand or a rooftop.
-// `scope` is exactly one of { brandId } or { locationId }. Host is normalized;
-// blank clears it. Approved so Caddy on-demand TLS may issue a cert.
-async function setTenantDomain(orgId: string, scope: { brandId?: string; locationId?: string }, rawHost: string) {
+// Register/update/clear a branded-login domain for a brand or rooftop, of a given
+// kind ("admin" or "user"). `scope` is exactly one of { brandId } or { locationId }.
+// Host is normalized; blank clears the domain for that scope+kind. Approved so
+// Caddy on-demand TLS may issue a cert.
+async function setTenantDomain(
+  orgId: string,
+  scope: { brandId?: string; locationId?: string },
+  kind: "admin" | "user",
+  rawHost: string
+) {
   const host = normalizeHost(rawHost);
-  const where = scope.locationId ? { locationId: scope.locationId } : { brandId: scope.brandId, locationId: null };
-  await prisma.tenantDomain.deleteMany({ where });
+  const base = scope.locationId ? { locationId: scope.locationId } : { brandId: scope.brandId, locationId: null };
+  await prisma.tenantDomain.deleteMany({ where: { ...base, kind } });
   if (!host) return;
   await prisma.tenantDomain.upsert({
     where: { host },
-    update: { orgId, brandId: scope.brandId ?? null, locationId: scope.locationId ?? null, approved: true },
-    create: { host, orgId, brandId: scope.brandId ?? null, locationId: scope.locationId ?? null, approved: true },
+    update: { orgId, kind, brandId: scope.brandId ?? null, locationId: scope.locationId ?? null, approved: true },
+    create: { host, orgId, kind, brandId: scope.brandId ?? null, locationId: scope.locationId ?? null, approved: true },
   });
 }
 
@@ -562,7 +568,8 @@ adminRouter.post("/brands/:id", upload.single("logoFile"), async (req, res) => {
       ...campaignBanner(b),
     },
   });
-  await setTenantDomain(brand.orgId, { brandId: brand.id }, b.loginDomain);
+  await setTenantDomain(brand.orgId, { brandId: brand.id }, "admin", b.adminDomain);
+  await setTenantDomain(brand.orgId, { brandId: brand.id }, "user", b.userDomain);
   res.redirect("/admin");
 });
 
@@ -733,7 +740,8 @@ adminRouter.post("/locations/:id", upload.single("logoFile"), async (req, res) =
       ...signatureConfig(b),
     },
   });
-  await setTenantDomain(loc.orgId, { locationId: loc.id }, b.loginDomain);
+  await setTenantDomain(loc.orgId, { locationId: loc.id }, "admin", b.adminDomain);
+  await setTenantDomain(loc.orgId, { locationId: loc.id }, "user", b.userDomain);
   res.redirect("/admin");
 });
 
