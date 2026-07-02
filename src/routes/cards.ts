@@ -10,6 +10,7 @@ import { emitEvent, leadPayload } from "../webhooks";
 import { parseUtm } from "../attribution";
 import { assembleLead } from "../leadform";
 import { notifyLead } from "../notify";
+import { syncLeadToCrm } from "../crmsync-dispatch";
 import { findDuplicate } from "../leadstatus";
 
 export const cardsRouter = Router();
@@ -139,6 +140,7 @@ cardsRouter.post("/:slug/connect", async (req, res) => {
   });
   emitEvent("lead.captured", leadPayload(lead, { card }));
   notifyLead(lead, { card });
+  syncLeadToCrm(lead, { card });
   res.send(
     page({
       title: "Thanks!",

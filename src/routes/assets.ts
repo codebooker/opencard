@@ -10,6 +10,7 @@ import { parseUtm } from "../attribution";
 import { assembleLead } from "../leadform";
 import { emitEvent, leadPayload } from "../webhooks";
 import { notifyLead } from "../notify";
+import { syncLeadToCrm } from "../crmsync-dispatch";
 import { findDuplicate } from "../leadstatus";
 
 export const assetsRouter = Router();
@@ -74,6 +75,7 @@ assetsRouter.post("/:slug/connect", async (req, res) => {
   });
   emitEvent("lead.captured", leadPayload(lead, { asset }));
   notifyLead(lead, { asset });
+  syncLeadToCrm(lead, { asset });
   res.send(
     page({
       title: "Thanks!",

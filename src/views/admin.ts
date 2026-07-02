@@ -31,6 +31,7 @@ import { LEAD_FIELDS, DEFAULT_LEAD_FIELDS } from "../leadform";
 import { campaignRoutingToLines } from "../routing";
 import { LEAD_STATUSES, STATUS_LABELS, nextStatuses } from "../leadstatus";
 import { SIGNATURE_THEMES, SIGNATURE_ELEMENTS, asLockList, SignatureTheme } from "../signature";
+import { CRM_SOURCE_FIELDS } from "../crmsync";
 
 // Shared lead-form config block for the template + brand editors.
 function leadFormConfig(opts: {
@@ -1232,6 +1233,8 @@ export function integrationsView(data: {
   scimBaseUrl: string;
   scimTokenSet: boolean;
   newScimToken?: string | null;
+  crmIntegrations?: any[];
+  crmLocations?: { id: string; name: string }[];
 }): string {
   const keyScopes = (k: any) => {
     const s = Array.isArray(k.scopes) ? k.scopes : [];
@@ -1284,6 +1287,71 @@ export function integrationsView(data: {
     .map((ev) => `<label class="chk"><input type="checkbox" name="events" value="${esc(ev)}" ${ev === "lead.captured" ? "checked" : ""} /> ${esc(ev)}</label>`)
     .join("");
   const saml = data.saml || {};
+
+  // ---- CRM / marketing sync section ----
+  const syncBadge = (s: string) =>
+    s === "sent"
+      ? `<span class="pill on">sent</span>`
+      : s === "failed"
+      ? `<span class="pill off">failed</span>`
+      : s === "dead"
+      ? `<span class="pill off">dead-letter</span>`
+      : `<span class="pill">${esc(s)}</span>`;
+  const crmIntegrations = data.crmIntegrations || [];
+  const crmLocations = data.crmLocations || [];
+  const crmRows = crmIntegrations.length
+    ? crmIntegrations
+        .map((c) => {
+          const scope = c.locationId ? esc(crmLocations.find((l) => l.id === c.locationId)?.name || "one rooftop") : "All rooftops";
+          const logs = (c.syncLogs || [])
+            .map(
+              (g: any) =>
+                `<div class="muted" style="font-size:12px;margin-top:4px">${syncBadge(g.status)} ${
+                  g.responseCode ? `HTTP ${g.responseCode}` : ""
+                } · ${esc(new Date(g.updatedAt).toISOString().slice(0, 16).replace("T", " "))}${
+                  g.lastError ? ` · ${esc(String(g.lastError).slice(0, 80))}` : ""
+                }${
+                  g.status === "failed"
+                    ? ` <form method="POST" action="/admin/crm/logs/${esc(g.id)}/retry" style="display:inline"><button class="btn secondary" style="padding:2px 8px;font-size:11px" type="submit">Retry</button></form>`
+                    : ""
+                }</div>`
+            )
+            .join("");
+          return `<div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start">
+          <div><strong>${esc(c.name)}</strong> <span class="pill">${esc(c.provider)}</span> ${
+            c.enabled ? `<span class="pill on">enabled</span>` : `<span class="pill off">off</span>`
+          }<br><span class="muted" style="font-size:12px">→ <code>${esc(String(c.endpoint || "").slice(0, 60))}</code> · ${esc(scope)}</span></div>
+          <div style="white-space:nowrap">
+            <form method="POST" action="/admin/crm/${esc(c.id)}/test" style="display:inline"><button class="btn secondary" type="submit">Send test</button></form>
+            <form method="POST" action="/admin/crm/${esc(c.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this integration?')"><button class="btn danger" type="submit">Delete</button></form>
+          </div>
+        </div>
+        ${logs || `<div class="muted" style="font-size:12px;margin-top:4px">No sync attempts yet.</div>`}
+      </div>`;
+        })
+        .join("")
+    : `<p class="muted">No CRM integrations yet. Add one below — leads captured from cards and QR assets are pushed automatically.</p>`;
+  const crmScopeOptions =
+    `<option value="">All rooftops</option>` +
+    crmLocations.map((l) => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join("");
+  const crmFieldHelp = CRM_SOURCE_FIELDS.map(([k]) => `<code>${esc(k)}</code>`).join(", ");
+  const crmSection = `
+  <h3 style="margin-top:28px">CRM &amp; marketing sync</h3>
+  <p class="muted">Push every captured lead to your CRM, Zapier, or Make in real time. Point it at a Zapier/Make "Catch Hook" (or any webhook) URL — we POST a normalized lead payload. Field mapping and per-rooftop routing are optional.</p>
+  ${crmRows}
+  <form class="editor" method="POST" action="/admin/crm" style="margin-top:12px;max-width:620px">
+    <label>Name</label>
+    <input name="name" placeholder="e.g. HubSpot via Zapier" required />
+    <label style="margin-top:10px">Webhook URL <span class="muted">(Zapier/Make catch hook or any endpoint)</span></label>
+    <input name="endpoint" type="url" placeholder="https://hooks.zapier.com/hooks/catch/..." required />
+    <label style="margin-top:10px">Applies to</label>
+    <select name="locationId">${crmScopeOptions}</select>
+    <label style="margin-top:10px">Field mapping <span class="muted">(optional, one per line: <code>targetKey = leadField</code>; blank = send all fields)</span></label>
+    <textarea name="fieldMap" rows="3" placeholder="firstname = name&#10;email = email&#10;phone = phone"></textarea>
+    <p class="muted" style="font-size:12px;margin:6px 0 0">Lead fields: ${crmFieldHelp}</p>
+    <p style="margin-top:10px"><button class="btn" type="submit">Add integration</button></p>
+  </form>`;
 
   const body = `
   <h2>Integrations</h2>
@@ -1385,6 +1453,8 @@ export function integrationsView(data: {
     <div class="self-fields">${eventChecks}</div>
     <p style="margin-top:10px"><button class="btn" type="submit">Add webhook</button></p>
   </form>
+
+  ${crmSection}
 
   <p style="margin-top:18px"><a class="btn secondary" href="/admin">← Back</a></p>`;
   return shell("Integrations", body);

@@ -54,7 +54,52 @@ model Org {
   assets            Asset[]
   leadEvents        LeadEvent[]
   domains           TenantDomain[]
+  crmIntegrations   CrmIntegration[]
+  crmSyncLogs       CrmSyncLog[]
   createdAt   DateTime @default(now())
+}
+
+// A per-org CRM / marketing sync target (Phase 7). Provider "zapier" is a generic
+// webhook (Zapier / Make / any endpoint) that receives a normalized lead payload;
+// HubSpot / Salesforce providers plug in later. `fieldMap` maps target keys to
+// lead source fields; empty = a default normalized record. `locationId` scopes an
+// integration to one rooftop (null = all rooftops in the org).
+model CrmIntegration {
+  id          String       @id @default(cuid())
+  org         Org          @relation(fields: [orgId], references: [id])
+  orgId       String
+  provider    String       @default("zapier") // zapier | hubspot | salesforce
+  name        String
+  enabled     Boolean      @default(true)
+  endpoint    String? // webhook URL for the zapier/generic provider
+  fieldMap    Json         @default("{}") // { targetKey: leadSourceField }
+  locationId  String? // optional per-rooftop routing (null = all rooftops)
+  maxAttempts Int          @default(5)
+  syncLogs    CrmSyncLog[]
+  createdAt   DateTime     @default(now())
+
+  @@index([orgId])
+}
+
+// One sync attempt of a lead to a CRM integration, with retry / dead-letter state.
+model CrmSyncLog {
+  id            String         @id @default(cuid())
+  org           Org            @relation(fields: [orgId], references: [id])
+  orgId         String
+  integration   CrmIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  integrationId String
+  leadId        String
+  provider      String
+  status        String         @default("pending") // pending | sent | failed | dead
+  attempts      Int            @default(0)
+  responseCode  Int?
+  lastError     String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([orgId])
+  @@index([integrationId])
+  @@index([status])
 }
 
 // A hostname a client points at us (via CNAME) for a branded login. Maps a host

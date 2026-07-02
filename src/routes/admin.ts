@@ -17,6 +17,8 @@ import { LEAD_STATUSES, canTransition } from "../leadstatus";
 import { isConsole, isPlatformRole, PLATFORM_ROLES, assignableStaffRoles, canManageStaffTarget } from "../roles";
 import { loginBrandingForHost, requestHost } from "../tenant-resolver";
 import { normalizeHost } from "../branding";
+import { parseFieldMapLines } from "../crmsync";
+import { sendTestSync, retrySync } from "../crmsync-dispatch";
 import { promises as dns } from "dns";
 import { evaluateDomain, CNAME_TARGET } from "../domainstatus";
 
@@ -1413,7 +1415,7 @@ adminRouter.get("/leads.csv", async (req, res) => {
 // API keys and webhooks are per-org; only platform owners see across orgs.
 async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: string | null = null, newScimToken: string | null = null) {
   const orgFilter = RBAC.seesAllOrgs(p) ? {} : { orgId: p.orgId };
-  const [keys, endpoints, saml, org] = await Promise.all([
+  const [keys, endpoints, saml, org, crmIntegrations, crmLocations] = await Promise.all([
     prisma.apiKey.findMany({ where: orgFilter, orderBy: { createdAt: "desc" } }),
     prisma.webhookEndpoint.findMany({
       where: orgFilter,
@@ -1425,6 +1427,12 @@ async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: stri
       where: { id: p.orgId },
       select: { scimTokenHash: true, subdomain: true, customDomain: true },
     }),
+    prisma.crmIntegration.findMany({
+      where: orgFilter,
+      orderBy: { createdAt: "desc" },
+      include: { syncLogs: { orderBy: { updatedAt: "desc" }, take: 5 } },
+    }),
+    prisma.location.findMany({ where: orgFilter, orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
   const samlHost = org ? orgCanonicalHost(org) : null;
   res.send(
@@ -1444,6 +1452,8 @@ async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: stri
       scimBaseUrl: `${config.baseUrl}/scim/v2`,
       scimTokenSet: !!org?.scimTokenHash,
       newScimToken,
+      crmIntegrations,
+      crmLocations,
     })
   );
 }
@@ -1452,6 +1462,58 @@ adminRouter.get("/integrations", (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canManageIntegrations(p)) return forbidden(res);
   return renderIntegrations(res, p);
+});
+
+// ---------- CRM / marketing sync (Phase 7.1) ----------
+adminRouter.post("/crm", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  if (!(await ensureFeature(res, p.orgId, "crmSync", "CRM sync"))) return;
+  const b = req.body || {};
+  const name = clean(b.name);
+  const endpoint = clean(b.endpoint);
+  if (!name || !endpoint) return res.redirect("/admin/integrations");
+  // Scope to a rooftop the admin can reach, or all rooftops in the org.
+  let locationId: string | null = null;
+  if (b.locationId) {
+    const loc = await prisma.location.findFirst({ where: { id: String(b.locationId), orgId: p.orgId } });
+    locationId = loc ? loc.id : null;
+  }
+  await prisma.crmIntegration.create({
+    data: {
+      orgId: p.orgId,
+      provider: "zapier",
+      name,
+      endpoint,
+      fieldMap: parseFieldMapLines(b.fieldMap) as any,
+      locationId,
+      enabled: true,
+    },
+  });
+  res.redirect("/admin/integrations");
+});
+
+adminRouter.post("/crm/:id/delete", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  await prisma.crmIntegration.deleteMany({
+    where: RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
+  });
+  res.redirect("/admin/integrations");
+});
+
+adminRouter.post("/crm/:id/test", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  await sendTestSync(req.params.id, p.orgId);
+  res.redirect("/admin/integrations");
+});
+
+adminRouter.post("/crm/logs/:id/retry", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  await retrySync(req.params.id, p.orgId);
+  res.redirect("/admin/integrations");
 });
 
 adminRouter.post("/api-keys", async (req, res) => {
