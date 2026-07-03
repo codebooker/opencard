@@ -8,6 +8,14 @@ datasource db {
 }
 
 // Top-level tenant: your company / this deployment.
+// Platform-wide settings, editable by OpenCard staff in the UI (no code
+// changes / redeploys). Single row with a fixed id.
+model PlatformConfig {
+  id              String @id @default("platform")
+  signupPlan      String @default("starter") // plan tier for self-service signups
+  signupTrialDays Int    @default(30)        // trial length for self-service signups
+}
+
 model Org {
   id          String   @id @default(cuid())
   name        String

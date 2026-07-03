@@ -125,6 +125,33 @@ type BrandWithLocations = {
   locations: LocationLite[];
 };
 
+// Platform settings (OpenCard staff): defaults applied to self-service signups.
+export function platformSettingsView(cfg: { signupPlan: string; signupTrialDays: number }, saved = false): string {
+  const planOpts = PLAN_ORDER.map(
+    (k) => `<option value="${k}" ${cfg.signupPlan === k ? "selected" : ""}>${esc(PLANS[k].label)} — ${esc(PLANS[k].price)}</option>`
+  ).join("");
+  const body = `
+  <p class="crumb"><a href="/admin/clients">← Clients</a></p>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>Platform settings</h2>
+      <p class="muted" style="margin:0">Defaults for new accounts created through public signup. Changing these affects future signups only.</p>
+    </div>
+  </div>
+  ${saved ? `<p class="auth-banner" style="max-width:560px">✓ Saved. New signups will use these defaults.</p>` : ""}
+  <form class="editor" method="POST" action="/admin/platform" style="max-width:560px">
+    <label>Plan tier for new signups</label>
+    <select name="signupPlan">${planOpts}</select>
+    ${planGuide()}
+    <label>Trial length (days)</label>
+    <input name="signupTrialDays" type="number" min="1" max="365" value="${cfg.signupTrialDays}" required />
+    <p class="muted" style="margin:6px 0 0">1–365 days. Signups start in Standard billing as "trialing"; the workspace locks when the trial ends unless they subscribe (or you change their billing type).</p>
+    <div class="form-actions"><button class="btn" type="submit">Save settings</button>
+    <a class="btn secondary" href="/admin/clients">Cancel</a></div>
+  </form>`;
+  return shell("Platform settings", body);
+}
+
 // The OpenCard staff console: every client workspace in the system. Platform
 // staff see this instead of a client dashboard (no plan/billing of their own).
 export function clientsConsole(orgs: any[], p: AdminPrincipal): string {
@@ -154,7 +181,9 @@ export function clientsConsole(orgs: any[], p: AdminPrincipal): string {
       <p class="muted" style="margin:0">Signed in as ${esc(p.name)} · <strong>OpenCard staff</strong></p>
     </div>
     <div>${
-      p.staffAdmin ? `<a class="btn secondary" href="/admin/staff">Staff</a> ` : ""
+      p.staffAdmin
+        ? `<a class="btn secondary" href="/admin/staff">Staff</a> <a class="btn secondary" href="/admin/platform">Settings</a> `
+        : ""
     }<a class="btn secondary" href="/admin/security">Security</a> <a class="btn" href="/admin/clients/new">+ New client</a></div>
   </div>
   <p class="muted">Every workspace in the system. “Manage” administers a client's brands, cards, leads and SSO; “Edit” sets its plan and seat allowance.</p>

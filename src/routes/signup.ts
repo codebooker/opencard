@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma, runWithOrg } from "../db";
 import { config } from "../config";
 import { hashPassword } from "../security";
+import { getPlatformConfig } from "../platform-config";
 import { page, esc } from "../views/html";
 
 // Public self-service onboarding: create a new tenant (Org) with its first owner
@@ -78,8 +79,13 @@ signupRouter.post("/", async (req, res) => {
   // Create the tenant + its owner. Org and AdminUser are not RLS-scoped (they're
   // needed before any tenant context exists); the brand + rooftop are created
   // under the new org's RLS context as a consistency check.
-  const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14-day trial
-  const org = await prisma.org.create({ data: { name: orgName, plan: "starter", subscriptionStatus: "trialing", trialEndsAt } });
+  // Plan tier + trial length come from the staff-editable platform settings
+  // (defaults: starter, 30 days).
+  const defaults = await getPlatformConfig();
+  const trialEndsAt = new Date(Date.now() + defaults.signupTrialDays * 24 * 60 * 60 * 1000);
+  const org = await prisma.org.create({
+    data: { name: orgName, plan: defaults.signupPlan, subscriptionStatus: "trialing", trialEndsAt },
+  });
   await prisma.adminUser.create({
     data: { email, name: adminName, role: "org_owner", orgId: org.id, passwordHash: hashPassword(password) },
   });

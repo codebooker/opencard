@@ -27,6 +27,7 @@ import { recordAudit, reqIp } from "../audit-log";
 import { buildOrgExport, purgeOrgData } from "../data-bundle";
 import { exportFilename } from "../dataexport";
 import { parseRetentionDays } from "../retention";
+import { getPlatformConfig, updatePlatformConfig } from "../platform-config";
 import { clean, parseLabeled, parseSocials, parseAddress } from "../parse";
 import { pruneOrgLeads } from "../retention-prune";
 
@@ -274,6 +275,24 @@ const VALID_MODES = ["free", "standard", "demo"];
 adminRouter.get("/clients/new", (req, res) => {
   if (!reqAdmin(req).platform) return forbidden(res);
   res.send(V.clientForm());
+});
+
+// ---------- platform settings (signup defaults) ----------
+adminRouter.get("/platform", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.platform || !p.staffAdmin) return forbidden(res);
+  res.send(V.platformSettingsView(await getPlatformConfig(), req.query.saved === "1"));
+});
+
+adminRouter.post("/platform", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.platform || !p.staffAdmin) return forbidden(res);
+  const saved = await updatePlatformConfig({
+    signupPlan: String(req.body?.signupPlan || ""),
+    signupTrialDays: parseInt(String(req.body?.signupTrialDays || ""), 10),
+  });
+  audit(req, p, "platform.settings", { targetType: "PlatformConfig", summary: JSON.stringify(saved) });
+  res.redirect("/admin/platform?saved=1");
 });
 
 adminRouter.post("/clients", async (req, res) => {
