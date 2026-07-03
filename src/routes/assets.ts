@@ -29,6 +29,7 @@ async function loadAsset(slug: string, orgId: string | null) {
       location: { include: { brand: true } },
       destinationCard: { select: { slug: true, active: true } },
       event: true,
+      org: { select: { vertical: true } },
     },
   });
 }

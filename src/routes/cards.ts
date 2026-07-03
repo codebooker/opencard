@@ -35,7 +35,7 @@ async function loadCard(slug: string, orgId: string | null) {
   return prisma.card.findFirst({
     // org.suspended gates every public surface for a suspended client.
     where: { slug, active: true, org: { suspended: false, ownerVerifiedAt: { not: null } }, ...(orgId ? { orgId } : {}) },
-    include: { location: { include: { brand: true } }, template: true, dept: true },
+    include: { location: { include: { brand: true } }, template: true, dept: true, org: { select: { vertical: true } } },
   });
 }
 const hostOrg = (req: Request) => orgIdForHost(requestHost(req));

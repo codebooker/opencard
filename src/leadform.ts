@@ -21,6 +21,21 @@ export const LEAD_FIELDS: [string, string][] = [
 export const DEFAULT_LEAD_FIELDS = ["email", "phone", "vehicleInterest", "note", "consent"];
 export const DEFAULT_CONSENT_TEXT = "I agree to be contacted about my inquiry.";
 
+// Vertical-specific fields: offered and defaulted only for dealerships.
+export const DEALERSHIP_LEAD_FIELDS = ["vehicleInterest", "tradeIn", "serviceNeed"];
+export const GENERAL_DEFAULT_LEAD_FIELDS = ["email", "phone", "note", "consent"];
+
+// The lead-form field choices an admin may enable, per vertical.
+export function leadFieldChoicesFor(vertical?: string | null): [string, string][] {
+  if (vertical === "dealership") return LEAD_FIELDS;
+  return LEAD_FIELDS.filter(([k]) => !DEALERSHIP_LEAD_FIELDS.includes(k));
+}
+
+// The built-in default field set, per vertical.
+export function defaultLeadFieldsFor(vertical?: string | null): string[] {
+  return vertical === "dealership" ? DEFAULT_LEAD_FIELDS : GENERAL_DEFAULT_LEAD_FIELDS;
+}
+
 // Which fields to show: template override -> brand default -> built-in defaults.
 // null/undefined = inherit; an explicit array (even empty) is used as-is.
 export function resolveLeadFields(

@@ -1,6 +1,6 @@
 import { esc, page } from "./html";
 import { rooftopCtas, parseOemBrands } from "../dealership";
-import { resolveLeadFields, resolveConsentText } from "../leadform";
+import { resolveLeadFields, resolveConsentText, defaultLeadFieldsFor } from "../leadform";
 import { renderLeadForm, leadRefScript, LeadAttribution } from "./leadform-view";
 
 // A lightweight dealership landing page for a rooftop/department asset (no person).
@@ -12,7 +12,7 @@ export function renderAssetLanding(asset: any, baseUrl: string, attribution: Lea
   const ctas = rooftopCtas(loc);
   const addr = (loc.address as any) || {};
   const addrText = [addr.line1, addr.city, addr.region, addr.postal].filter(Boolean).join(", ");
-  const leadFieldSet = new Set(resolveLeadFields(null, loc.brand?.leadFields));
+  const leadFieldSet = new Set(resolveLeadFields(null, loc.brand?.leadFields, defaultLeadFieldsFor(asset.org?.vertical)));
   const consentText = resolveConsentText(null, loc.brand?.leadConsentText);
 
   const body = `

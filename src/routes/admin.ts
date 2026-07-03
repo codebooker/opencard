@@ -56,6 +56,7 @@ import { buildOrgExport, purgeOrgData } from "../data-bundle";
 import { exportFilename } from "../dataexport";
 import { parseRetentionDays } from "../retention";
 import { getPlatformConfig, updatePlatformConfig } from "../platform-config";
+import { isVertical } from "../terminology";
 import { clean, parseLabeled, parseSocials, parseAddress } from "../parse";
 import { pruneOrgLeads } from "../retention-prune";
 
@@ -433,6 +434,7 @@ adminRouter.post("/clients", async (req, res) => {
   await prisma.org.create({
     data: {
       name,
+      vertical: isVertical(b.businessType) ? b.businessType : "general",
       plan: isPlanKey(b.plan) ? b.plan : "starter",
       billingMode: mode,
       seatLimit: parseSeatLimit(b.seatLimit),
@@ -456,6 +458,7 @@ adminRouter.post("/clients/:orgId/settings", async (req, res) => {
   const b = req.body;
   const data: any = { seatLimit: parseSeatLimit(b.seatLimit) };
   if (clean(b.name)) data.name = clean(b.name);
+  if (isVertical(b.businessType)) data.vertical = b.businessType;
   if (isPlanKey(b.plan)) data.plan = b.plan;
   if (VALID_MODES.includes(b.billingMode)) {
     data.billingMode = b.billingMode;
@@ -528,7 +531,7 @@ adminRouter.get("/clients/exit", (_req, res) => {
 
 adminRouter.get("/", async (req, res) => {
   const p = reqAdmin(req);
-  const t = await currentTerminology();
+  const t = await currentTerminology(reqAdmin(req).orgId);
   // OpenCard staff who haven't drilled into a client see the clients console.
   if (isConsole(p)) return res.redirect("/admin/clients");
   const brandIds = await RBAC.accessibleBrandIds(p);
@@ -819,11 +822,11 @@ adminRouter.post("/billing/portal", async (req, res) => {
 // ---------- brands ----------
 adminRouter.get("/brands/new", async (req, res) => {
   if (!RBAC.canCreateBrand(reqAdmin(req))) return forbidden(res);
-  res.send(V.brandForm(undefined, undefined, await currentTerminology()));
+  res.send(V.brandForm(undefined, undefined, await currentTerminology(reqAdmin(req).orgId)));
 });
 adminRouter.get("/brands/:id/edit", async (req, res) => {
   if (!await RBAC.canManageBrandScoped(reqAdmin(req),req.params.id)) return forbidden(res);
-  const t = await currentTerminology();
+  const t = await currentTerminology(reqAdmin(req).orgId);
   const brand = await prisma.brand.findUnique({
     where: { id: req.params.id },
     include: { locations: { include: { _count: { select: { cards: true } } } }, domains: true },
@@ -930,13 +933,13 @@ adminRouter.get("/templates", async (req, res) => {
 adminRouter.get("/templates/new", async (req, res) => {
   const brandId = String(req.query.brandId || "");
   if (!await RBAC.canManageBrandScoped(reqAdmin(req),brandId)) return forbidden(res);
-  res.send(V.templateForm(brandId));
+  res.send(V.templateForm(brandId, undefined, await currentTerminology(reqAdmin(req).orgId)));
 });
 adminRouter.get("/templates/:id/edit", async (req, res) => {
   const tpl = await prisma.template.findUnique({ where: { id: req.params.id } });
   if (!tpl) return res.status(404).send("Not found");
   if (!await RBAC.canManageBrandScoped(reqAdmin(req),tpl.brandId)) return forbidden(res);
-  res.send(V.templateForm(tpl.brandId, tpl));
+  res.send(V.templateForm(tpl.brandId, tpl, await currentTerminology(reqAdmin(req).orgId)));
 });
 
 function templateData(b: any) {
@@ -1009,13 +1012,13 @@ function rooftopProfile(b: any) {
 adminRouter.get("/locations/new", async (req, res) => {
   const brandId = String(req.query.brandId || "");
   if (!await RBAC.canManageBrandScoped(reqAdmin(req),brandId)) return forbidden(res);
-  res.send(V.locationForm(brandId, undefined, await currentTerminology()));
+  res.send(V.locationForm(brandId, undefined, await currentTerminology(reqAdmin(req).orgId)));
 });
 adminRouter.get("/locations/:id/edit", async (req, res) => {
   const loc = await prisma.location.findUnique({ where: { id: req.params.id }, include: { domains: true } });
   if (!loc) return res.status(404).send("Not found");
   if (!await RBAC.canManageBrandScoped(reqAdmin(req),loc.brandId)) return forbidden(res);
-  res.send(V.locationForm(loc.brandId, loc, await currentTerminology()));
+  res.send(V.locationForm(loc.brandId, loc, await currentTerminology(reqAdmin(req).orgId)));
 });
 adminRouter.post("/locations", upload.single("logoFile"), async (req, res) => {
   const p = reqAdmin(req);
@@ -1159,7 +1162,7 @@ adminRouter.get("/locations/:id/departments", async (req, res) => {
     where: { locationId: loc.id },
     orderBy: { name: "asc" },
   });
-  res.send(V.departmentsView({ location: loc, departments }));
+  res.send(V.departmentsView({ location: loc, departments }, await currentTerminology(reqAdmin(req).orgId)));
 });
 
 adminRouter.post("/locations/:id/departments", async (req, res) => {
@@ -1268,7 +1271,7 @@ adminRouter.post("/assets/:id/delete", async (req, res) => {
 
 // ---------- cards ----------
 adminRouter.get("/cards", async (req, res) => {
-  const t = await currentTerminology();
+  const t = await currentTerminology(reqAdmin(req).orgId);
   const locationId = String(req.query.locationId || "");
   if (!(await RBAC.canAccessLocation(reqAdmin(req), locationId))) return forbidden(res);
   const loc = await prisma.location.findUnique({ where: { id: locationId } });
@@ -1285,7 +1288,7 @@ function brandFields(brand: { selfEditFields: unknown } | null): string[] | unde
 }
 
 adminRouter.get("/cards/new", async (req, res) => {
-  const t = await currentTerminology();
+  const t = await currentTerminology(reqAdmin(req).orgId);
   const locationId = String(req.query.locationId || "");
   if (!(await RBAC.canAccessLocation(reqAdmin(req), locationId))) return forbidden(res);
   const loc = await prisma.location.findUnique({
@@ -1299,7 +1302,7 @@ adminRouter.get("/cards/new", async (req, res) => {
 });
 
 adminRouter.get("/cards/:id/edit", async (req, res) => {
-  const t = await currentTerminology();
+  const t = await currentTerminology(reqAdmin(req).orgId);
   const card = await prisma.card.findUnique({
     where: { id: req.params.id },
     include: { location: { include: { brand: true } } },
@@ -1659,6 +1662,7 @@ adminRouter.get("/analytics", async (req, res) => {
 
   res.send(
     V.analyticsView({
+      locationLabel: (await currentTerminology(p.orgId)).locationSingular,
       totals,
       leadCount,
       conversion: conversionPct(leadCount, totals["view"] || 0),
@@ -1775,7 +1779,7 @@ adminRouter.get("/events", async (req, res) => {
     }),
     prisma.location.findMany({ where: scope, select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
-  res.send(V.eventsView({ events, locations }));
+  res.send(V.eventsView({ events, locations }, await currentTerminology(reqAdmin(req).orgId)));
 });
 
 adminRouter.post("/events", async (req, res) => {
@@ -1809,7 +1813,7 @@ adminRouter.get("/events/:id", async (req, res) => {
     select: { id: true, name: true },
     orderBy: { name: "asc" },
   });
-  res.send(V.eventDetailView({ ev, scans, leads, baseUrl: config.cardUrl, locations }));
+  res.send(V.eventDetailView({ ev, scans, leads, baseUrl: config.cardUrl, locations }, await currentTerminology(reqAdmin(req).orgId)));
 });
 
 adminRouter.post("/events/:id", async (req, res) => {

@@ -4,7 +4,7 @@ import { safeUrl } from "../parse";
 import { esc, page } from "./html";
 import { rooftopCtas, parseOemBrands, ctasFromJson, mergeCtas } from "../dealership";
 import { asStringArray, isHidden, resolveShowQr, renderSignature } from "../roletemplate";
-import { resolveLeadFields, resolveConsentText } from "../leadform";
+import { resolveLeadFields, resolveConsentText, defaultLeadFieldsFor } from "../leadform";
 import { renderLeadForm, LeadAttribution } from "./leadform-view";
 
 export type FullCard = Card & {
@@ -81,7 +81,9 @@ export function renderCardPage(
   const leadCapture = (card.template as any)?.leadCapture !== false;
   const brand = card.location.brand as any;
   const tpl = card.template as any;
-  const leadFieldSet = new Set(resolveLeadFields(tpl?.leadFields, brand?.leadFields));
+  const leadFieldSet = new Set(
+    resolveLeadFields(tpl?.leadFields, brand?.leadFields, defaultLeadFieldsFor((card as any).org?.vertical))
+  );
   const consentText = resolveConsentText(tpl?.leadConsentText, brand?.leadConsentText);
   const fullName = [card.prefix, card.firstName, card.lastName].filter(Boolean).join(" ");
   const phones = asLabeled(card.phones);

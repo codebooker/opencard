@@ -6,6 +6,7 @@ import { getPlatformConfig } from "../platform-config";
 import { issueToken } from "../account";
 import { sendMail } from "../notify";
 import { mailEnabled } from "../config";
+import { VERTICALS, isVertical } from "../terminology";
 import { page, esc } from "../views/html";
 
 // Public self-service onboarding: create a new tenant (Org) with its first owner
@@ -30,7 +31,11 @@ function signupPage(opts: { values?: any; error?: string } = {}): string {
         ${opts.error ? `<p class="auth-error">${esc(opts.error)}</p>` : ""}
         <form method="POST" action="/signup" class="auth-form">
           <label>Organization name</label>
-          <input name="orgName" value="${esc(v.orgName || "")}" placeholder="Acme Auto Group" required autofocus />
+          <input name="orgName" value="${esc(v.orgName || "")}" placeholder="Acme Inc" required autofocus />
+          <label>Business type</label>
+          <select name="businessType">${VERTICALS.map(
+            ([val, label]) => `<option value="${esc(val)}" ${v.businessType === val ? "selected" : ""}>${esc(label)}</option>`
+          ).join("")}</select>
           <label>Your name</label>
           <input name="adminName" value="${esc(v.adminName || "")}" placeholder="Jane Doe" required />
           <label>Work email</label>
@@ -70,8 +75,9 @@ signupRouter.post("/", async (req, res) => {
   const password = String(b.password || "");
   const brandName = clean(b.brandName) || orgName;
   const locationName = clean(b.locationName) || "Main";
+  const businessType = isVertical(b.businessType) ? b.businessType : "general";
 
-  const values = { orgName, adminName, email, brandName, locationName };
+  const values = { orgName, adminName, email, brandName, locationName, businessType };
   if (!orgName || !adminName || !email) return res.status(400).send(signupPage({ values, error: "All required fields must be filled in." }));
   if (!validEmail(email)) return res.status(400).send(signupPage({ values, error: "Enter a valid email address." }));
   if (password.length < 8) return res.status(400).send(signupPage({ values, error: "Password must be at least 8 characters." }));
@@ -89,6 +95,7 @@ signupRouter.post("/", async (req, res) => {
   const org = await prisma.org.create({
     data: {
       name: orgName,
+      vertical: businessType,
       plan: defaults.signupPlan,
       subscriptionStatus: "trialing",
       trialEndsAt,

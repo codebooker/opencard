@@ -4,7 +4,7 @@ import { AdminPrincipal, ROLE_LABELS } from "../rbac";
 import { showsBilling, canManageStaffTarget, Role } from "../roles";
 import { PLAN_ORDER, PLANS, PlanKey } from "../plans";
 import { API_SCOPES, SCOPE_LABELS } from "../api-scopes";
-import { GENERAL_TERMINOLOGY, Terminology, lower } from "../terminology";
+import { GENERAL_TERMINOLOGY, Terminology, lower, VERTICALS } from "../terminology";
 import {
   photoField,
   labeledRowsField,
@@ -27,7 +27,7 @@ import {
 } from "../dealership";
 import { HIDEABLE_FIELDS, SIGNATURE_TOKENS, ROLE_SUGGESTIONS, asStringArray } from "../roletemplate";
 import { ASSET_TYPES, ASSET_DEST_TYPES, assetTypeLabel } from "../assets";
-import { LEAD_FIELDS, DEFAULT_LEAD_FIELDS } from "../leadform";
+import { LEAD_FIELDS, DEFAULT_LEAD_FIELDS, leadFieldChoicesFor, defaultLeadFieldsFor } from "../leadform";
 import { campaignRoutingToLines } from "../routing";
 import { LEAD_STATUSES, STATUS_LABELS, nextStatuses } from "../leadstatus";
 import { SIGNATURE_THEMES, SIGNATURE_ELEMENTS, asLockList, SignatureTheme } from "../signature";
@@ -42,9 +42,10 @@ function leadFormConfig(opts: {
   inheritName: string;
   inheritLabel: string;
   inherit: boolean;
+  vertical?: string;
 }): string {
   const set = new Set(opts.fields);
-  const boxes = LEAD_FIELDS.map(
+  const boxes = leadFieldChoicesFor(opts.vertical).map(
     ([v, l]) =>
       `<label class="chk"><input type="checkbox" name="leadFields" value="${esc(v)}" ${
         set.has(v) ? "checked" : ""
@@ -308,6 +309,14 @@ export function clientForm(org?: any): string {
   </div>
   <form class="editor" method="POST" action="${action}" style="max-width:560px">
     <label>Client name</label><input name="name" value="${esc(o.name)}" required placeholder="Acme Auto Group" />
+    <label>Business type</label>
+    <select name="businessType">${VERTICALS.map(
+      ([val, label]) =>
+        `<option value="${esc(val)}" ${(o.vertical || "general") === val ? "selected" : ""}>${esc(label)}</option>`
+    ).join("")}</select>
+    <p class="muted" style="margin:6px 0 0">Sets the workspace's wording (e.g. Rooftops vs Locations) and which lead-form fields are offered.${
+      org ? " Changing it relabels their admin UI." : ""
+    }</p>
     <div class="grid2">
       <div><label>Plan tier</label><select name="plan">${planOpts}</select>
         <p class="muted" style="margin:6px 0 0">Controls the feature set.</p></div>
@@ -515,8 +524,9 @@ export function brandForm(
     <h3 style="margin-top:16px">Lead form (default)</h3>
     <p class="muted">The default lead-capture form for this brand's cards and asset landing pages. Templates can override it.</p>
     ${leadFormConfig({
-      fields: Array.isArray(b.leadFields) ? asStringArray(b.leadFields) : DEFAULT_LEAD_FIELDS,
+      fields: Array.isArray(b.leadFields) ? asStringArray(b.leadFields) : defaultLeadFieldsFor(t.vertical),
       consentText: b.leadConsentText,
+      vertical: t.vertical,
       inheritName: "leadDefault",
       inheritLabel: "Use the built-in default lead form",
       inherit: b.leadFields == null,
@@ -572,7 +582,7 @@ export function brandForm(
 }
 
 // Events list + create (Phase 10.2).
-export function eventsView(data: { events: any[]; locations: { id: string; name: string }[] }): string {
+export function eventsView(data: { events: any[]; locations: { id: string; name: string }[] }, t: Terminology = GENERAL_TERMINOLOGY): string {
   const pill = (ev: any) => {
     const s = eventStatus(ev);
     const cls = s === "live" ? "on" : s === "off" || s === "ended" ? "off" : "";
@@ -592,20 +602,20 @@ export function eventsView(data: { events: any[]; locations: { id: string; name:
         )
         .join("")
     : `<tr><td colspan="5" class="muted">No events yet.</td></tr>`;
-  const locOpts = `<option value="">(no rooftop — set later)</option>` + data.locations.map((l) => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join("");
+  const locOpts = `<option value="">(no ${lower(t.locationSingular)} — set later)</option>` + data.locations.map((l) => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join("");
   const body = `
   <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar"><h2>Events</h2></div>
-  <p class="muted">Auto shows, tent sales, hiring events: create an event, add QR codes that capture leads, and track its performance. Event QR codes only work while the event is live.</p>
+  <p class="muted">${t.vertical === "dealership" ? "Auto shows, tent sales, hiring events" : "Trade shows, open houses, hiring events"}: create an event, add QR codes that capture leads, and track its performance. Event QR codes only work while the event is live.</p>
   <table>
-    <tr><th>Event</th><th>Status</th><th>Rooftop</th><th>Dates</th><th>QR</th></tr>
+    <tr><th>Event</th><th>Status</th><th>${esc(t.locationSingular)}</th><th>Dates</th><th>QR</th></tr>
     ${rows}
   </table>
   <h3 style="margin-top:18px">New event</h3>
   <form class="editor" method="POST" action="/admin/events" style="max-width:560px">
     <label>Event name</label>
     <input name="name" placeholder="Summer Tent Sale" required />
-    <label style="margin-top:8px">Rooftop</label>
+    <label style="margin-top:8px">${esc(t.locationSingular)}</label>
     <select name="locationId">${locOpts}</select>
     <div class="grid2">
       <div><label style="margin-top:8px">Starts <span class="muted">(optional)</span></label><input type="datetime-local" name="startsAt" /></div>
@@ -617,7 +627,7 @@ export function eventsView(data: { events: any[]; locations: { id: string; name:
 }
 
 // Event detail: edit, performance, QR assets, attach QR (Phase 10.2).
-export function eventDetailView(data: { ev: any; scans: number; leads: number; baseUrl: string; locations: { id: string; name: string }[] }): string {
+export function eventDetailView(data: { ev: any; scans: number; leads: number; baseUrl: string; locations: { id: string; name: string }[] }, t: Terminology = GENERAL_TERMINOLOGY): string {
   const ev = data.ev;
   const status = eventStatus(ev);
   const conv = data.scans ? Math.round((data.leads / data.scans) * 1000) / 10 : 0;
@@ -638,7 +648,7 @@ export function eventDetailView(data: { ev: any; scans: number; leads: number; b
   const body = `
   <p class="crumb"><a href="/admin/events">← Events</a></p>
   <div class="topbar"><h2>${esc(ev.name)} <span class="pill ${status === "live" ? "on" : "off"}">${EVENT_STATUS_LABELS[status]}</span></h2></div>
-  <p class="muted">${ev.location?.name ? `Rooftop: ${esc(ev.location.name)} · ` : ""}Event QR codes resolve only while <strong>Live</strong>.</p>
+  <p class="muted">${ev.location?.name ? `${esc(t.locationSingular)}: ${esc(ev.location.name)} · ` : ""}Event QR codes resolve only while <strong>Live</strong>.</p>
 
   <div class="cards-grid">
     <div class="stat"><div class="n">${data.scans}</div><div class="muted">QR scans</div></div>
@@ -651,7 +661,7 @@ export function eventDetailView(data: { ev: any; scans: number; leads: number; b
   <form class="editor" method="POST" action="/admin/events/${esc(ev.id)}/assets" style="max-width:560px;margin-top:10px">
     <label>Add a QR code — name</label>
     <input name="name" placeholder="Entrance banner" required />
-    ${needsLoc ? `<label style="margin-top:8px">Rooftop</label><select name="locationId" required><option value="">(pick a rooftop)</option>${locOpts}</select>` : ""}
+    ${needsLoc ? `<label style="margin-top:8px">${esc(t.locationSingular)}</label><select name="locationId" required><option value="">(pick a ${lower(t.locationSingular)})</option>${locOpts}</select>` : ""}
     <p style="margin-top:10px"><button class="btn" type="submit">Add QR code</button></p>
   </form>
 
@@ -1016,19 +1026,28 @@ export function locationForm(
       <div><label>Country</label><input name="addr_country" value="${esc(addr.country)}" /></div>
     </div>
 
-    <h3>Dealership profile</h3>
+    ${
+      t.vertical === "dealership"
+        ? `<h3>Dealership profile</h3>
     <p class="muted">Shown on this ${esc(lower(t.locationSingular))}'s cards as click-to-call and Sales/Service buttons.</p>
     <label>OEM brands <span class="muted">(comma-separated)</span></label>
     <input name="oemBrands" list="oem-list" value="${esc(parseOemBrands(l.oemBrands).join(", "))}" placeholder="e.g. Ford, Lincoln" />
-    <datalist id="oem-list">${KNOWN_OEMS.map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>
+    <datalist id="oem-list">${KNOWN_OEMS.map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>`
+        : `<h3>Contact</h3>
+    <p class="muted">Shown on this ${esc(lower(t.locationSingular))}'s cards as click-to-call and website buttons.</p>`
+    }
     <div class="grid2">
       <div><label>Main phone</label><input name="phone" value="${esc(l.phone)}" placeholder="(555) 123-4567" /></div>
-      <div><label>Website</label><input name="website" value="${esc(l.website)}" placeholder="acmeford.com" /></div>
+      <div><label>Website</label><input name="website" value="${esc(l.website)}" placeholder="acme.com" /></div>
     </div>
-    <div class="grid2">
+    ${
+      t.vertical === "dealership"
+        ? `<div class="grid2">
       <div><label>Sales URL</label><input name="salesUrl" value="${esc(l.salesUrl)}" placeholder="acmeford.com/inventory" /></div>
       <div><label>Service URL</label><input name="serviceUrl" value="${esc(l.serviceUrl)}" placeholder="acmeford.com/service" /></div>
-    </div>
+    </div>`
+        : ""
+    }
     <label>Timezone</label>
     <select name="timezone"><option value="">(none)</option>${DEALERSHIP_TIMEZONES.map(
       (tz) => `<option ${l.timezone === tz ? "selected" : ""}>${esc(tz)}</option>`
@@ -1063,10 +1082,10 @@ export function locationForm(
 }
 
 // Manage the departments (and their CTAs) within a rooftop.
-export function departmentsView(data: { location: any; departments: any[] }): string {
+export function departmentsView(data: { location: any; departments: any[] }, t: Terminology = GENERAL_TERMINOLOGY): string {
   const loc = data.location;
   const existing = new Set(data.departments.map((d) => d.name));
-  const suggestions = DEPARTMENTS.filter((d) => !existing.has(d));
+  const suggestions = t.vertical === "dealership" ? DEPARTMENTS.filter((d) => !existing.has(d)) : [];
   const rows = data.departments.length
     ? data.departments
         .map(
@@ -1088,7 +1107,7 @@ export function departmentsView(data: { location: any; departments: any[] }): st
   const body = `
   <p class="crumb"><a href="/admin/locations/${esc(loc.id)}/edit">← Back to ${esc(loc.name)}</a></p>
   <h2>Departments — ${esc(loc.name)}</h2>
-  <p class="muted">Each department can carry its own CTA buttons, which take precedence over the rooftop's on cards assigned to it.</p>
+  <p class="muted">Each department can carry its own CTA buttons, which take precedence over the ${esc(lower(t.locationSingular))}'s on cards assigned to it.</p>
   ${rows}
   <h3 style="margin-top:20px">Add a department</h3>
   <form class="editor" method="POST" action="/admin/locations/${esc(loc.id)}/departments" style="max-width:560px">
@@ -1159,7 +1178,7 @@ export function assetsView(data: { location: any; assets: any[]; cards: any[]; c
   const body = `
   <p class="crumb"><a href="/admin/locations/${esc(loc.id)}/edit">← Back to ${esc(loc.name)}</a></p>
   <h2>Assets — ${esc(loc.name)}</h2>
-  <p class="muted">QR/NFC codes that aren't people: rooftop &amp; department landings, and trackable desk / vehicle / service-lane / event / campaign codes. Scans are counted.</p>
+  <p class="muted">QR/NFC codes that aren't people: landing pages for the business or a department, and trackable event / campaign codes. Scans are counted.</p>
   ${rows}
   <h3 style="margin-top:20px">Add an asset</h3>
   <form class="editor" method="POST" action="/admin/locations/${esc(loc.id)}/assets" style="max-width:620px">
@@ -1554,7 +1573,7 @@ export function templatesGallery(brandName: string, brandId: string, templates: 
   return shell("Templates", body);
 }
 
-export function templateForm(brandId: string, template?: any): string {
+export function templateForm(brandId: string, template?: any, term: Terminology = GENERAL_TERMINOLOGY): string {
   const t = template || {};
   const locked = new Set(asStringArray(t.lockedFields));
   const hidden = new Set(asStringArray(t.hiddenFields));
@@ -1631,8 +1650,9 @@ export function templateForm(brandId: string, template?: any): string {
 
     <h3 style="margin-top:20px">Lead form</h3>
     ${leadFormConfig({
-      fields: Array.isArray(t.leadFields) ? asStringArray(t.leadFields) : DEFAULT_LEAD_FIELDS,
+      fields: Array.isArray(t.leadFields) ? asStringArray(t.leadFields) : defaultLeadFieldsFor(term.vertical),
       consentText: t.leadConsentText,
+      vertical: term.vertical,
       inheritName: "leadInherit",
       inheritLabel: "Inherit the lead form from the brand",
       inherit: t.leadFields == null,
@@ -2213,6 +2233,7 @@ export function analyticsView(stats: {
   deptPerf?: { key: string; count: number }[];
   range?: { key: string; label: string };
   ranges?: [string, string][];
+  locationLabel?: string;
   reports?: { csvUrl: string; emails: string; cadence: string; sent: boolean };
 }): string {
   const t = stats.totals;
@@ -2262,14 +2283,15 @@ export function analyticsView(stats: {
         )
         .join(" ")}</div>`
     : "";
+  const locLabel = stats.locationLabel || "Location";
   const leaderboardSection = stats.leaderboard
-    ? `<h3 style="margin-top:24px">Rooftop leaderboard</h3>
+    ? `<h3 style="margin-top:24px">${esc(locLabel)} leaderboard</h3>
   <table>
-    <tr><th>Rooftop</th><th>Views</th><th>Leads</th><th>Conv.</th></tr>
+    <tr><th>${esc(locLabel)}</th><th>Views</th><th>Leads</th><th>Conv.</th></tr>
     ${
       stats.leaderboard.length
         ? stats.leaderboard.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.views}</td><td>${r.leads}</td><td>${r.conv}%</td></tr>`).join("")
-        : `<tr><td colspan="4" class="muted">No rooftop activity in this range.</td></tr>`
+        : `<tr><td colspan="4" class="muted">No ${esc(lower(locLabel))} activity in this range.</td></tr>`
     }
   </table>`
     : "";
