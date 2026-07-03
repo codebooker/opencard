@@ -246,6 +246,7 @@ export function dashboard(
     ${p.super ? `<a class="btn secondary" href="/admin/integrations">Integrations</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/marketing">Marketing</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/audit">Audit</a>` : ""}
+    ${p.global ? `<a class="btn secondary" href="/admin/data">Data</a>` : ""}
     ${p.global ? `<a class="btn" href="/admin/brands/new">+ New ${lower(t.brandSingular)}</a>` : ""}`;
   const banner = actingClientName
     ? `<div class="stat" style="border:1px solid #2563eb;background:#eff6ff;margin-bottom:12px">Managing client <strong>${esc(
@@ -413,6 +414,33 @@ export function brandForm(
   }
   ${designScripts()}`;
   return shell("Brand", body);
+}
+
+// Data & privacy hub (Phase 9.2): export + erasure controls.
+export function dataPrivacyView(d: { orgName: string; canPurge: boolean; done: boolean }): string {
+  const body = `
+  <div class="topbar"><h2>Data &amp; privacy</h2><a class="btn secondary" href="/admin">← Back</a></div>
+  ${d.done ? `<p class="auth-banner" style="max-width:none">Data purge complete.</p>` : ""}
+  <h3>Export</h3>
+  <p class="muted">Download a full JSON copy of this account's data (brands, rooftops, cards, employees, leads, assets, campaigns) — for data-portability / GDPR access requests. Secrets (tokens, Stripe IDs) are excluded.</p>
+  <p><a class="btn" href="/admin/data/export.json">⬇ Download data (JSON)</a></p>
+  <h3 style="margin-top:24px">Erase a lead</h3>
+  <p class="muted">To honor a customer's right to erasure, open the lead from <a href="/admin/leads">Leads</a> and use <strong>Erase lead</strong>. Every erasure is recorded in the <a href="/admin/audit">audit log</a>.</p>
+  ${
+    d.canPurge
+      ? `<div class="danger-zone">
+    <h3>Danger zone — erase ALL data for ${esc(d.orgName)}</h3>
+    <p class="muted">Permanently deletes every brand, rooftop, card, employee, lead, asset, campaign, and integration for this client. The account shell and admin logins remain. This cannot be undone.</p>
+    <form method="POST" action="/admin/data/purge" onsubmit="return confirm('Permanently erase ALL data for ${esc(d.orgName)}? This cannot be undone.')">
+      <label>Type the client name to confirm: <strong>${esc(d.orgName)}</strong></label>
+      <input name="confirmName" autocomplete="off" placeholder="${esc(d.orgName)}" />
+      <button class="btn danger" type="submit">Erase all data</button>
+    </form>
+  </div>`
+      : ""
+  }
+  <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;
+  return shell("Data & privacy", body);
 }
 
 // Append-only audit trail viewer (Phase 9.1).
@@ -1939,6 +1967,14 @@ export function leadDetailView(data: { lead: any; events: any[] }): string {
 
   <h3 style="margin-top:20px">History</h3>
   <table><tr><th>When</th><th>Event</th><th>By</th></tr>${eventRows}</table>
+
+  <div class="danger-zone" style="margin-top:20px;max-width:820px">
+    <h3>Erase this lead</h3>
+    <p class="muted">Permanently deletes this lead and its history (right to erasure). Recorded in the audit log. This cannot be undone.</p>
+    <form method="POST" action="/admin/leads/${esc(l.id)}/delete" onsubmit="return confirm('Permanently erase this lead? This cannot be undone.')">
+      <button class="btn danger" type="submit">Erase lead</button>
+    </form>
+  </div>
   <p style="margin-top:14px"><a class="btn secondary" href="/admin/leads">← Leads</a></p>`;
   return shell("Lead", body);
 }

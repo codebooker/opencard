@@ -23,6 +23,8 @@ import { isGaId, isGtmId, normalizeCampaignCode } from "../marketing";
 import { resolveRange, conversionPct, sortLeaderboard, buildFunnel, topGroups, ANALYTICS_RANGES } from "../analytics";
 import { computeOrgAnalytics, analyticsCsv, sendDigest } from "../reports";
 import { recordAudit, reqIp } from "../audit-log";
+import { buildOrgExport, purgeOrgData } from "../data-bundle";
+import { exportFilename } from "../dataexport";
 
 // Compact audit helper bound to the current principal + request.
 function audit(
@@ -1450,6 +1452,41 @@ adminRouter.get("/audit", async (req, res) => {
   res.send(V.auditView(logs, action));
 });
 
+// ---------- data & privacy (GDPR/CCPA) (Phase 9.2) ----------
+adminRouter.get("/data", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  const org = await prisma.org.findUnique({ where: { id: p.orgId }, select: { name: true } });
+  // Full org purge is platform-staff-only, and only while drilled into a client.
+  res.send(V.dataPrivacyView({ orgName: org?.name || "", canPurge: p.platform && !!p.actingOrgId, done: req.query.done === "1" }));
+});
+
+adminRouter.get("/data/export.json", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  const org = await prisma.org.findUnique({ where: { id: p.orgId }, select: { name: true } });
+  const bundle = await buildOrgExport(p.orgId);
+  audit(req, p, "data.export", { targetType: "Org", targetId: p.orgId });
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${exportFilename(org?.name)}"`);
+  res.send(JSON.stringify(bundle, null, 2));
+});
+
+// Erase all operational data for the drilled-in client (platform staff only,
+// name-match confirmation required). Keeps the org shell + admin accounts.
+adminRouter.post("/data/purge", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.platform || !p.actingOrgId) return forbidden(res, "Drill into the client workspace first.");
+  const org = await prisma.org.findUnique({ where: { id: p.orgId }, select: { name: true } });
+  if (!org) return res.status(404).send("Not found");
+  if ((req.body?.confirmName || "") !== org.name) {
+    return res.status(400).send(`The name you typed didn't match "${esc(org.name)}". Nothing was deleted. <a href="/admin/data">Back</a>.`);
+  }
+  await purgeOrgData(p.orgId);
+  audit(req, p, "data.delete", { targetType: "Org", targetId: p.orgId, summary: `PURGED all data for ${org.name}` });
+  res.redirect("/admin/data?done=1");
+});
+
 // ---------- leads ----------
 // Scope leads to what the admin may see: cards in their locations OR assets in
 // their locations (global admins see all).
@@ -1492,6 +1529,17 @@ adminRouter.get("/leads/:id", async (req, res) => {
 async function scopedLead(req: any, id: string) {
   return prisma.lead.findFirst({ where: { id, ...(await leadScopeWhere(reqAdmin(req))) } });
 }
+
+// Erase a single lead (GDPR/CCPA right to erasure).
+adminRouter.post("/leads/:id/delete", async (req, res) => {
+  const p = reqAdmin(req);
+  const lead = await scopedLead(req, req.params.id);
+  if (!lead) return res.status(404).send("Lead not found");
+  await prisma.leadEvent.deleteMany({ where: { leadId: lead.id } });
+  await prisma.lead.delete({ where: { id: lead.id } });
+  audit(req, p, "data.delete", { targetType: "Lead", targetId: lead.id, summary: `erased lead: ${lead.name}` });
+  res.redirect("/admin/leads");
+});
 
 adminRouter.post("/leads/:id/status", async (req, res) => {
   const p = reqAdmin(req);
