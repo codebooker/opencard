@@ -199,28 +199,40 @@ export function staffForm(allowedRoles: string[], staff?: any): string {
     .map((r) => `<option value="${esc(r)}" ${s.role === r ? "selected" : ""}>${esc(ROLE_LABELS[r as Role] || r)}</option>`)
     .join("");
   const body = `
-  <h2>${staff ? "Edit staff" : "New OpenCard staff"}</h2>
-  <form class="editor" method="POST" action="${action}" style="max-width:520px">
-    <label>Email</label><input name="email" type="email" value="${esc(s.email)}" ${staff ? "readonly" : "required"} />
-    <label style="margin-top:10px">Name</label><input name="name" value="${esc(s.name)}" />
-    <label style="margin-top:10px">Role</label>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>${staff ? "Edit staff" : "New OpenCard staff"}</h2>
+      <p class="muted" style="margin:0">${staff ? `Platform account for ${esc(s.email)}.` : "Creates a platform account with access to client workspaces."}</p>
+    </div>
+  </div>
+  <form class="editor" method="POST" action="${action}" style="max-width:560px">
+    <div class="grid2">
+      <div><label>Email</label><input name="email" type="email" value="${esc(s.email)}" ${staff ? "readonly" : "required"} /></div>
+      <div><label>Name</label><input name="name" value="${esc(s.name)}" placeholder="Jane Doe" /></div>
+    </div>
+    <label>Role</label>
     <select name="role">${roleOpts}</select>
-    <label style="margin-top:10px">Password ${staff ? `<span class="muted">(leave blank to keep)</span>` : ""}</label>
+    <p class="muted" style="margin:6px 0 0">Owner: full control, incl. other owners. Admin: everything except managing owners. Staff: manage clients only.</p>
+    <label>Password ${staff ? `<span class="muted">(leave blank to keep)</span>` : ""}</label>
     <input name="password" type="password" autocomplete="new-password" />
     ${
       staff
-        ? `<label class="chk" style="margin-top:10px"><input type="checkbox" name="active" value="1" ${
+        ? `<label class="chk" style="margin-top:12px"><input type="checkbox" name="active" value="1" ${
             s.active ? "checked" : ""
           } /> Active</label>
-      <label class="chk"><input type="checkbox" name="resetMfa" value="1" /> Reset two-factor</label>`
+      <label class="chk"><input type="checkbox" name="resetMfa" value="1" /> Reset two-factor (force re-enroll)</label>`
         : ""
     }
-    <p style="margin-top:14px"><button class="btn" type="submit">${staff ? "Save" : "Create staff"}</button>
-    <a class="btn secondary" href="/admin/staff">Cancel</a></p>
+    <div class="form-actions"><button class="btn" type="submit">${staff ? "Save changes" : "Create staff"}</button>
+    <a class="btn secondary" href="/admin/staff">Cancel</a></div>
   </form>
   ${
     staff
-      ? `<form method="POST" action="/admin/staff/${esc(s.id)}/delete" style="margin-top:10px" onsubmit="return confirm('Delete this staff account?')"><button class="btn danger" type="submit">Delete staff account</button></form>`
+      ? `<div class="danger-zone" style="max-width:560px">
+    <h3>Delete this staff account</h3>
+    <p class="muted">Removes ${esc(s.email)}'s access immediately. This cannot be undone.</p>
+    <form method="POST" action="/admin/staff/${esc(s.id)}/delete" onsubmit="return confirm('Delete this staff account?')"><button class="btn danger" type="submit">Delete staff account</button></form>
+  </div>`
       : ""
   }`;
   return shell(staff ? "Edit staff" : "New staff", body);
@@ -240,17 +252,25 @@ export function clientForm(org?: any): string {
     .join("");
   const seatVal = o.seatLimit == null ? "" : o.seatLimit < 0 ? "unlimited" : String(o.seatLimit);
   const body = `
-  <h2>${org ? "Edit client" : "New client"}</h2>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>${org ? `Edit client — ${esc(o.name)}` : "New client"}</h2>
+      <p class="muted" style="margin:0">${org ? "Plan tier, billing type, and the seat allowance for this workspace." : "Creates a client workspace. The client's own admins manage everything inside it."}</p>
+    </div>
+  </div>
   <form class="editor" method="POST" action="${action}" style="max-width:560px">
-    <label>Client name</label><input name="name" value="${esc(o.name)}" required />
-    <label style="margin-top:10px">Plan tier <span class="muted">(feature set)</span></label>
-    <select name="plan">${planOpts}</select>
-    <label style="margin-top:10px">Billing type</label>
-    <select name="billingMode">${modeOpts}</select>
-    <label style="margin-top:10px">User allowance <span class="muted">(blank = plan default · "unlimited" = per-seat billing · or a number)</span></label>
+    <label>Client name</label><input name="name" value="${esc(o.name)}" required placeholder="Acme Auto Group" />
+    <div class="grid2">
+      <div><label>Plan tier</label><select name="plan">${planOpts}</select>
+        <p class="muted" style="margin:6px 0 0">Controls the feature set.</p></div>
+      <div><label>Billing type</label><select name="billingMode">${modeOpts}</select>
+        <p class="muted" style="margin:6px 0 0">Trial workspaces lock after the trial ends.</p></div>
+    </div>
+    <label>User allowance</label>
     <input name="seatLimit" value="${esc(seatVal)}" placeholder="e.g. 50, or unlimited" />
-    <p style="margin-top:14px"><button class="btn" type="submit">${org ? "Save client" : "Create client"}</button>
-    <a class="btn secondary" href="/admin/clients">Cancel</a></p>
+    <p class="muted" style="margin:6px 0 0">Blank = the plan's default · <code>unlimited</code> = per-seat billing · or a fixed number of users.</p>
+    <div class="form-actions"><button class="btn" type="submit">${org ? "Save client" : "Create client"}</button>
+    <a class="btn secondary" href="/admin/clients">Cancel</a></div>
   </form>`;
   return shell(org ? "Edit client" : "New client", body);
 }
@@ -361,8 +381,14 @@ export function brandForm(
   const adminDomain = brandDomains.find((d) => !d.locationId && d.kind === "admin")?.host || "";
   const userDomain = brandDomains.find((d) => !d.locationId && d.kind !== "admin")?.host || "";
   const body = `
-  <h2>${brand ? "Edit" : "New"} ${esc(lower(t.brandSingular))}</h2>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>${brand ? `Edit ${esc(lower(t.brandSingular))} — ${esc(b.name)}` : `New ${esc(lower(t.brandSingular))}`}</h2>
+      <p class="muted" style="margin:0">Identity, design defaults, and policies every ${esc(lower(t.locationSingular))} and ${esc(lower(t.cardSingular))} inherits.</p>
+    </div>
+  </div>
   <form class="editor" method="POST" action="${action}" enctype="multipart/form-data">
+    <h3>Identity</h3>
     <label>Brand name</label><input name="name" value="${esc(b.name)}" required />
     <label>Logo</label>
     ${b.logoUrl ? `<p class="muted">Current: <img src="${esc(b.logoUrl)}" style="height:34px;vertical-align:middle" /></p>` : ""}
@@ -416,8 +442,8 @@ export function brandForm(
       <div><label>Admin login domain</label><input name="adminDomain" value="${esc(adminDomain)}" placeholder="cardadmin.yourbrand.com" /></div>
     </div>
 
-    <p style="margin-top:16px"><button class="btn" type="submit">Save brand</button>
-    <a class="btn secondary" href="/admin">Cancel</a></p>
+    <div class="form-actions"><button class="btn" type="submit">Save brand</button>
+    <a class="btn secondary" href="/admin">Cancel</a></div>
   </form>
   ${
     brand
@@ -646,40 +672,49 @@ export function marketingView(data: { org: any; campaigns: any[]; baseUrl: strin
         .join("")
     : `<tr><td colspan="6" class="muted">No campaign links yet.</td></tr>`;
   const body = `
-  <div class="topbar"><h2>Marketing</h2><a class="btn secondary" href="/admin">Back</a></div>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>Marketing</h2>
+      <p class="muted" style="margin:0">Your analytics tags on public pages, and trackable campaign short links.</p>
+    </div>
+  </div>
 
+  <section class="panel">
   <h3>Analytics tags</h3>
   <p class="muted">Injected into this account's public card and QR-landing pages, so scans and views land in your own Google Analytics / Tag Manager.</p>
-  <form class="editor" method="POST" action="/admin/marketing/tags" style="max-width:560px">
-    <label>GA4 Measurement ID</label>
-    <input name="gaMeasurementId" value="${esc(org.gaMeasurementId || "")}" placeholder="G-XXXXXXXXXX" />
-    <label style="margin-top:10px">Google Tag Manager container ID</label>
-    <input name="gtmContainerId" value="${esc(org.gtmContainerId || "")}" placeholder="GTM-XXXXXXX" />
+  <form class="editor" method="POST" action="/admin/marketing/tags">
+    <div class="grid2">
+      <div><label>GA4 Measurement ID</label><input name="gaMeasurementId" value="${esc(org.gaMeasurementId || "")}" placeholder="G-XXXXXXXXXX" /></div>
+      <div><label>Google Tag Manager container ID</label><input name="gtmContainerId" value="${esc(org.gtmContainerId || "")}" placeholder="GTM-XXXXXXX" /></div>
+    </div>
     <p class="muted" style="font-size:12px;margin:6px 0 0">Leave blank to disable. Invalid IDs are ignored.</p>
     <p style="margin-top:10px"><button class="btn" type="submit">Save tags</button></p>
   </form>
+  </section>
 
-  <h3 style="margin-top:28px">Campaign links</h3>
+  <section class="panel">
+  <h3>Campaign links</h3>
   <p class="muted">Short, trackable links that redirect to a landing page with UTM parameters attached — great for print QR codes, ads, and events.</p>
   <table>
     <tr><th>Short link</th><th>Name</th><th>Landing</th><th>UTM</th><th>Clicks</th><th></th></tr>
     ${rows}
   </table>
-  <form class="editor" method="POST" action="/admin/marketing/campaigns" style="margin-top:12px;max-width:620px">
-    <label>Campaign name</label>
-    <input name="name" placeholder="Summer Sales Event" required />
-    <label style="margin-top:10px">Short code <span class="muted">(optional; auto-derived from the name)</span></label>
-    <input name="code" placeholder="summer" />
-    <label style="margin-top:10px">Landing URL</label>
+  <form class="editor" method="POST" action="/admin/marketing/campaigns">
+    <div class="grid2">
+      <div><label>Campaign name</label><input name="name" placeholder="Summer Sales Event" required /></div>
+      <div><label>Short code <span class="muted">(optional)</span></label><input name="code" placeholder="summer" /></div>
+    </div>
+    <label>Landing URL</label>
     <input name="landingUrl" type="url" placeholder="https://dealer.com/specials" required />
     <div class="grid2">
-      <div><label style="margin-top:10px">UTM source</label><input name="utmSource" placeholder="qr" /></div>
-      <div><label style="margin-top:10px">UTM medium</label><input name="utmMedium" placeholder="print" /></div>
+      <div><label>UTM source</label><input name="utmSource" placeholder="qr" /></div>
+      <div><label>UTM medium</label><input name="utmMedium" placeholder="print" /></div>
     </div>
-    <label style="margin-top:10px">UTM campaign <span class="muted">(defaults to the short code)</span></label>
+    <label>UTM campaign <span class="muted">(defaults to the short code)</span></label>
     <input name="utmCampaign" placeholder="summer-2026" />
     <p style="margin-top:10px"><button class="btn" type="submit">Add campaign link</button></p>
-  </form>`;
+  </form>
+  </section>`;
   return shell("Marketing", body);
 }
 
@@ -698,7 +733,7 @@ export function domainsView(data: { domains: any[]; brands: any[]; target: strin
         .map((d) => {
           const purpose = d.kind === "admin" ? "Admin sign-in" : "Employee sign-in";
           const scope = d.location ? esc(d.location.name) : esc(d.brand?.name || "");
-          return `<div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:12px">
+          return `<div class="item-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
         <div><strong>${esc(d.host)}</strong> ${badge(d)}<br><span class="muted">${purpose} · ${scope}</span></div>
         <div>
@@ -834,12 +869,26 @@ export function locationForm(
   const locAdminDomain = locDomains.find((d) => d.locationId && d.kind === "admin")?.host || "";
   const locUserDomain = locDomains.find((d) => d.locationId && d.kind !== "admin")?.host || "";
   const body = `
-  <h2>${location ? "Edit" : "New"} ${esc(lower(t.locationSingular))}</h2>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>${location ? `Edit ${esc(lower(t.locationSingular))} — ${esc(l.name)}` : `New ${esc(lower(t.locationSingular))}`}</h2>
+      <p class="muted" style="margin:0">Profile, lead routing, and design overrides for this ${esc(lower(t.locationSingular))}.</p>
+    </div>
+    ${location ? `<div>
+      <a class="btn secondary" href="/admin/locations/${esc(location.id)}/departments">Departments</a>
+      <a class="btn secondary" href="/admin/locations/${esc(location.id)}/assets">Assets</a>
+      <a class="btn secondary" href="/admin/cards?locationId=${esc(location.id)}">${esc(t.cardPlural)}</a>
+    </div>` : ""}
+  </div>
   <form class="editor" method="POST" action="${action}" enctype="multipart/form-data">
     <input type="hidden" name="brandId" value="${esc(brandId)}" />
-    <label>${esc(t.locationSingular)} name</label><input name="name" value="${esc(l.name)}" required />
-    <label>${esc(t.locationCodeLabel)} (for directory mapping)</label><input name="code" value="${esc(l.code)}" placeholder="e.g. STORE-014" />
-    <p class="muted">Leave the overrides blank to inherit from the ${esc(lower(t.brandSingular))}.</p>
+    <h3>Basics</h3>
+    <div class="grid2">
+      <div><label>${esc(t.locationSingular)} name</label><input name="name" value="${esc(l.name)}" required /></div>
+      <div><label>${esc(t.locationCodeLabel)} <span class="muted">(directory mapping)</span></label><input name="code" value="${esc(l.code)}" placeholder="e.g. STORE-014" /></div>
+    </div>
+    <h3>Design overrides</h3>
+    <p class="muted">Leave anything blank to inherit from the ${esc(lower(t.brandSingular))}.</p>
     <label>Logo override</label>
     ${l.logoUrl ? `<p class="muted">Current: <img src="${esc(l.logoUrl)}" style="height:34px;vertical-align:middle" /></p>` : ""}
     <input type="file" name="logoFile" accept="image/*" />
@@ -902,10 +951,8 @@ export function locationForm(
         : ""
     }
 
-    <p style="margin-top:16px"><button class="btn" type="submit">Save ${esc(lower(t.locationSingular))}</button>
-    <a class="btn secondary" href="/admin">Cancel</a>
-    ${location ? `<a class="btn secondary" href="/admin/locations/${esc(location.id)}/departments">Departments</a>` : ""}
-    ${location ? `<a class="btn secondary" href="/admin/locations/${esc(location.id)}/assets">Assets</a>` : ""}</p>
+    <div class="form-actions"><button class="btn" type="submit">Save ${esc(lower(t.locationSingular))}</button>
+    <a class="btn secondary" href="/admin">Cancel</a></div>
   </form>`;
   return shell(t.locationSingular, body);
 }
@@ -918,8 +965,7 @@ export function departmentsView(data: { location: any; departments: any[] }): st
   const rows = data.departments.length
     ? data.departments
         .map(
-          (d) => `<form class="editor" method="POST" action="/admin/locations/${esc(loc.id)}/departments"
-      style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:12px">
+          (d) => `<form class="editor item-card" method="POST" action="/admin/locations/${esc(loc.id)}/departments">
       <input type="hidden" name="departmentId" value="${esc(d.id)}" />
       <strong>${esc(d.name)}</strong>
       <label style="margin-top:8px">Call-to-action buttons <span class="muted">(one per line: <code>Label | https://url</code>)</span></label>
@@ -983,8 +1029,7 @@ export function assetsView(data: { location: any; assets: any[]; cards: any[]; c
     ? data.assets
         .map((a) => {
           const url = `${base}/a/${a.slug}`;
-          return `<form class="editor" method="POST" action="/admin/locations/${esc(loc.id)}/assets"
-        style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:12px">
+          return `<form class="editor item-card" method="POST" action="/admin/locations/${esc(loc.id)}/assets">
         <input type="hidden" name="assetId" value="${esc(a.id)}" />
         <div class="grid2">
           <div><label>Type</label><select name="type">${typeOpts(a.type)}</select></div>
@@ -1073,10 +1118,23 @@ export function cardForm(opts: {
   const effectiveSelf = cardOverride || opts.brandSelfFields || DEFAULT_SELF_FIELDS;
   const action = opts.card ? `/admin/cards/${opts.card.id}` : "/admin/cards";
   const addr = (c.address as Address) || {};
+  const cardName = [c.firstName, c.lastName].filter(Boolean).join(" ");
   const body = `
-  <h2>${opts.card ? "Edit" : "New"} ${esc(lower(t.cardSingular))}</h2>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>${opts.card ? `Edit ${esc(lower(t.cardSingular))} — ${esc(cardName)}` : `New ${esc(lower(t.cardSingular))}`}</h2>
+      <p class="muted" style="margin:0">Identity, contact details, design and self-service policy for this ${esc(lower(t.cardSingular))}.</p>
+    </div>
+    ${opts.card ? `<div>
+      <a class="btn secondary" href="/c/${esc(opts.card.slug)}" target="_blank">Preview</a>
+      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/analytics">Stats</a>
+      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/signature">Email signature</a>
+      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/turnover">Turn over</a>
+    </div>` : ""}
+  </div>
   <form class="editor" method="POST" action="${action}" enctype="multipart/form-data">
     <input type="hidden" name="locationId" value="${esc(opts.locationId)}" />
+    <h3>Person</h3>
     <div class="grid2">
       <div><label>Prefix</label><input name="prefix" value="${esc(c.prefix)}" placeholder="Mr./Dr." /></div>
       <div><label>Pronouns</label><input name="pronouns" value="${esc(c.pronouns)}" placeholder="he/him" /></div>
@@ -1161,19 +1219,20 @@ export function cardForm(opts: {
     <label>What this person can edit on their own card</label>
     ${selfFieldChecks(effectiveSelf, { name: "selfEditFields", includeInherit: true, inherit: inheritSelf })}
 
-    <p style="margin-top:16px">
+    <div class="form-actions">
       <button class="btn" type="submit">Save ${esc(lower(t.cardSingular))}</button>
-      ${opts.card ? `<a class="btn secondary" href="/c/${esc(opts.card.slug)}" target="_blank">Preview</a>` : ""}
       <a class="btn secondary" href="/admin/cards?locationId=${esc(opts.locationId)}">Cancel</a>
-      ${opts.card ? `<a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/signature">Email signature</a>` : ""}
-      ${opts.card ? `<a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/turnover">Turn over</a>` : ""}
-    </p>
+    </div>
   </form>
   ${
     opts.card
-      ? `<form method="POST" action="/admin/cards/${esc(opts.card.id)}/delete" style="margin-top:10px"
+      ? `<div class="danger-zone">
+    <h3>Delete this ${esc(lower(t.cardSingular))}</h3>
+    <p class="muted">Removes the public page and its analytics. For offboarding a person (redirects, lead transfer, replacement), use <a href="/admin/cards/${esc(opts.card.id)}/turnover">Turn over</a> instead.</p>
+    <form method="POST" action="/admin/cards/${esc(opts.card.id)}/delete"
            onsubmit="return confirm('Delete this ${esc(lower(t.cardSingular))}?')">
-           <button class="btn danger" type="submit">Delete ${esc(lower(t.cardSingular))}</button></form>`
+           <button class="btn danger" type="submit">Delete ${esc(lower(t.cardSingular))}</button></form>
+  </div>`
       : ""
   }
   ${editorScripts()}`;
@@ -1310,9 +1369,15 @@ export function templateForm(brandId: string, template?: any): string {
   const hidden = new Set(asStringArray(t.hiddenFields));
   const action = template ? `/admin/templates/${template.id}` : "/admin/templates";
   const body = `
-  <h2>${template ? "Edit" : "New"} template</h2>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>${template ? `Edit template — ${esc(t.name)}` : "New template"}</h2>
+      <p class="muted" style="margin:0">A template fixes a design, role behavior and lead form once — cards just pick it.</p>
+    </div>
+  </div>
   <form class="editor" method="POST" action="${action}" style="max-width:900px">
     <input type="hidden" name="brandId" value="${esc(brandId)}" />
+    <h3>Basics</h3>
     <label>Template name</label>
     <input name="name" value="${esc(t.name)}" required placeholder="e.g. Sales — Green Wave" />
     <label class="chk" style="margin:10px 0"><input type="checkbox" name="isDefault" value="1" ${
@@ -1381,8 +1446,8 @@ export function templateForm(brandId: string, template?: any): string {
       inherit: t.leadFields == null,
     })}
 
-    <p style="margin-top:16px"><button class="btn" type="submit">Save template</button>
-    <a class="btn secondary" href="/admin/templates?brandId=${esc(brandId)}">Cancel</a></p>
+    <div class="form-actions"><button class="btn" type="submit">Save template</button>
+    <a class="btn secondary" href="/admin/templates?brandId=${esc(brandId)}">Cancel</a></div>
   </form>
   ${designScripts()}`;
   return shell("Template", body);
@@ -1430,19 +1495,30 @@ export function adminForm(opts: { admin?: any; brands: any[]; locations: any[] }
   const locSet = new Set(scopes.filter((s: any) => s.locationId).map((s: any) => s.locationId));
   const roles = ["org_owner", "org_admin", "brand_admin", "location_admin"] as const;
   const body = `
-  <h2>${opts.admin ? "Edit" : "New"} admin</h2>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>${opts.admin ? `Edit admin — ${esc(a.email)}` : "New admin"}</h2>
+      <p class="muted" style="margin:0">${opts.admin ? "Role, scope, and sign-in settings for this admin." : "Invite an admin to this workspace. Scope what they can manage with the role."}</p>
+    </div>
+  </div>
   <form class="editor" method="POST" action="${action}" style="max-width:640px">
-    <label>Email</label><input name="email" type="email" value="${esc(a.email)}" ${
+    <h3>Account</h3>
+    <div class="grid2">
+      <div><label>Email</label><input name="email" type="email" value="${esc(a.email)}" ${
     opts.admin ? "readonly" : ""
-  } required />
-    <label>Name</label><input name="name" value="${esc(a.name)}" />
+  } required placeholder="admin@yourco.com" /></div>
+      <div><label>Name</label><input name="name" value="${esc(a.name)}" placeholder="Jane Doe" /></div>
+    </div>
+
+    <h3>Role &amp; scope</h3>
+    <p class="muted">Super: everything. General: all brands' content. Brand / Store admins manage only what you check below.</p>
     <label>Role</label>
     <select name="role" id="role-sel">${roles
       .map((r) => `<option value="${r}" ${a.role === r ? "selected" : ""}>${esc(ROLE_LABELS[r])}</option>`)
       .join("")}</select>
 
     <div id="brand-scope" class="scope-box">
-      <label>Brand scope (for Brand admin)</label>
+      <label>Brands this admin manages</label>
       <div class="self-fields">${opts.brands
         .map(
           (b: any) =>
@@ -1453,7 +1529,7 @@ export function adminForm(opts: { admin?: any; brands: any[]; locations: any[] }
         .join("")}</div>
     </div>
     <div id="loc-scope" class="scope-box">
-      <label>Store scope (for Store admin)</label>
+      <label>Stores this admin manages</label>
       <div class="self-fields">${opts.locations
         .map(
           (l: any) =>
@@ -1464,24 +1540,30 @@ export function adminForm(opts: { admin?: any; brands: any[]; locations: any[] }
         .join("")}</div>
     </div>
 
-    <label>Password ${opts.admin ? "(leave blank to keep current)" : "(for password login; blank = SSO-only)"}</label>
+    <h3>Sign-in</h3>
+    <label>Password <span class="muted">${opts.admin ? "(leave blank to keep current)" : "(for password login; blank = SSO-only)"}</span></label>
     <input name="password" type="password" autocomplete="new-password" />
+    <p class="muted" style="margin:6px 0 0">Password admins must enroll an authenticator app on first sign-in. SSO admins inherit MFA from your identity provider.</p>
     ${
       opts.admin
-        ? `<label class="chk" style="margin-top:8px"><input type="checkbox" name="active" value="1" ${
+        ? `<label class="chk" style="margin-top:12px"><input type="checkbox" name="active" value="1" ${
             a.active ? "checked" : ""
           } /> Active</label>
     <label class="chk"><input type="checkbox" name="resetMfa" value="1" /> Reset two-factor (force re-enroll)</label>`
         : ""
     }
-    <p style="margin-top:14px"><button class="btn" type="submit">Save admin</button>
-    <a class="btn secondary" href="/admin/admins">Cancel</a></p>
+    <div class="form-actions"><button class="btn" type="submit">${opts.admin ? "Save changes" : "Create admin"}</button>
+    <a class="btn secondary" href="/admin/admins">Cancel</a></div>
   </form>
   ${
     opts.admin
-      ? `<form method="POST" action="/admin/admins/${esc(
-          a.id
-        )}/delete" onsubmit="return confirm('Delete this admin account?')" style="margin-top:10px"><button class="btn danger" type="submit">Delete admin</button></form>`
+      ? `<div class="danger-zone" style="max-width:640px">
+    <h3>Delete this admin</h3>
+    <p class="muted">Removes ${esc(a.email)}'s access immediately. This cannot be undone.</p>
+    <form method="POST" action="/admin/admins/${esc(
+      a.id
+    )}/delete" onsubmit="return confirm('Delete this admin account?')"><button class="btn danger" type="submit">Delete admin</button></form>
+  </div>`
       : ""
   }
   <script>(function(){var s=document.getElementById('role-sel'),bs=document.getElementById('brand-scope'),ls=document.getElementById('loc-scope');function u(){bs.style.display=s.value==='brand_admin'?'block':'none';ls.style.display=s.value==='location_admin'?'block':'none';}s.addEventListener('change',u);u();})();</script>`;
@@ -1588,7 +1670,7 @@ export function integrationsView(data: {
                 }</div>`
             )
             .join("");
-          return `<div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:10px">
+          return `<div class="item-card">
         <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start">
           <div><strong>${esc(c.name)}</strong> <span class="pill">${esc(c.provider)}</span> ${
             c.enabled ? `<span class="pill on">enabled</span>` : `<span class="pill off">off</span>`
@@ -1614,10 +1696,11 @@ export function integrationsView(data: {
     crmLocations.map((l) => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join("");
   const crmFieldHelp = CRM_SOURCE_FIELDS.map(([k]) => `<code>${esc(k)}</code>`).join(", ");
   const crmSection = `
-  <h3 style="margin-top:28px">CRM &amp; marketing sync</h3>
+  <section class="panel">
+  <h3>CRM &amp; marketing sync</h3>
   <p class="muted">Push every captured lead to your CRM, Zapier, or Make in real time. Point it at a Zapier/Make "Catch Hook" (or any webhook) URL — we POST a normalized lead payload. Field mapping and per-rooftop routing are optional.</p>
   ${crmRows}
-  <form class="editor" method="POST" action="/admin/crm" style="margin-top:12px;max-width:620px" id="crm-add">
+  <form class="editor" method="POST" action="/admin/crm" id="crm-add">
     <label>Name</label>
     <input name="name" placeholder="e.g. HubSpot production" required />
     <label style="margin-top:10px">Provider</label>
@@ -1658,10 +1741,16 @@ export function integrationsView(data: {
       }); }
       sel.addEventListener('change',sync); sync();
     })();</script>
-  </form>`;
+  </form>
+  </section>`;
 
   const body = `
-  <h2>Integrations</h2>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>Integrations</h2>
+      <p class="muted" style="margin:0">API keys, single sign-on, provisioning, webhooks and CRM sync for this workspace.</p>
+    </div>
+  </div>
 
   ${
     data.newKey
@@ -1672,13 +1761,14 @@ export function integrationsView(data: {
       : ""
   }
 
+  <section class="panel">
   <h3>REST API</h3>
   <p class="muted">Base URL: <code>${esc(data.baseUrl)}/api/v1</code>. Authenticate with <code>Authorization: Bearer &lt;key&gt;</code>.</p>
   <table>
     <tr><th>Name</th><th>Key</th><th>Scopes</th><th>Last used</th><th>Status</th><th></th></tr>
     ${keyRows}
   </table>
-  <form class="editor" method="POST" action="/admin/api-keys" style="margin-top:12px;max-width:560px">
+  <form class="editor" method="POST" action="/admin/api-keys">
     <label>Create API key — name</label>
     <input name="name" placeholder="e.g. Zapier, CRM sync" required />
     <label style="margin-top:10px">Permissions <span class="muted">(leave all unchecked for full access)</span></label>
@@ -1687,8 +1777,11 @@ export function integrationsView(data: {
     ).join("")}</div>
     <p style="margin-top:10px"><button class="btn" type="submit">Create key</button></p>
   </form>
+  </section>
 
-  <h3 style="margin-top:28px">SAML single sign-on</h3>
+  <section class="panel">
+  <h3>SAML single sign-on</h3>
+  <p class="muted">Let employees sign in to self-service (/me) with your identity provider — Okta, Entra, Google Workspace, etc.</p>
   <div class="stat" style="margin-bottom:12px">
     <p style="margin:0 0 8px">Status: ${
       saml.enabled
@@ -1727,8 +1820,11 @@ export function integrationsView(data: {
     )}</textarea>
     <p style="margin-top:10px"><button class="btn" type="submit">Save SSO settings</button></p>
   </form>
+  </section>
 
-  <h3 style="margin-top:28px">SCIM provisioning</h3>
+  <section class="panel">
+  <h3>SCIM provisioning</h3>
+  <p class="muted">Auto-create and deactivate cards from your directory (Entra, Okta) — new hires get a card automatically.</p>
   ${
     data.newScimToken
       ? `<div class="stat" style="border:1px solid #16a34a;background:#f0fdf4;margin-bottom:12px"><strong>New SCIM token — copy it now, it won't be shown again:</strong><p><code style="font-size:14px;word-break:break-all">${esc(
@@ -1746,24 +1842,25 @@ export function integrationsView(data: {
   }')">
     <button class="btn" type="submit">${data.scimTokenSet ? "Regenerate token" : "Generate token"}</button>
   </form>
+  </section>
 
-  <h3 style="margin-top:28px">Webhooks</h3>
+  <section class="panel">
+  <h3>Webhooks</h3>
   <p class="muted">We POST signed JSON to your URL on each subscribed event. Verify with the <code>X-OpenCard-Signature</code> header (HMAC-SHA256 of the body, using the endpoint secret).</p>
   <table>
     <tr><th>URL</th><th>Events</th><th>Status</th><th>Last delivery</th><th>Secret</th><th></th></tr>
     ${epRows}
   </table>
-  <form class="editor" method="POST" action="/admin/webhooks" style="margin-top:12px;max-width:560px">
+  <form class="editor" method="POST" action="/admin/webhooks">
     <label>Endpoint URL</label>
     <input name="url" type="url" placeholder="https://example.com/hooks/opencard" required />
     <label>Events</label>
     <div class="self-fields">${eventChecks}</div>
     <p style="margin-top:10px"><button class="btn" type="submit">Add webhook</button></p>
   </form>
+  </section>
 
-  ${crmSection}
-
-  <p style="margin-top:18px"><a class="btn secondary" href="/admin">← Back</a></p>`;
+  ${crmSection}`;
   return shell("Integrations", body);
 }
 
