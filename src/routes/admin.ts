@@ -21,6 +21,7 @@ import { parseFieldMapLines } from "../crmsync";
 import { sendTestSync, retrySync } from "../crmsync-dispatch";
 import { isGaId, isGtmId, normalizeCampaignCode } from "../marketing";
 import { resolveRange, conversionPct, sortLeaderboard, buildFunnel, topGroups, ANALYTICS_RANGES } from "../analytics";
+import { computeOrgAnalytics, analyticsCsv, sendDigest } from "../reports";
 import { promises as dns } from "dns";
 import { evaluateDomain, CNAME_TARGET } from "../domainstatus";
 
@@ -1352,6 +1353,19 @@ adminRouter.get("/analytics", async (req, res) => {
     return { name: c ? `${c.firstName} ${c.lastName}` : "—", slug: c?.slug || "", views: v._count._all };
   });
 
+  // Reporting controls (CSV export + manager digest) — org-level, so gate to global admins.
+  const orgSettings = p.global
+    ? await prisma.org.findUnique({ where: { id: p.orgId }, select: { digestEmails: true, digestCadence: true } })
+    : null;
+  const reports = p.global
+    ? {
+        csvUrl: `/admin/analytics/export.csv?range=${range.key}`,
+        emails: orgSettings?.digestEmails || "",
+        cadence: orgSettings?.digestCadence || "off",
+        sent: req.query.digest === "sent",
+      }
+    : undefined;
+
   res.send(
     V.analyticsView({
       totals,
@@ -1367,8 +1381,41 @@ adminRouter.get("/analytics", async (req, res) => {
       deptPerf,
       range: { key: range.key, label: range.label },
       ranges: ANALYTICS_RANGES,
+      reports,
     })
   );
+});
+
+// CSV export of the org-wide analytics report.
+adminRouter.get("/analytics/export.csv", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  const rangeKey = String(req.query.range || "30");
+  const org = await prisma.org.findUnique({ where: { id: p.orgId }, select: { name: true } });
+  const data = await computeOrgAnalytics(p.orgId, rangeKey);
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="opencard-analytics-${data.range.key}.csv"`);
+  res.send(analyticsCsv(org?.name || "OpenCard", data));
+});
+
+// Save the manager-digest recipients + cadence.
+adminRouter.post("/reports/digest", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  const cadence = req.body?.cadence === "weekly" ? "weekly" : "off";
+  await prisma.org.update({
+    where: { id: p.orgId },
+    data: { digestEmails: clean(req.body?.digestEmails) || null, digestCadence: cadence },
+  });
+  res.redirect("/admin/analytics");
+});
+
+// Send a digest right now (test / on-demand).
+adminRouter.post("/reports/digest/test", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  await sendDigest(p.orgId);
+  res.redirect("/admin/analytics?digest=sent");
 });
 
 // ---------- leads ----------

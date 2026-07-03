@@ -19,6 +19,26 @@ function getTransport(): Transporter | null {
   return transporter;
 }
 
+// Generic mail send (reuses the transporter). Logs the intended delivery when
+// SMTP isn't configured. Never throws.
+export async function sendMail(to: string[], subject: string, text: string): Promise<{ delivered: string }> {
+  try {
+    if (!to.length) return { delivered: "none (no recipients)" };
+    const t = getTransport();
+    if (!t) {
+      // eslint-disable-next-line no-console
+      console.log(JSON.stringify({ msg: "mail", to, subject, delivered: "logged (SMTP not configured)" }));
+      return { delivered: "logged" };
+    }
+    await t.sendMail({ from: config.smtp.from, to: to.join(","), subject, text });
+    return { delivered: "smtp" };
+  } catch (e: any) {
+    // eslint-disable-next-line no-console
+    console.log(JSON.stringify({ msg: "mail-error", error: String(e?.message || e).slice(0, 200) }));
+    return { delivered: "error" };
+  }
+}
+
 // Fire-and-forget lead notification. `source` carries the loaded card (with dept
 // + location) or asset (with location) used to resolve routing.
 export function notifyLead(lead: any, source: { card?: any; asset?: any }): void {

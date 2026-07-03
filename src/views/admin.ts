@@ -1660,8 +1660,27 @@ export function analyticsView(stats: {
   deptPerf?: { key: string; count: number }[];
   range?: { key: string; label: string };
   ranges?: [string, string][];
+  reports?: { csvUrl: string; emails: string; cadence: string; sent: boolean };
 }): string {
   const t = stats.totals;
+  const rp = stats.reports;
+  const reportsSection = rp
+    ? `<h3 style="margin-top:28px">Reports</h3>
+  ${rp.sent ? `<p class="auth-banner" style="max-width:none">Digest sent (or logged if SMTP isn't configured).</p>` : ""}
+  <p><a class="btn secondary" href="${esc(rp.csvUrl)}">⬇ Download CSV</a></p>
+  <form class="editor" method="POST" action="/admin/reports/digest" style="max-width:560px;margin-top:8px">
+    <label>Manager digest recipients <span class="muted">(comma-separated emails)</span></label>
+    <input name="digestEmails" value="${esc(rp.emails)}" placeholder="gm@dealer.com, marketing@dealer.com" />
+    <label style="margin-top:8px">Cadence</label>
+    <select name="cadence">
+      <option value="off" ${rp.cadence === "off" ? "selected" : ""}>Off</option>
+      <option value="weekly" ${rp.cadence === "weekly" ? "selected" : ""}>Weekly</option>
+    </select>
+    <p class="muted" style="font-size:12px;margin:6px 0 0">A weekly summary (last 7 days) is emailed to these recipients.</p>
+    <p style="margin-top:10px"><button class="btn" type="submit">Save digest</button>
+    <button class="btn secondary" type="submit" formaction="/admin/reports/digest/test">Send test now</button></p>
+  </form>`
+    : "";
   const kvTable = (title: string, rows: { key: string; count: number }[] | undefined, col: string) =>
     rows
       ? `<h3 style="margin-top:24px">${esc(title)}</h3>
@@ -1721,6 +1740,7 @@ export function analyticsView(stats: {
   ${kvTable("Campaign performance", stats.campaigns, "Campaign")}
   ${kvTable("Top employees by leads", stats.employees, "Employee")}
   ${kvTable("Department performance", stats.deptPerf, "Department")}
+  ${reportsSection}
 
   <h3 style="margin-top:24px">Top cards by views</h3>
   <table>

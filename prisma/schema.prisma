@@ -23,6 +23,10 @@ model Org {
   // landing pages so scans/views land in the customer's own GA4 / GTM.
   gaMeasurementId String? // GA4 Measurement ID, e.g. G-XXXXXXXXXX
   gtmContainerId  String? // Google Tag Manager container, e.g. GTM-XXXXXXX
+  // Scheduled manager digest (Phase 8.3): comma-separated recipients + cadence.
+  digestEmails     String?
+  digestCadence    String    @default("off") // off | weekly
+  digestLastSentAt DateTime?
   // Billing / plan state. `plan` keys into src/plans.ts. Stripe ids are set once
   // hosted checkout is wired; until then plans are assigned by a platform owner.
   plan                 String    @default("starter")

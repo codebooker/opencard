@@ -5,6 +5,7 @@ import { config } from "./config";
 import { cardsRouter } from "./routes/cards";
 import { assetsRouter } from "./routes/assets";
 import { campaignRouter } from "./routes/campaigns";
+import { runDueDigests } from "./reports";
 import { adminRouter } from "./routes/admin";
 import { scimRouter } from "./routes/scim";
 import { selfRouter } from "./routes/selfservice";
@@ -126,3 +127,10 @@ app.listen(config.port, () => {
   // eslint-disable-next-line no-console
   console.log(`OpenCard listening on ${config.baseUrl} (port ${config.port})`);
 });
+
+// Manager-digest scheduler: hourly tick sends weekly digests to orgs that are due.
+if (process.env.NODE_ENV !== "test") {
+  setInterval(() => {
+    runDueDigests().catch((e) => console.log(JSON.stringify({ msg: "digest-tick-error", error: String(e?.message || e).slice(0, 200) })));
+  }, 60 * 60 * 1000);
+}
