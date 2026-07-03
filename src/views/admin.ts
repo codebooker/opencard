@@ -33,6 +33,7 @@ import { LEAD_STATUSES, STATUS_LABELS, nextStatuses } from "../leadstatus";
 import { SIGNATURE_THEMES, SIGNATURE_ELEMENTS, asLockList, SignatureTheme } from "../signature";
 import { CRM_SOURCE_FIELDS } from "../crmsync";
 import { auditLabel, formatAuditActor } from "../audit";
+import { eventStatus, EVENT_STATUS_LABELS } from "../event";
 
 // Shared lead-form config block for the template + brand editors.
 function leadFormConfig(opts: {
@@ -246,6 +247,7 @@ export function dashboard(
     ${p.super ? `<a class="btn secondary" href="/admin/integrations">Integrations</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/marketing">Marketing</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/audit">Audit</a>` : ""}
+    ${p.global ? `<a class="btn secondary" href="/admin/events">Events</a>` : ""}
     ${p.global ? `<a class="btn secondary" href="/admin/data">Data</a>` : ""}
     ${p.global ? `<a class="btn" href="/admin/brands/new">+ New ${lower(t.brandSingular)}</a>` : ""}`;
   const banner = actingClientName
@@ -414,6 +416,108 @@ export function brandForm(
   }
   ${designScripts()}`;
   return shell("Brand", body);
+}
+
+// Events list + create (Phase 10.2).
+export function eventsView(data: { events: any[]; locations: { id: string; name: string }[] }): string {
+  const pill = (ev: any) => {
+    const s = eventStatus(ev);
+    const cls = s === "live" ? "on" : s === "off" || s === "ended" ? "off" : "";
+    return `<span class="pill ${cls}">${EVENT_STATUS_LABELS[s]}</span>`;
+  };
+  const day = (d: any) => (d ? esc(new Date(d).toISOString().slice(0, 10)) : "");
+  const rows = data.events.length
+    ? data.events
+        .map(
+          (ev) => `<tr>
+        <td><a href="/admin/events/${esc(ev.id)}">${esc(ev.name)}</a></td>
+        <td>${pill(ev)}</td>
+        <td class="muted">${ev.location?.name ? esc(ev.location.name) : "—"}</td>
+        <td class="muted">${day(ev.startsAt)}${ev.endsAt ? ` → ${day(ev.endsAt)}` : ""}</td>
+        <td>${ev._count?.assets ?? 0} QR</td>
+      </tr>`
+        )
+        .join("")
+    : `<tr><td colspan="5" class="muted">No events yet.</td></tr>`;
+  const locOpts = `<option value="">(no rooftop — set later)</option>` + data.locations.map((l) => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join("");
+  const body = `
+  <div class="topbar"><h2>Events</h2><a class="btn secondary" href="/admin">← Back</a></div>
+  <p class="muted">Auto shows, tent sales, hiring events: create an event, add QR codes that capture leads, and track its performance. Event QR codes only work while the event is live.</p>
+  <table>
+    <tr><th>Event</th><th>Status</th><th>Rooftop</th><th>Dates</th><th>QR</th></tr>
+    ${rows}
+  </table>
+  <h3 style="margin-top:18px">New event</h3>
+  <form class="editor" method="POST" action="/admin/events" style="max-width:560px">
+    <label>Event name</label>
+    <input name="name" placeholder="Summer Tent Sale" required />
+    <label style="margin-top:8px">Rooftop</label>
+    <select name="locationId">${locOpts}</select>
+    <div class="grid2">
+      <div><label style="margin-top:8px">Starts <span class="muted">(optional)</span></label><input type="datetime-local" name="startsAt" /></div>
+      <div><label style="margin-top:8px">Ends <span class="muted">(optional)</span></label><input type="datetime-local" name="endsAt" /></div>
+    </div>
+    <p style="margin-top:10px"><button class="btn" type="submit">Create event</button></p>
+  </form>`;
+  return shell("Events", body);
+}
+
+// Event detail: edit, performance, QR assets, attach QR (Phase 10.2).
+export function eventDetailView(data: { ev: any; scans: number; leads: number; baseUrl: string; locations: { id: string; name: string }[] }): string {
+  const ev = data.ev;
+  const status = eventStatus(ev);
+  const conv = data.scans ? Math.round((data.leads / data.scans) * 1000) / 10 : 0;
+  const assetRows = ev.assets.length
+    ? ev.assets
+        .map(
+          (a: any) => `<tr>
+        <td>${esc(a.name)}</td>
+        <td><a href="${esc(data.baseUrl)}/a/${esc(a.slug)}" target="_blank"><code>/a/${esc(a.slug)}</code></a></td>
+        <td><a href="${esc(data.baseUrl)}/a/${esc(a.slug)}/qr.png" target="_blank">QR</a></td>
+        <td>${a.scanCount}</td>
+      </tr>`
+        )
+        .join("")
+    : `<tr><td colspan="4" class="muted">No QR codes yet — add one below.</td></tr>`;
+  const needsLoc = !ev.locationId;
+  const locOpts = data.locations.map((l) => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join("");
+  const body = `
+  <div class="topbar"><h2>${esc(ev.name)} <span class="pill ${status === "live" ? "on" : "off"}">${EVENT_STATUS_LABELS[status]}</span></h2><a class="btn secondary" href="/admin/events">← Events</a></div>
+  <p class="muted">${ev.location?.name ? `Rooftop: ${esc(ev.location.name)} · ` : ""}Event QR codes resolve only while <strong>Live</strong>.</p>
+
+  <div class="cards-grid">
+    <div class="stat"><div class="n">${data.scans}</div><div class="muted">QR scans</div></div>
+    <div class="stat"><div class="n">${data.leads}</div><div class="muted">Leads captured</div></div>
+    <div class="stat"><div class="n">${conv}%</div><div class="muted">Scan → lead rate</div></div>
+  </div>
+
+  <h3 style="margin-top:24px">QR codes</h3>
+  <table><tr><th>Name</th><th>Link</th><th>QR</th><th>Scans</th></tr>${assetRows}</table>
+  <form class="editor" method="POST" action="/admin/events/${esc(ev.id)}/assets" style="max-width:560px;margin-top:10px">
+    <label>Add a QR code — name</label>
+    <input name="name" placeholder="Entrance banner" required />
+    ${needsLoc ? `<label style="margin-top:8px">Rooftop</label><select name="locationId" required><option value="">(pick a rooftop)</option>${locOpts}</select>` : ""}
+    <p style="margin-top:10px"><button class="btn" type="submit">Add QR code</button></p>
+  </form>
+
+  <h3 style="margin-top:24px">Event settings</h3>
+  <form class="editor" method="POST" action="/admin/events/${esc(ev.id)}" style="max-width:560px">
+    <label>Name</label><input name="name" value="${esc(ev.name)}" required />
+    <label class="chk" style="margin-top:8px"><input type="checkbox" name="active" value="1" ${ev.active ? "checked" : ""} /> Active</label>
+    <div class="grid2">
+      <div><label style="margin-top:8px">Starts</label><input type="datetime-local" name="startsAt" value="${dtLocal(ev.startsAt)}" /></div>
+      <div><label style="margin-top:8px">Ends</label><input type="datetime-local" name="endsAt" value="${dtLocal(ev.endsAt)}" /></div>
+    </div>
+    <p style="margin-top:10px"><button class="btn" type="submit">Save event</button></p>
+  </form>
+
+  <div class="danger-zone" style="margin-top:20px;max-width:560px">
+    <form method="POST" action="/admin/events/${esc(ev.id)}/delete" onsubmit="return confirm('Delete this event? Its QR codes are kept but detached.')">
+      <button class="btn danger" type="submit">Delete event</button>
+    </form>
+  </div>
+  <p style="margin-top:14px"><a class="btn secondary" href="/admin/events">← Events</a></p>`;
+  return shell(ev.name, body);
 }
 
 // Data & privacy hub (Phase 9.2/9.3): export + erasure + retention controls.

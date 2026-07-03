@@ -12,6 +12,7 @@ import { emitEvent, leadPayload } from "../webhooks";
 import { notifyLead } from "../notify";
 import { syncLeadToCrm } from "../crmsync-dispatch";
 import { orgAnalyticsHead } from "../marketing-tags";
+import { eventLive } from "../event";
 import { findDuplicate } from "../leadstatus";
 
 export const assetsRouter = Router();
@@ -26,6 +27,7 @@ async function loadAsset(slug: string, orgId: string | null) {
     include: {
       location: { include: { brand: true } },
       destinationCard: { select: { slug: true, active: true } },
+      event: true,
     },
   });
 }
@@ -35,6 +37,11 @@ assetsRouter.get("/:slug", async (req, res) => {
   const orgId = await hostOrg(req);
   const asset = await loadAsset(req.params.slug, orgId);
   if (!asset) return notFound(res);
+
+  // Event QR codes only resolve while the event is live.
+  if (asset.event && !eventLive(asset.event)) {
+    return notFound(res, "This event QR code isn't active right now.");
+  }
 
   await runWithOrg(asset.orgId, (db) =>
     db.asset.update({

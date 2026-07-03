@@ -69,7 +69,27 @@ model Org {
   crmSyncLogs       CrmSyncLog[]
   campaigns         Campaign[]
   auditLogs         AuditLog[]
+  events            Event[]
   createdAt   DateTime @default(now())
+}
+
+// A time-bounded event (auto show, tent sale, hiring event) that groups QR assets
+// + their leads for one occasion (Phase 10.2). QR assets tied to it only resolve
+// while the event is live (active + within the optional start/end window).
+model Event {
+  id         String    @id @default(cuid())
+  org        Org       @relation(fields: [orgId], references: [id])
+  orgId      String
+  location   Location? @relation(fields: [locationId], references: [id])
+  locationId String?
+  name       String
+  startsAt   DateTime?
+  endsAt     DateTime?
+  active     Boolean   @default(true)
+  assets     Asset[]
+  createdAt  DateTime  @default(now())
+
+  @@index([orgId])
 }
 
 // Append-only audit trail (Phase 9.1): who did what security/compliance-relevant
@@ -248,6 +268,7 @@ model Location {
   departments  Department[]
   assets       Asset[]
   domains      TenantDomain[]
+  events       Event[]
   createdAt    DateTime @default(now())
 
   @@unique([brandId, code])
@@ -273,11 +294,16 @@ model Asset {
   active            Boolean   @default(true)
   scanCount         Int       @default(0)
   lastScanAt        DateTime?
+  // When set, this QR asset belongs to an event and only resolves while the
+  // event is live (Phase 10.2).
+  event             Event?    @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  eventId           String?
   leads             Lead[]
   createdAt         DateTime  @default(now())
 
   @@index([orgId])
   @@index([locationId])
+  @@index([eventId])
 }
 
 // A department within a rooftop (Sales/Service/Parts/Finance/BDC/Management or

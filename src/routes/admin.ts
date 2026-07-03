@@ -1490,6 +1490,105 @@ adminRouter.post("/data/retention/prune", async (req, res) => {
   res.redirect("/admin/data?pruned=" + n);
 });
 
+// ---------- events (Phase 10.2) ----------
+function parseDateLocal(v: any): Date | null {
+  const s = clean(v);
+  if (!s) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+adminRouter.get("/events", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  const scope = RBAC.seesAllOrgs(p) ? {} : { orgId: p.orgId };
+  const [events, locations] = await Promise.all([
+    prisma.event.findMany({
+      where: scope,
+      orderBy: { createdAt: "desc" },
+      include: { location: { select: { name: true } }, _count: { select: { assets: true } } },
+    }),
+    prisma.location.findMany({ where: scope, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+  ]);
+  res.send(V.eventsView({ events, locations }));
+});
+
+adminRouter.post("/events", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  const b = req.body || {};
+  const name = clean(b.name);
+  if (!name) return res.redirect("/admin/events");
+  let locationId: string | null = null;
+  if (b.locationId) {
+    const loc = await prisma.location.findFirst({ where: { id: String(b.locationId), orgId: p.orgId } });
+    locationId = loc?.id || null;
+  }
+  const ev = await prisma.event.create({
+    data: { orgId: p.orgId, name, locationId, startsAt: parseDateLocal(b.startsAt), endsAt: parseDateLocal(b.endsAt), active: true },
+  });
+  res.redirect("/admin/events/" + ev.id);
+});
+
+adminRouter.get("/events/:id", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  const where = RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId };
+  const ev = await prisma.event.findFirst({ where, include: { location: true, assets: { orderBy: { createdAt: "asc" } } } });
+  if (!ev) return res.status(404).send("Event not found");
+  const assetIds = ev.assets.map((a) => a.id);
+  const scans = ev.assets.reduce((s, a) => s + a.scanCount, 0);
+  const leads = assetIds.length ? await prisma.lead.count({ where: { assetId: { in: assetIds } } }) : 0;
+  const locations = await prisma.location.findMany({
+    where: RBAC.seesAllOrgs(p) ? {} : { orgId: p.orgId },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+  res.send(V.eventDetailView({ ev, scans, leads, baseUrl: config.cardUrl, locations }));
+});
+
+adminRouter.post("/events/:id", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  const where = RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId };
+  const ev = await prisma.event.findFirst({ where });
+  if (!ev) return res.status(404).send("Not found");
+  const b = req.body || {};
+  await prisma.event.update({
+    where: { id: ev.id },
+    data: { name: clean(b.name) || ev.name, startsAt: parseDateLocal(b.startsAt), endsAt: parseDateLocal(b.endsAt), active: !!b.active },
+  });
+  res.redirect("/admin/events/" + ev.id);
+});
+
+adminRouter.post("/events/:id/assets", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  const where = RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId };
+  const ev = await prisma.event.findFirst({ where });
+  if (!ev) return res.status(404).send("Not found");
+  const b = req.body || {};
+  const name = clean(b.name) || "Event QR";
+  let locationId = ev.locationId;
+  if (!locationId && b.locationId) {
+    const loc = await prisma.location.findFirst({ where: { id: String(b.locationId), orgId: p.orgId } });
+    locationId = loc?.id || null;
+  }
+  if (!locationId) return res.status(400).send("Set an event rooftop first (edit the event), then add QR codes.");
+  const slug = await uniqueAssetSlug(name);
+  await prisma.asset.create({
+    data: { orgId: p.orgId, locationId, type: "event", name, slug, destinationType: "landing", eventId: ev.id, active: true },
+  });
+  res.redirect("/admin/events/" + ev.id);
+});
+
+adminRouter.post("/events/:id/delete", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  await prisma.event.deleteMany({ where: RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId } });
+  res.redirect("/admin/events");
+});
+
 adminRouter.get("/data/export.json", async (req, res) => {
   const p = reqAdmin(req);
   if (!p.global) return forbidden(res);
