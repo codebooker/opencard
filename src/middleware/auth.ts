@@ -76,14 +76,19 @@ export function mfaPage(error?: string): string {
   return page({
     title: "Two-factor",
     head: OC_FAVICON,
-    body: `<div class="login">
-      <h1>Two-factor code</h1>
-      <p class="muted">Enter the 6-digit code from your authenticator app.</p>
-      ${error ? `<p style="color:#b91c1c">${esc(error)}</p>` : ""}
-      <form method="POST" action="/admin/login/mfa">
-        <input name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456" autofocus />
-        <p style="margin-top:12px"><button class="btn" type="submit">Verify</button></p>
-      </form>
+    body: `<div class="auth">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <img src="/opencard-logo.svg" alt="OpenCard" style="height:44px;width:auto;margin:0 auto 6px;display:block" />
+          <h1 style="font-size:20px">Two-factor code</h1>
+          <p class="auth-sub">Enter the 6-digit code from your authenticator app.</p>
+        </div>
+        ${error ? `<p class="auth-error">${esc(error)}</p>` : ""}
+        <form method="POST" action="/admin/login/mfa" class="auth-form">
+          <input class="auth-code" name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="••••••" autocomplete="one-time-code" autofocus />
+          <button class="btn auth-submit" type="submit">Verify</button>
+        </form>
+      </div>
     </div>`,
   });
 }
@@ -92,17 +97,22 @@ export function enrollPage(otpUri: string, secret: string, qr: string, error?: s
   return page({
     title: "Set up two-factor",
     head: OC_FAVICON,
-    body: `<div class="login" style="max-width:440px">
-      <h1>Set up two-factor</h1>
-      <p class="muted">Two-factor is required for admins. Scan this with Google Authenticator, 1Password, Authy, etc., then enter a code to confirm.</p>
-      ${error ? `<p style="color:#b91c1c">${esc(error)}</p>` : ""}
-      <p style="text-align:center"><img src="${esc(qr)}" alt="QR code" width="200" height="200" /></p>
-      <p class="muted" style="text-align:center;word-break:break-all">Or enter the key manually: <code>${esc(secret)}</code></p>
-      <form method="POST" action="/admin/login/enroll">
-        <label>Confirmation code</label>
-        <input name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456" autofocus />
-        <p style="margin-top:12px"><button class="btn" type="submit">Confirm &amp; sign in</button></p>
-      </form>
+    body: `<div class="auth">
+      <div class="auth-card" style="max-width:440px">
+        <div class="auth-brand">
+          <img src="/opencard-logo.svg" alt="OpenCard" style="height:44px;width:auto;margin:0 auto 6px;display:block" />
+          <h1 style="font-size:20px">Set up two-factor</h1>
+          <p class="auth-sub">Two-factor is required for admins. Scan this with Google Authenticator, 1Password, Authy, etc., then enter a code to confirm.</p>
+        </div>
+        ${error ? `<p class="auth-error">${esc(error)}</p>` : ""}
+        <div class="auth-qr"><img src="${esc(qr)}" alt="QR code" width="180" height="180" /></div>
+        <p class="muted" style="text-align:center;word-break:break-all;margin:8px 0 0">Or enter the key manually: <code>${esc(secret)}</code></p>
+        <form method="POST" action="/admin/login/enroll" class="auth-form">
+          <label>Confirmation code</label>
+          <input class="auth-code" name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="••••••" autocomplete="one-time-code" autofocus />
+          <button class="btn auth-submit" type="submit">Confirm &amp; sign in</button>
+        </form>
+      </div>
     </div>`,
   });
 }

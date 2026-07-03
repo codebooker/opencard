@@ -33,10 +33,17 @@ function authLogin(title: string, inner: string, branding?: LoginBranding | null
 function shell(title: string, body: string): string {
   return page({
     title,
-    body: `<div class="admin"><div class="topbar">
-      <h1>My card</h1>
-      <a class="btn secondary" href="/me/logout">Sign out</a>
-    </div>${body}</div>`,
+    body: `<header class="site-head">
+      <div class="site-head-in">
+        <span class="site-title">My card</span>
+        <div class="site-actions">
+          <a class="btn secondary" href="/me/logout">Sign out</a>
+        </div>
+      </div>
+    </header>
+    <main class="admin" style="max-width:820px">
+      ${body}
+    </main>`,
   });
 }
 
@@ -116,13 +123,18 @@ export function selfEditPage(
 
   const body = `
   <div class="stat" style="margin-bottom:16px">
-    <strong>${esc(fullName)}</strong> · ${esc(card.location?.brand?.name || "")}
-    &nbsp;·&nbsp; <a href="/c/${esc(card.slug)}" target="_blank">view public card</a>
-    <p class="muted" style="margin:6px 0 0">Signed in as ${esc(email)}. You can edit: ${esc(
+    <div class="topbar" style="margin-bottom:0">
+      <div style="flex-direction:column;align-items:flex-start;gap:2px">
+        <strong style="font-size:16px">${esc(fullName)}</strong>
+        <span class="muted">${esc(card.location?.brand?.name || "")} · signed in as ${esc(email)}</span>
+      </div>
+      <a class="btn secondary" href="/c/${esc(card.slug)}" target="_blank">View public card</a>
+    </div>
+    <p class="muted" style="margin:10px 0 0">You can edit: ${esc(
       allowedLabels.join(", ") || "(nothing — ask your admin)"
     )}.</p>
   </div>
-  ${saved ? `<p style="color:#166534">✓ Saved.</p>` : ""}
+  ${saved ? `<p class="auth-banner">✓ Saved.</p>` : ""}
   <form class="editor" method="POST" action="/me" enctype="multipart/form-data">
     ${sections.join("\n")}
     <p style="margin-top:16px"><button class="btn" type="submit">Save my card</button>

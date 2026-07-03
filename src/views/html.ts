@@ -16,7 +16,7 @@ export function esc(s: unknown): string {
 
 // Bump when styles.css changes so browsers/CDN refetch instead of serving a
 // stale cached copy (the stylesheet URL becomes a new cache key).
-export const ASSET_VER = "20260702a";
+export const ASSET_VER = "20260702b";
 
 export function page(opts: {
   title: string;

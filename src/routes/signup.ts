@@ -16,26 +16,31 @@ function signupPage(opts: { values?: any; error?: string } = {}): string {
   const v = opts.values || {};
   return page({
     title: "Create your OpenCard account",
-    body: `<div class="login" style="max-width:520px">
-      <h1>Create your account</h1>
-      <p class="muted">Set up your organization and owner account. You'll add your team once you're in.</p>
-      ${opts.error ? `<p style="color:#b91c1c">${esc(opts.error)}</p>` : ""}
-      <form method="POST" action="/signup">
-        <label>Organization name</label>
-        <input name="orgName" value="${esc(v.orgName || "")}" placeholder="Acme Auto Group" required />
-        <label>Your name</label>
-        <input name="adminName" value="${esc(v.adminName || "")}" placeholder="Jane Doe" required />
-        <label>Work email</label>
-        <input name="email" type="email" value="${esc(v.email || "")}" autocomplete="username" required />
-        <label>Password</label>
-        <input name="password" type="password" autocomplete="new-password" minlength="8" required />
-        <label>First brand name <span class="muted">(optional)</span></label>
-        <input name="brandName" value="${esc(v.brandName || "")}" placeholder="defaults to your org name" />
-        <label>First location name <span class="muted">(optional)</span></label>
-        <input name="locationName" value="${esc(v.locationName || "")}" placeholder="Main" />
-        <p style="margin-top:14px"><button class="btn" type="submit">Create account</button></p>
-      </form>
-      <p class="muted" style="text-align:center">Already have an account? <a href="/admin/login">Sign in</a></p>
+    body: `<div class="auth">
+      <div class="auth-card wide">
+        <div class="auth-brand">
+          <img src="/opencard-logo.svg" alt="OpenCard" style="height:44px;width:auto;margin:0 auto 6px;display:block" />
+          <h1 style="font-size:22px">Create your account</h1>
+          <p class="auth-sub">Set up your organization and owner account. You'll add your team once you're in.</p>
+        </div>
+        ${opts.error ? `<p class="auth-error">${esc(opts.error)}</p>` : ""}
+        <form method="POST" action="/signup" class="auth-form">
+          <label>Organization name</label>
+          <input name="orgName" value="${esc(v.orgName || "")}" placeholder="Acme Auto Group" required autofocus />
+          <label>Your name</label>
+          <input name="adminName" value="${esc(v.adminName || "")}" placeholder="Jane Doe" required />
+          <label>Work email</label>
+          <input name="email" type="email" value="${esc(v.email || "")}" autocomplete="username" required />
+          <label>Password</label>
+          <input name="password" type="password" autocomplete="new-password" minlength="8" required />
+          <label>First brand name <span class="muted">(optional)</span></label>
+          <input name="brandName" value="${esc(v.brandName || "")}" placeholder="defaults to your org name" />
+          <label>First location name <span class="muted">(optional)</span></label>
+          <input name="locationName" value="${esc(v.locationName || "")}" placeholder="Main" />
+          <button class="btn auth-submit" type="submit">Create account</button>
+        </form>
+        <p class="auth-foot">Already have an account? <a href="/admin/login">Sign in</a></p>
+      </div>
     </div>`,
   });
 }

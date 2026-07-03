@@ -79,21 +79,40 @@ function selfFieldChecks(allowed: string[], opts: { name: string; includeInherit
   return `<div class="self-fields">${inherit}${boxes}</div>`;
 }
 
+// Marks the nav link that best matches the current path (longest matching href
+// wins, so /admin/leads/123 highlights "Leads" and /admin/brands/x highlights
+// "Dashboard"). Client-side so the shell stays stateless.
+const NAV_ACTIVE_SCRIPT = `<script>(function(){
+  var p = location.pathname, best = null, len = -1;
+  document.querySelectorAll(".site-nav a").forEach(function (a) {
+    var h = a.getAttribute("href");
+    if ((p === h || p.indexOf(h + "/") === 0) && h.length > len) { best = a; len = h.length; }
+  });
+  if (!best) best = document.querySelector('.site-nav a[href="/admin"]');
+  if (best) best.classList.add("active");
+})();</script>`;
+
 function shell(title: string, body: string): string {
   return page({
     title,
     head: OC_FAVICON,
-    body: `<div class="admin">
-      <div class="topbar">
-        <h1 style="margin:0"><a href="/admin" aria-label="OpenCard" style="display:inline-block;text-decoration:none"><img src="/opencard-logo.svg" alt="OpenCard" style="height:42px;width:auto;display:block" /></a></h1>
-        <div>
-          <a class="btn secondary" href="/admin/analytics">Analytics</a>
-          <a class="btn secondary" href="/admin/leads">Leads</a>
+    body: `<header class="site-head">
+      <div class="site-head-in">
+        <a class="site-logo" href="/admin" aria-label="OpenCard"><img src="/opencard-logo.svg" alt="OpenCard" /></a>
+        <nav class="site-nav" aria-label="Main">
+          <a href="/admin">Dashboard</a>
+          <a href="/admin/analytics">Analytics</a>
+          <a href="/admin/leads">Leads</a>
+        </nav>
+        <div class="site-actions">
           <a class="btn secondary" href="/admin/logout">Sign out</a>
         </div>
       </div>
+    </header>
+    <main class="admin">
       ${body}
-    </div>`,
+    </main>
+    ${NAV_ACTIVE_SCRIPT}`,
   });
 }
 
@@ -129,10 +148,15 @@ export function clientsConsole(orgs: any[], p: AdminPrincipal): string {
         .join("")
     : `<tr><td colspan="6" class="muted">No client workspaces yet.</td></tr>`;
   const body = `
-  <p class="muted">Signed in as ${esc(p.name)} · <strong>OpenCard staff</strong></p>
-  <div class="topbar"><h2>Clients</h2><div>${
-    p.staffAdmin ? `<a class="btn secondary" href="/admin/staff">Staff</a> ` : ""
-  }<a class="btn secondary" href="/admin/security">Security</a> <a class="btn" href="/admin/clients/new">+ New client</a></div></div>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>Clients</h2>
+      <p class="muted" style="margin:0">Signed in as ${esc(p.name)} · <strong>OpenCard staff</strong></p>
+    </div>
+    <div>${
+      p.staffAdmin ? `<a class="btn secondary" href="/admin/staff">Staff</a> ` : ""
+    }<a class="btn secondary" href="/admin/security">Security</a> <a class="btn" href="/admin/clients/new">+ New client</a></div>
+  </div>
   <p class="muted">Every workspace in the system. “Manage” administers a client's brands, cards, leads and SSO; “Edit” sets its plan and seat allowance.</p>
   <table>
     <tr><th>Client</th><th>Plan</th><th>Mode</th><th>Status</th><th>Usage</th><th></th></tr>
@@ -257,8 +281,13 @@ export function dashboard(
     : "";
   const body = `
   ${banner}
-  <p class="muted">Signed in as ${esc(p.name)} · <strong>${esc(ROLE_LABELS[p.role])}</strong></p>
-  <div class="topbar"><h2>${esc(t.brandPlural)} &amp; ${esc(lower(t.locationPlural))}</h2><div>${topActions}</div></div>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>${esc(t.brandPlural)} &amp; ${esc(lower(t.locationPlural))}</h2>
+      <p class="muted" style="margin:0">Signed in as ${esc(p.name)} · <strong>${esc(ROLE_LABELS[p.role])}</strong></p>
+    </div>
+    <div>${topActions}</div>
+  </div>
   ${
     brands.length === 0
       ? `<p class="muted">No ${esc(lower(t.brandPlural))} in your scope yet.</p>`
