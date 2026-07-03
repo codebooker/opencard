@@ -109,8 +109,15 @@ is a launch-adjacent cleanup, not a someday feature.
 - Fix the tenant bug first: `currentTerminology()` resolves terminology from
   an **arbitrary** org (`findFirst()`), not the signed-in tenant — one org's
   vertical leaks into every other org's admin UI.
-- Vertical picker: on the staff client form and (curated) on public signup;
-  stored on the org, changeable later.
+- Vertical picker at signup: a **"Business type"** dropdown on the public
+  signup form (customer-facing wording — never "vertical") with friendly
+  labels: "Car dealership", "General business", and one entry per future
+  pack. The choice sets `Org.vertical`, which drives terminology, lead-form
+  defaults, department suggestions, and starter templates from day one.
+  Options come from the installed vertical packs (Stage 2), so shipping a new
+  pack automatically adds it to the dropdown. Same picker on the staff
+  client form; staff can change an org's type later (with a warning about
+  relabeled UI and lead-form changes).
 - Gate dealership-only UI behind the vertical: OEM brands, Sales/Service
   URLs and timezone block in the location editor; vehicle-interest/trade-in/
   service-need lead fields; department suggestions; "Rooftop leaderboard"
