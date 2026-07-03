@@ -6,8 +6,8 @@
 
 :root {
   --primary: #1f6f43;            /* tenant accent (overridden per card) */
-  --accent: #1f6f43;             /* OpenCard admin accent */
-  --accent-ink: #14532d;
+  --accent: #1F5BEA;             /* OpenCard admin accent (logo blue) */
+  --accent-ink: #123A70;
   --text: #111827;
   --bg: #ffffff;
 
@@ -72,7 +72,9 @@ code { background: var(--wash-2); border: 1px solid var(--line-soft); border-rad
 .layout-minimal .logo { position: static; transform: none; display: block; margin: 18px auto 0; }
 .layout-classic .hero { height: 220px; }
 .layout-banner .hero { height: 160px; }
-.layout-minimal .hero { height: 0; }
+/* Minimal: no colored banner. The hero must size to its (static) logo/photo
+   children — a fixed height of 0 made them spill over the name and bio. */
+.layout-minimal .hero { height: auto; background: transparent; }
 .photo {
   width: 120px; height: 120px; border-radius: 50%;
   object-fit: cover; border: 4px solid var(--bg);
@@ -253,7 +255,7 @@ td .btn { padding: 5px 10px; font-size: 13px; }
   display: flex; align-items: center; gap: 20px;
 }
 .site-logo { display: flex; align-items: center; text-decoration: none; }
-.site-logo img { height: 30px; width: auto; display: block; }
+.site-logo img { height: 38px; width: auto; display: block; }
 .site-nav { display: flex; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .site-nav::-webkit-scrollbar { display: none; }
 .site-nav a {

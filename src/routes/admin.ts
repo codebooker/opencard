@@ -263,12 +263,21 @@ adminRouter.post("/clients", async (req, res) => {
   const b = req.body;
   const name = clean(b.name);
   if (!name) return res.redirect("/admin/clients/new");
+  const mode = VALID_MODES.includes(b.billingMode) ? b.billingMode : "standard";
+  const demo =
+    mode === "demo"
+      ? {
+          trialEndsAt: new Date(Date.now() + (Number(b.demoDays) === 60 ? 60 : 30) * 24 * 60 * 60 * 1000),
+          subscriptionStatus: "trialing",
+        }
+      : {};
   await prisma.org.create({
     data: {
       name,
       plan: isPlanKey(b.plan) ? b.plan : "starter",
-      billingMode: VALID_MODES.includes(b.billingMode) ? b.billingMode : "standard",
+      billingMode: mode,
       seatLimit: parseSeatLimit(b.seatLimit),
+      ...demo,
     },
   });
   res.redirect("/admin/clients");
@@ -287,7 +296,13 @@ adminRouter.post("/clients/:orgId/settings", async (req, res) => {
   const data: any = { seatLimit: parseSeatLimit(b.seatLimit) };
   if (clean(b.name)) data.name = clean(b.name);
   if (isPlanKey(b.plan)) data.plan = b.plan;
-  if (VALID_MODES.includes(b.billingMode)) data.billingMode = b.billingMode;
+  if (VALID_MODES.includes(b.billingMode)) {
+    data.billingMode = b.billingMode;
+    if (b.billingMode === "demo") {
+      data.trialEndsAt = new Date(Date.now() + (Number(b.demoDays) === 60 ? 60 : 30) * 24 * 60 * 60 * 1000);
+      data.subscriptionStatus = "trialing";
+    }
+  }
   await prisma.org.update({ where: { id: req.params.orgId }, data });
   res.redirect("/admin/clients");
 });
@@ -428,15 +443,23 @@ adminRouter.get("/billing", async (req, res) => {
          <label>Plan</label>
          <select name="plan">${PLAN_ORDER.map((k) => `<option value="${k}" ${k === plan.key ? "selected" : ""}>${esc(PLANS[k].label)} — ${esc(PLANS[k].price)}</option>`).join("")}</select>
          <label style="margin-top:10px">Billing mode</label>
-         <select name="billingMode">
+         <select name="billingMode" id="staff-billing-mode">
            <option value="standard" ${mode === "standard" ? "selected" : ""}>Standard (Stripe)</option>
            <option value="demo" ${mode === "demo" ? "selected" : ""}>Demo (free for a set period)</option>
            <option value="free" ${mode === "free" ? "selected" : ""}>Free (permanent comp)</option>
          </select>
-         <label style="margin-top:10px">Demo length (days, demo mode only)</label>
-         <select name="demoDays"><option value="30">30 days</option><option value="60">60 days</option></select>
+         <div id="staff-demo-days" style="display:none">
+           <label style="margin-top:10px">Demo length</label>
+           <select name="demoDays"><option value="30">30 days</option><option value="60">60 days</option></select>
+         </div>
          <p style="margin-top:10px"><button class="btn" type="submit">Update account</button></p>
-       </form>`
+       </form>
+       <script>(function(){
+         var m=document.getElementById('staff-billing-mode'),w=document.getElementById('staff-demo-days');
+         if(!m||!w) return;
+         function u(){ w.style.display = m.value==='demo' ? '' : 'none'; }
+         m.addEventListener('change',u); u();
+       })();</script>`
     : null;
   res.send(
     V.billingView({

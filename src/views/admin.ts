@@ -282,8 +282,13 @@ export function clientForm(org?: any): string {
     <div class="grid2">
       <div><label>Plan tier</label><select name="plan">${planOpts}</select>
         <p class="muted" style="margin:6px 0 0">Controls the feature set.</p></div>
-      <div><label>Billing type</label><select name="billingMode">${modeOpts}</select>
+      <div><label>Billing type</label><select name="billingMode" id="billing-mode">${modeOpts}</select>
         <p class="muted" style="margin:6px 0 0">Trial workspaces lock after the trial ends.</p></div>
+    </div>
+    <div id="demo-days-wrap" style="display:none">
+      <label>Trial length</label>
+      <select name="demoDays"><option value="30">30 days</option><option value="60">60 days</option></select>
+      <p class="muted" style="margin:6px 0 0">${org ? "Saving with Trial selected restarts the trial clock from today." : "The trial starts when the workspace is created."}</p>
     </div>
     ${planGuide()}
     <label>User allowance</label>
@@ -291,7 +296,13 @@ export function clientForm(org?: any): string {
     <p class="muted" style="margin:6px 0 0">Blank = the plan's default · <code>unlimited</code> = per-seat billing · or a fixed number of users.</p>
     <div class="form-actions"><button class="btn" type="submit">${org ? "Save client" : "Create client"}</button>
     <a class="btn secondary" href="/admin/clients">Cancel</a></div>
-  </form>`;
+  </form>
+  <script>(function(){
+    var m=document.getElementById('billing-mode'),w=document.getElementById('demo-days-wrap');
+    if(!m||!w) return;
+    function u(){ w.style.display = m.value==='demo' ? '' : 'none'; }
+    m.addEventListener('change',u); u();
+  })();</script>`;
   return shell(org ? "Edit client" : "New client", body);
 }
 

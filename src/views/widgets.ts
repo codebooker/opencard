@@ -50,12 +50,21 @@ function linesFromLabeled(items: LabeledValue[]): string {
 
 // ---- Reusable field markup ----
 export function photoField(currentUrl?: string | null): string {
+  // "Adjust" reloads the saved photo into the cropper. Only offered for
+  // same-origin uploads — external URLs would taint the canvas export.
+  const adjustable = !!currentUrl && currentUrl.startsWith("/uploads/");
   return `<h3>Profile photo</h3>
     ${
       currentUrl
         ? `<p class="muted">Current: <img src="${esc(
             currentUrl
-          )}" style="height:54px;width:54px;border-radius:50%;object-fit:cover;vertical-align:middle" /></p>`
+          )}" style="height:54px;width:54px;border-radius:50%;object-fit:cover;vertical-align:middle" />${
+            adjustable
+              ? ` <button type="button" id="adjustPhoto" class="btn secondary" data-src="${esc(
+                  currentUrl
+                )}" style="margin-left:8px;padding:5px 10px;font-size:13px">Adjust (zoom / position)</button>`
+              : ""
+          }</p>`
         : ""
     }
     <input type="file" id="photoFile" name="photoFile" accept="image/*" />
@@ -156,15 +165,23 @@ export function cropperScript(): string {
       var mx=Math.max(0, halfW - S/2), my=Math.max(0, halfH - S/2);
       ox=Math.max(-mx, Math.min(mx, ox)); oy=Math.max(-my, Math.min(my, oy));
     }
-    input.addEventListener('change', function(){
-      var f=input.files && input.files[0]; if(!f) return;
-      var url=URL.createObjectURL(f);
+    function loadIntoCropper(url){
       img.onload=function(){
         nw=img.naturalWidth; nh=img.naturalHeight; base=Math.max(S/nw, S/nh);
         ox=0; oy=0; zoom.value=1; ready=true; done=false; apply(); cropper.hidden=false;
       };
       img.src=url;
+    }
+    input.addEventListener('change', function(){
+      var f=input.files && input.files[0]; if(!f) return;
+      loadIntoCropper(URL.createObjectURL(f));
     });
+    // Re-crop the already-saved photo (same-origin uploads only).
+    var adjust=document.getElementById('adjustPhoto');
+    if(adjust){ adjust.addEventListener('click', function(){
+      loadIntoCropper(adjust.getAttribute('data-src'));
+      cropper.scrollIntoView({behavior:'smooth', block:'center'});
+    }); }
     zoom.addEventListener('input', function(){ apply(); clamp(); apply(); });
     var btns=document.querySelectorAll('[data-nudge]');
     for(var i=0;i<btns.length;i++){
