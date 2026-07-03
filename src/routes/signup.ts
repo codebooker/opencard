@@ -5,6 +5,7 @@ import { hashPassword } from "../security";
 import { getPlatformConfig } from "../platform-config";
 import { issueToken } from "../account";
 import { sendMail } from "../notify";
+import { mailEnabled } from "../config";
 import { page, esc } from "../views/html";
 
 // Public self-service onboarding: create a new tenant (Org) with its first owner
@@ -86,7 +87,15 @@ signupRouter.post("/", async (req, res) => {
   const defaults = await getPlatformConfig();
   const trialEndsAt = new Date(Date.now() + defaults.signupTrialDays * 24 * 60 * 60 * 1000);
   const org = await prisma.org.create({
-    data: { name: orgName, plan: defaults.signupPlan, subscriptionStatus: "trialing", trialEndsAt },
+    data: {
+      name: orgName,
+      plan: defaults.signupPlan,
+      subscriptionStatus: "trialing",
+      trialEndsAt,
+      // Can't gate go-live on an email that can't be sent: instances without
+      // SMTP auto-verify at signup instead of bricking the workspace.
+      ownerVerifiedAt: mailEnabled ? null : new Date(),
+    },
   });
   await prisma.adminUser.create({
     data: { email, name: adminName, role: "org_owner", orgId: org.id, passwordHash: hashPassword(password) },

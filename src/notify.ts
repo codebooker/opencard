@@ -26,8 +26,9 @@ export async function sendMail(to: string[], subject: string, text: string): Pro
     if (!to.length) return { delivered: "none (no recipients)" };
     const t = getTransport();
     if (!t) {
+      // Include the body so links (reset/verify/invite) are usable from logs in dev.
       // eslint-disable-next-line no-console
-      console.log(JSON.stringify({ msg: "mail", to, subject, delivered: "logged (SMTP not configured)" }));
+      console.log(JSON.stringify({ msg: "mail", to, subject, text, delivered: "logged (SMTP not configured)" }));
       return { delivered: "logged" };
     }
     await t.sendMail({ from: config.smtp.from, to: to.join(","), subject, text });
