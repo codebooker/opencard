@@ -2,7 +2,7 @@ import { esc, page, OC_FAVICON } from "./html";
 import { Address } from "../types";
 import { AdminPrincipal, ROLE_LABELS } from "../rbac";
 import { showsBilling, canManageStaffTarget, Role } from "../roles";
-import { PLAN_ORDER } from "../plans";
+import { PLAN_ORDER, PLANS, PlanKey } from "../plans";
 import { API_SCOPES, SCOPE_LABELS } from "../api-scopes";
 import { GENERAL_TERMINOLOGY, Terminology, lower } from "../terminology";
 import {
@@ -182,13 +182,13 @@ export function staffListView(staff: any[], p: AdminPrincipal): string {
         .join("")
     : `<tr><td colspan="5" class="muted">No staff accounts yet.</td></tr>`;
   const body = `
+  <p class="crumb"><a href="/admin/clients">← Clients</a></p>
   <div class="topbar"><h2>OpenCard staff</h2><a class="btn" href="/admin/staff/new">+ New staff</a></div>
   <p class="muted"><strong>Owner</strong>: full control, incl. other owners. <strong>Admin</strong>: everything except managing owners. <strong>Staff</strong>: manage clients only (no staff/password admin).</p>
   <table>
     <tr><th>Person</th><th>Role</th><th>2FA</th><th>Status</th><th></th></tr>
     ${rows}
-  </table>
-  <p style="margin-top:14px"><a class="btn secondary" href="/admin/clients">← Clients</a></p>`;
+  </table>`;
   return shell("Staff", body);
 }
 
@@ -199,6 +199,7 @@ export function staffForm(allowedRoles: string[], staff?: any): string {
     .map((r) => `<option value="${esc(r)}" ${s.role === r ? "selected" : ""}>${esc(ROLE_LABELS[r as Role] || r)}</option>`)
     .join("");
   const body = `
+  <p class="crumb"><a href="/admin/staff">← Staff</a></p>
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>${staff ? "Edit staff" : "New OpenCard staff"}</h2>
@@ -238,11 +239,28 @@ export function staffForm(allowedRoles: string[], staff?: any): string {
   return shell(staff ? "Edit staff" : "New staff", body);
 }
 
+// One-line summary of what each plan tier includes (shown on the client form).
+const PLAN_BLURBS: Record<PlanKey, string> = {
+  starter: "Try-it-out tier: 1 brand, 1 location, 25 cards, lead capture only.",
+  team: "Single business: self-service editing, email signatures, CSV export, API. Up to 250 cards.",
+  dealer_group: "Multi-rooftop groups: everything in Team plus SSO, SCIM provisioning, webhooks, CRM sync, custom domains, advanced analytics. Up to 5,000 cards.",
+  enterprise: "Everything, unlimited, plus audit logs. Custom pricing.",
+};
+
+function planGuide(): string {
+  return `<div class="scope-box" style="margin-top:8px">${PLAN_ORDER.map((k) => {
+    const p = PLANS[k];
+    return `<p style="margin:4px 0;font-size:13px"><strong>${esc(p.label)}</strong> <span class="muted">(${esc(p.price)})</span> — <span class="muted">${esc(PLAN_BLURBS[k])}</span></p>`;
+  }).join("")}</div>`;
+}
+
 // Create/edit a client (OpenCard staff): name, plan tier, billing type, seats.
 export function clientForm(org?: any): string {
   const o = org || {};
   const action = org ? `/admin/clients/${esc(o.id)}/settings` : "/admin/clients";
-  const planOpts = PLAN_ORDER.map((k) => `<option value="${k}" ${o.plan === k ? "selected" : ""}>${k}</option>`).join("");
+  const planOpts = PLAN_ORDER.map(
+    (k) => `<option value="${k}" ${o.plan === k ? "selected" : ""}>${esc(PLANS[k].label)} — ${esc(PLANS[k].price)}</option>`
+  ).join("");
   const modeOpts = [
     ["free", "Free"],
     ["standard", "Paid"],
@@ -252,6 +270,7 @@ export function clientForm(org?: any): string {
     .join("");
   const seatVal = o.seatLimit == null ? "" : o.seatLimit < 0 ? "unlimited" : String(o.seatLimit);
   const body = `
+  <p class="crumb"><a href="/admin/clients">← Clients</a></p>
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>${org ? `Edit client — ${esc(o.name)}` : "New client"}</h2>
@@ -266,6 +285,7 @@ export function clientForm(org?: any): string {
       <div><label>Billing type</label><select name="billingMode">${modeOpts}</select>
         <p class="muted" style="margin:6px 0 0">Trial workspaces lock after the trial ends.</p></div>
     </div>
+    ${planGuide()}
     <label>User allowance</label>
     <input name="seatLimit" value="${esc(seatVal)}" placeholder="e.g. 50, or unlimited" />
     <p class="muted" style="margin:6px 0 0">Blank = the plan's default · <code>unlimited</code> = per-seat billing · or a fixed number of users.</p>
@@ -381,6 +401,7 @@ export function brandForm(
   const adminDomain = brandDomains.find((d) => !d.locationId && d.kind === "admin")?.host || "";
   const userDomain = brandDomains.find((d) => !d.locationId && d.kind !== "admin")?.host || "";
   const body = `
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>${brand ? `Edit ${esc(lower(t.brandSingular))} — ${esc(b.name)}` : `New ${esc(lower(t.brandSingular))}`}</h2>
@@ -496,7 +517,8 @@ export function eventsView(data: { events: any[]; locations: { id: string; name:
     : `<tr><td colspan="5" class="muted">No events yet.</td></tr>`;
   const locOpts = `<option value="">(no rooftop — set later)</option>` + data.locations.map((l) => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join("");
   const body = `
-  <div class="topbar"><h2>Events</h2><a class="btn secondary" href="/admin">← Back</a></div>
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
+  <div class="topbar"><h2>Events</h2></div>
   <p class="muted">Auto shows, tent sales, hiring events: create an event, add QR codes that capture leads, and track its performance. Event QR codes only work while the event is live.</p>
   <table>
     <tr><th>Event</th><th>Status</th><th>Rooftop</th><th>Dates</th><th>QR</th></tr>
@@ -537,7 +559,8 @@ export function eventDetailView(data: { ev: any; scans: number; leads: number; b
   const needsLoc = !ev.locationId;
   const locOpts = data.locations.map((l) => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join("");
   const body = `
-  <div class="topbar"><h2>${esc(ev.name)} <span class="pill ${status === "live" ? "on" : "off"}">${EVENT_STATUS_LABELS[status]}</span></h2><a class="btn secondary" href="/admin/events">← Events</a></div>
+  <p class="crumb"><a href="/admin/events">← Events</a></p>
+  <div class="topbar"><h2>${esc(ev.name)} <span class="pill ${status === "live" ? "on" : "off"}">${EVENT_STATUS_LABELS[status]}</span></h2></div>
   <p class="muted">${ev.location?.name ? `Rooftop: ${esc(ev.location.name)} · ` : ""}Event QR codes resolve only while <strong>Live</strong>.</p>
 
   <div class="cards-grid">
@@ -570,8 +593,7 @@ export function eventDetailView(data: { ev: any; scans: number; leads: number; b
     <form method="POST" action="/admin/events/${esc(ev.id)}/delete" onsubmit="return confirm('Delete this event? Its QR codes are kept but detached.')">
       <button class="btn danger" type="submit">Delete event</button>
     </form>
-  </div>
-  <p style="margin-top:14px"><a class="btn secondary" href="/admin/events">← Events</a></p>`;
+  </div>`;
   return shell(ev.name, body);
 }
 
@@ -584,7 +606,8 @@ export function dataPrivacyView(d: {
   pruned?: number | null;
 }): string {
   const body = `
-  <div class="topbar"><h2>Data &amp; privacy</h2><a class="btn secondary" href="/admin">← Back</a></div>
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
+  <div class="topbar"><h2>Data &amp; privacy</h2></div>
   ${d.done ? `<p class="auth-banner" style="max-width:none">Data purge complete.</p>` : ""}
   ${d.pruned != null ? `<p class="auth-banner" style="max-width:none">Retention prune complete — ${d.pruned} lead(s) removed.</p>` : ""}
 
@@ -615,8 +638,7 @@ export function dataPrivacyView(d: {
     </form>
   </div>`
       : ""
-  }
-  <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;
+  }`;
   return shell("Data & privacy", body + rest);
 }
 
@@ -637,15 +659,15 @@ export function auditView(logs: any[], action: string | null = null): string {
         .join("")
     : `<tr><td colspan="5" class="muted">No audit entries${action ? " for this action" : ""} yet.</td></tr>`;
   const body = `
-  <div class="topbar"><h2>Audit log</h2><a class="btn secondary" href="/admin">← Back</a></div>
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
+  <div class="topbar"><h2>Audit log</h2></div>
   <p class="muted">Security &amp; compliance trail of admin, sign-in, integration, SSO/SCIM, billing, and domain changes. Newest first (last 250).${
     action ? ` Filtered to <code>${esc(action)}</code> · <a href="/admin/audit">clear</a>` : ""
   }</p>
   <table>
     <tr><th>When (UTC)</th><th>Actor</th><th>Action</th><th>Details</th><th>IP</th></tr>
     ${rows}
-  </table>
-  <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;
+  </table>`;
   return shell("Audit log", body);
 }
 
@@ -672,6 +694,7 @@ export function marketingView(data: { org: any; campaigns: any[]; baseUrl: strin
         .join("")
     : `<tr><td colspan="6" class="muted">No campaign links yet.</td></tr>`;
   const body = `
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>Marketing</h2>
@@ -760,7 +783,8 @@ export function domainsView(data: { domains: any[]; brands: any[]; target: strin
     })
     .join("");
   const body = `
-  <div class="topbar"><h2>Custom domains</h2><a class="btn secondary" href="/admin">Back</a></div>
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
+  <div class="topbar"><h2>Custom domains</h2></div>
   <p class="muted">Give your sign-in pages your own web address (e.g. <code>cards.yourco.com</code>). Add the domain, create the one DNS record shown, then click <strong>Verify</strong> — the secure certificate is set up automatically once DNS points to us.</p>
   <p style="border-left:4px solid #d97706;background:#fffbeb;color:#7c2d12;padding:10px 12px;border-radius:6px;font-size:14px;max-width:none">
     <strong>Using Cloudflare for your DNS?</strong> Set this record to <strong>DNS only</strong> (grey cloud) — <em>not</em> Proxied (orange cloud). A proxied record blocks our automatic certificate and the page will show an SSL error (525). You can switch it back to proxied only if you install your own Cloudflare Origin Certificate.
@@ -869,6 +893,7 @@ export function locationForm(
   const locAdminDomain = locDomains.find((d) => d.locationId && d.kind === "admin")?.host || "";
   const locUserDomain = locDomains.find((d) => d.locationId && d.kind !== "admin")?.host || "";
   const body = `
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>${location ? `Edit ${esc(lower(t.locationSingular))} — ${esc(l.name)}` : `New ${esc(lower(t.locationSingular))}`}</h2>
@@ -900,6 +925,9 @@ export function locationForm(
     <select name="layout"><option value="">(inherit)</option>${LAYOUTS.map(
       (x) => `<option ${l.layout === x ? "selected" : ""}>${x}</option>`
     ).join("")}</select>
+    <label class="chk" style="margin-top:12px"><input type="checkbox" name="showFooter" value="1" ${
+      l.hideCardFooter ? "" : "checked"
+    } /> Show the "${esc(t.brandSingular)} · ${esc(t.locationSingular)}" footer on ${esc(lower(t.cardPlural))} and landing pages</label>
     <h3>${esc(t.locationSingular)} address (shown on ${esc(lower(t.cardPlural))} by default)</h3>
     <label>Address line 1</label><input name="addr_line1" value="${esc(addr.line1)}" />
     <div class="grid2">
@@ -981,6 +1009,7 @@ export function departmentsView(data: { location: any; departments: any[] }): st
     : `<p class="muted">No departments yet.</p>`;
 
   const body = `
+  <p class="crumb"><a href="/admin/locations/${esc(loc.id)}/edit">← Back to ${esc(loc.name)}</a></p>
   <h2>Departments — ${esc(loc.name)}</h2>
   <p class="muted">Each department can carry its own CTA buttons, which take precedence over the rooftop's on cards assigned to it.</p>
   ${rows}
@@ -994,7 +1023,7 @@ export function departmentsView(data: { location: any; departments: any[] }): st
     <label style="margin-top:8px">Department lead inbox <span class="muted">(optional)</span></label>
     <input name="leadEmail" type="email" placeholder="service-leads@dealer.com" />
     <p style="margin-top:10px"><button class="btn" type="submit">Add department</button>
-    <a class="btn secondary" href="/admin/locations/${esc(loc.id)}/edit">Back</a></p>
+    <a class="btn secondary" href="/admin/locations/${esc(loc.id)}/edit">Cancel</a></p>
   </form>`;
   return shell("Departments", body);
 }
@@ -1051,6 +1080,7 @@ export function assetsView(data: { location: any; assets: any[]; cards: any[]; c
     : `<p class="muted">No assets yet.</p>`;
 
   const body = `
+  <p class="crumb"><a href="/admin/locations/${esc(loc.id)}/edit">← Back to ${esc(loc.name)}</a></p>
   <h2>Assets — ${esc(loc.name)}</h2>
   <p class="muted">QR/NFC codes that aren't people: rooftop &amp; department landings, and trackable desk / vehicle / service-lane / event / campaign codes. Scans are counted.</p>
   ${rows}
@@ -1062,7 +1092,7 @@ export function assetsView(data: { location: any; assets: any[]; cards: any[]; c
     </div>
     ${destFields({ destinationType: "landing", destinationUrl: "", destinationCardId: "" })}
     <p style="margin-top:10px"><button class="btn" type="submit">Add asset</button>
-    <a class="btn secondary" href="/admin/locations/${esc(loc.id)}/edit">Back</a></p>
+    <a class="btn secondary" href="/admin/locations/${esc(loc.id)}/edit">Cancel</a></p>
   </form>`;
   return shell("Assets", body);
 }
@@ -1074,6 +1104,7 @@ export function cardList(
   t: Terminology = GENERAL_TERMINOLOGY
 ): string {
   const body = `
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar">
     <h2>${esc(t.cardPlural)} — ${esc(locationName)}</h2>
     <a class="btn" href="/admin/cards/new?locationId=${esc(locationId)}">+ New ${esc(lower(t.cardSingular))}</a>
@@ -1098,8 +1129,7 @@ export function cardList(
             .join("")
         : `<tr><td colspan="5" class="muted">No ${esc(lower(t.cardPlural))} in this ${esc(lower(t.locationSingular))} yet.</td></tr>`
     }
-  </table>
-  <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;
+  </table>`;
   return shell(t.cardPlural, body);
 }
 
@@ -1120,6 +1150,7 @@ export function cardForm(opts: {
   const addr = (c.address as Address) || {};
   const cardName = [c.firstName, c.lastName].filter(Boolean).join(" ");
   const body = `
+  <p class="crumb"><a href="/admin/cards?locationId=${esc(opts.locationId)}">← Back to ${esc(lower(t.cardPlural))}</a></p>
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>${opts.card ? `Edit ${esc(lower(t.cardSingular))} — ${esc(cardName)}` : `New ${esc(lower(t.cardSingular))}`}</h2>
@@ -1129,7 +1160,7 @@ export function cardForm(opts: {
       <a class="btn secondary" href="/c/${esc(opts.card.slug)}" target="_blank">Preview</a>
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/analytics">Stats</a>
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/signature">Email signature</a>
-      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/turnover">Turn over</a>
+      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/turnover">Deprovision</a>
     </div>` : ""}
   </div>
   <form class="editor" method="POST" action="${action}" enctype="multipart/form-data">
@@ -1228,7 +1259,7 @@ export function cardForm(opts: {
     opts.card
       ? `<div class="danger-zone">
     <h3>Delete this ${esc(lower(t.cardSingular))}</h3>
-    <p class="muted">Removes the public page and its analytics. For offboarding a person (redirects, lead transfer, replacement), use <a href="/admin/cards/${esc(opts.card.id)}/turnover">Turn over</a> instead.</p>
+    <p class="muted">Removes the public page and its analytics. For offboarding a person (redirects, lead transfer, replacement), use <a href="/admin/cards/${esc(opts.card.id)}/turnover">Deprovision</a> instead.</p>
     <form method="POST" action="/admin/cards/${esc(opts.card.id)}/delete"
            onsubmit="return confirm('Delete this ${esc(lower(t.cardSingular))}?')">
            <button class="btn danger" type="submit">Delete ${esc(lower(t.cardSingular))}</button></form>
@@ -1249,8 +1280,9 @@ export function turnoverForm(opts: { card: any; rooftop: any; otherCards: any[];
     .join("");
   const leadTargetOpts = opts.otherCards.map((o) => `<option value="${esc(o.id)}">${esc(nameOf(o))}</option>`).join("");
   const body = `
-  <h2>Turn over — ${esc(fullName)}</h2>
-  <p class="muted">Offboarding disables the public card, revokes this person's self-service access, and preserves their analytics. Leads stay unless you transfer them.</p>
+  <p class="crumb"><a href="/admin/cards/${esc(c.id)}/edit">← Back to card</a></p>
+  <h2>Deprovision — ${esc(fullName)}</h2>
+  <p class="muted">Deprovisioning disables the public card, revokes this person's self-service access, and preserves their analytics. Leads stay unless you transfer them.</p>
   <form class="editor" method="POST" action="/admin/cards/${esc(c.id)}/turnover" style="max-width:640px">
     <h3>Redirect the old card</h3>
     <p class="muted">Where to send anyone scanning the printed NFC/QR card afterwards.</p>
@@ -1275,15 +1307,22 @@ export function turnoverForm(opts: { card: any; rooftop: any; otherCards: any[];
     <label>New owner email (self-service)</label><input name="newOwnerEmail" type="email" placeholder="new.hire@dealer.com" />
 
     <p style="margin-top:16px">
-      <button class="btn danger" type="submit" onclick="return confirm('Offboard ${esc(fullName)}? The public card will be disabled.')">Offboard employee</button>
+      <button class="btn danger" type="submit" onclick="return confirm('Deprovision ${esc(fullName)}? The public card will be disabled.')">Deprovision employee</button>
       <a class="btn secondary" href="/admin/cards/${esc(c.id)}/edit">Cancel</a>
     </p>
   </form>`;
-  return shell("Turn over", body);
+  return shell("Deprovision", body);
 }
 
-// Security (two-factor) settings, in the standard admin layout.
-export function securityView(opts: { email: string | null; on: boolean; note?: string }): string {
+// Security (two-factor) settings, in the standard admin layout. `workspace`
+// says whose account this is (an org name, or "OpenCard staff") so the page
+// reads differently for client admins vs platform staff.
+export function securityView(opts: { email: string | null; on: boolean; note?: string; workspace?: string | null; platform?: boolean }): string {
+  const who = opts.platform
+    ? `your <strong>OpenCard staff</strong> account`
+    : opts.workspace
+    ? `your admin account in <strong>${esc(opts.workspace)}</strong>`
+    : `your admin account`;
   const inner = !opts.email
     ? `<p class="muted">You're signed in with the break-glass token, which has no stored account. Two-factor applies to email/password admin accounts.</p>`
     : opts.on
@@ -1292,16 +1331,22 @@ export function securityView(opts: { email: string | null; on: boolean; note?: s
     : `<p>Two-factor authentication is <strong>off</strong>. Add an authenticator app for an extra layer of protection.</p>
        <form method="POST" action="/admin/security/mfa/start" style="margin-top:8px"><button class="btn" type="submit">Set up two-factor</button></form>`;
   const body = `
-  <h2>Security</h2>
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>Security</h2>
+      <p class="muted" style="margin:0">Sign-in protection for ${who}${opts.email ? ` (${esc(opts.email)})` : ""}. It doesn't affect anyone else.</p>
+    </div>
+  </div>
   ${opts.note || ""}
-  <div class="stat" style="max-width:560px">${inner}</div>
-  <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;
+  <div class="stat" style="max-width:560px">${inner}</div>`;
   return shell("Security", body);
 }
 
 // Two-factor enrollment (QR + confirm), in the standard admin layout.
 export function mfaSetupView(qr: string, secret: string, error?: string): string {
   const body = `
+  <p class="crumb"><a href="/admin/security">← Security</a></p>
   <h2>Set up two-factor</h2>
   <div class="stat" style="max-width:520px">
     ${error ? `<p style="color:#b91c1c">${esc(error)}</p>` : ""}
@@ -1323,10 +1368,10 @@ export function signaturePreviewView(fullName: string, cardId: string, block: st
   return shell(
     "Email signature",
     `
+  <p class="crumb"><a href="/admin/cards/${esc(cardId)}/edit">← Back to card</a></p>
   <h2>Email signature — ${esc(fullName)}</h2>
   <p class="muted">A branded signature generated from this card. Paste it into Gmail / Outlook signature settings.</p>
-  ${block}
-  <p style="margin-top:14px"><a class="btn secondary" href="/admin/cards/${esc(cardId)}/edit">← Back to card</a></p>`
+  ${block}`
   );
 }
 
@@ -1353,13 +1398,13 @@ export function templatesGallery(brandName: string, brandId: string, templates: 
     : `<p class="muted">No templates yet. Create one so your team can pick a ready-made design when making a card.</p>`;
 
   const body = `
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar">
     <h2>Templates — ${esc(brandName)}</h2>
     <a class="btn" href="/admin/templates/new?brandId=${esc(brandId)}">+ New template</a>
   </div>
   <p class="muted">A template fixes a layout, color theme and font once. Cards then just pick a template — no design fiddling per person.</p>
-  <div class="tpl-grid">${cards}</div>
-  <p style="margin-top:16px"><a class="btn secondary" href="/admin">← Back</a></p>`;
+  <div class="tpl-grid">${cards}</div>`;
   return shell("Templates", body);
 }
 
@@ -1369,6 +1414,7 @@ export function templateForm(brandId: string, template?: any): string {
   const hidden = new Set(asStringArray(t.hiddenFields));
   const action = template ? `/admin/templates/${template.id}` : "/admin/templates";
   const body = `
+  <p class="crumb"><a href="/admin/templates?brandId=${esc(brandId)}">← Templates</a></p>
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>${template ? `Edit template — ${esc(t.name)}` : "New template"}</h2>
@@ -1453,6 +1499,53 @@ export function templateForm(brandId: string, template?: any): string {
   return shell("Template", body);
 }
 
+// Plan & usage: the client's own view of their plan, limits and usage. The
+// hand-override controls render only for OpenCard staff and are labeled as such.
+export function billingView(d: {
+  plan: { key: string; label: string; price: string; features: string[] };
+  modeLabel: string;
+  statusLine: string;
+  statusOk: boolean;
+  usageRows: string; // pre-rendered <tr>s
+  paySection: string;
+  staffSetter: string | null; // pre-rendered staff-only form, or null
+}): string {
+  const feats = d.plan.features.length
+    ? d.plan.features.map((f) => `<span class="pill">${esc(f)}</span>`).join(" ")
+    : `<span class="muted">Basic features only</span>`;
+  const body = `
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>Plan &amp; usage</h2>
+      <p class="muted" style="margin:0">What your workspace's plan includes and how much of it you're using.</p>
+    </div>
+  </div>
+  <div class="cards-grid" style="margin-bottom:18px;max-width:720px">
+    <div class="stat"><div class="n" style="font-size:22px">${esc(d.plan.label)}</div><div class="muted">${esc(d.plan.price)} · ${esc(d.modeLabel)}</div></div>
+    <div class="stat"><div style="font-weight:700;color:${d.statusOk ? "var(--ok-ink)" : "var(--bad-ink)"}">${esc(d.statusLine)}</div><div class="muted">Subscription status</div></div>
+  </div>
+  <section class="panel" style="max-width:720px">
+    <h3>Usage against plan limits</h3>
+    <table class="usage"><tbody>${d.usageRows}</tbody></table>
+    <p style="margin-top:14px">Included: ${feats}</p>
+  </section>
+  <section class="panel" style="max-width:720px">
+    <h3>Change plan</h3>
+    ${d.paySection}
+  </section>
+  ${
+    d.staffSetter
+      ? `<section class="panel" style="max-width:720px;border-style:dashed">
+    <h3>OpenCard staff controls</h3>
+    <p class="muted">Only platform staff see this. Hand-assign a plan or billing mode (comp accounts, demos, manual overrides) — clients themselves can't change these.</p>
+    ${d.staffSetter}
+  </section>`
+      : ""
+  }`;
+  return shell("Plan & usage", body);
+}
+
 export function adminsView(admins: any[]): string {
   const rows = admins.length
     ? admins
@@ -1480,10 +1573,10 @@ export function adminsView(admins: any[]): string {
         .join("")
     : `<tr><td colspan="7" class="muted">No admin accounts yet. The ADMIN_TOKEN is the bootstrap super admin.</td></tr>`;
   const body = `
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar"><h2>Admin accounts</h2><a class="btn" href="/admin/admins/new">+ New admin</a></div>
   <p class="muted">Super (everything), General (all brands' content), Brand (assigned brands), Store (assigned stores' cards). SSO admins get MFA from your IdP; password admins enroll an authenticator app on first sign-in.</p>
-  <table><tr><th>Email</th><th>Name</th><th>Role</th><th>Scope</th><th>2FA</th><th>Status</th><th></th></tr>${rows}</table>
-  <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;
+  <table><tr><th>Email</th><th>Name</th><th>Role</th><th>Scope</th><th>2FA</th><th>Status</th><th></th></tr>${rows}</table>`;
   return shell("Admins", body);
 }
 
@@ -1495,6 +1588,7 @@ export function adminForm(opts: { admin?: any; brands: any[]; locations: any[] }
   const locSet = new Set(scopes.filter((s: any) => s.locationId).map((s: any) => s.locationId));
   const roles = ["org_owner", "org_admin", "brand_admin", "location_admin"] as const;
   const body = `
+  <p class="crumb"><a href="/admin/admins">← Admins</a></p>
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>${opts.admin ? `Edit admin — ${esc(a.email)}` : "New admin"}</h2>
@@ -1745,6 +1839,7 @@ export function integrationsView(data: {
   </section>`;
 
   const body = `
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>Integrations</h2>
@@ -1925,6 +2020,7 @@ export function webhookDetailView(data: {
     : `<tr><td colspan="6" class="muted">No deliveries${data.filter === "failed" ? " matching this filter" : " yet"}.</td></tr>`;
 
   const body = `
+  <p class="crumb"><a href="/admin/integrations">← Integrations</a></p>
   <h2>Webhook deliveries</h2>
   ${data.flash ? `<div class="stat" style="border:1px solid #16a34a;background:#f0fdf4;margin-bottom:14px"><strong>${esc(data.flash)}</strong></div>` : ""}
   <div class="stat" style="margin-bottom:14px">
@@ -1948,8 +2044,7 @@ export function webhookDetailView(data: {
   <table style="margin-top:14px">
     <tr><th>Time (UTC)</th><th>Event</th><th>Attempt</th><th>Status</th><th>Duration</th><th>Details</th></tr>
     ${rows}
-  </table>
-  <p style="margin-top:18px"><a class="btn secondary" href="/admin/integrations">← Integrations</a></p>`;
+  </table>`;
   return shell("Webhook deliveries", body);
 }
 
@@ -2028,7 +2123,7 @@ export function analyticsView(stats: {
   </table>`
     : "";
   const body = `
-  <div class="topbar"><h2>Analytics</h2><a class="btn secondary" href="/admin">← Back</a></div>
+  <div class="topbar"><h2>Analytics</h2></div>
   ${stats.range ? `<p class="muted">${esc(stats.range.label)} · <a href="/admin/leads">view leads</a></p>` : ""}
   ${rangeTabs}
 
@@ -2064,8 +2159,7 @@ export function analyticsView(stats: {
             .join("")
         : `<tr><td colspan="3" class="muted">No views yet.</td></tr>`
     }
-  </table>
-  <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;
+  </table>`;
   return shell("Analytics", body);
 }
 
@@ -2127,8 +2221,7 @@ export function leadsView(leads: any[], statusFilter = ""): string {
             .join("")
         : `<tr><td colspan="7" class="muted">No leads captured yet.</td></tr>`
     }
-  </table>
-  <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;
+  </table>`;
   return shell("Leads", body);
 }
 
@@ -2161,6 +2254,7 @@ export function leadDetailView(data: { lead: any; events: any[] }): string {
     : `<tr><td colspan="3" class="muted">No history yet.</td></tr>`;
 
   const body = `
+  <p class="crumb"><a href="/admin/leads">← Leads</a></p>
   <h2>Lead — ${esc(l.name)}</h2>
   ${
     l.duplicateOfId
@@ -2222,7 +2316,6 @@ export function leadDetailView(data: { lead: any; events: any[] }): string {
     <form method="POST" action="/admin/leads/${esc(l.id)}/delete" onsubmit="return confirm('Permanently erase this lead? This cannot be undone.')">
       <button class="btn danger" type="submit">Erase lead</button>
     </form>
-  </div>
-  <p style="margin-top:14px"><a class="btn secondary" href="/admin/leads">← Leads</a></p>`;
+  </div>`;
   return shell("Lead", body);
 }

@@ -85,6 +85,9 @@ code { background: var(--wash-2); border: 1px solid var(--line-soft); border-rad
   font-size: 38px; font-weight: 700; color: var(--primary); background: #fff;
 }
 .layout-minimal .photo { position: static; transform: none; margin: 28px auto 0; display: block; }
+/* Keep fallback initials centered in the minimal layout — the display:block
+   above was overriding .photo-fallback's flex centering (initials sat top-left). */
+.layout-minimal .photo-fallback { display: flex; }
 .ident { text-align: center; padding: 72px 24px 8px; }
 .layout-minimal .ident { padding-top: 16px; }
 .ident h1 { margin: 0; font-size: 26px; }
@@ -271,6 +274,10 @@ td .btn { padding: 5px 10px; font-size: 13px; }
 .admin a { color: var(--accent); }
 .admin a:hover { text-decoration-thickness: 2px; }
 .topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+/* Breadcrumb back-link above nested page titles. */
+.crumb { margin: 0 0 8px; font-size: 13px; }
+.crumb a { color: var(--ink-3); text-decoration: none; font-weight: 600; }
+.crumb a:hover { color: var(--accent); text-decoration: underline; }
 .topbar > div { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .topbar h2 { margin: 0; }
 /* `.admin a { color:accent }` must not bleed onto anchor-style buttons. */

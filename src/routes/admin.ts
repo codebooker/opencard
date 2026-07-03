@@ -342,9 +342,12 @@ adminRouter.get("/security", async (req, res) => {
       : req.query.mfa === "off"
       ? `<p class="muted">Two-factor disabled.</p>`
       : "";
-  if (!p.email) return res.send(V.securityView({ email: null, on: false, note }));
+  const workspace = p.platform
+    ? null
+    : (await prisma.org.findUnique({ where: { id: p.orgId }, select: { name: true } }))?.name || null;
+  if (!p.email) return res.send(V.securityView({ email: null, on: false, note, workspace, platform: p.platform }));
   const au = await prisma.adminUser.findUnique({ where: { email: p.email } });
-  res.send(V.securityView({ email: p.email, on: !!au?.mfaEnabled, note }));
+  res.send(V.securityView({ email: p.email, on: !!au?.mfaEnabled, note, workspace, platform: p.platform }));
 });
 
 adminRouter.post("/security/mfa/start", async (req, res) => {
@@ -416,14 +419,12 @@ adminRouter.get("/billing", async (req, res) => {
       return `<tr><td>${esc(LIMIT_LABELS[k])}</td><td style="text-align:right${over ? ";color:#b91c1c;font-weight:600" : ""}">${usage[k]} / ${cap}</td></tr>`;
     })
     .join("");
-  const feats = plan.features.map((f) => `<span class="pill">${esc(f)}</span>`).join(" ") || `<span class="muted">Basic features only</span>`;
-  const statusColor = access.active ? "#15803d" : "#b91c1c";
   const modeLabel = mode === "free" ? "Free (comp)" : mode === "demo" ? "Demo" : "Standard";
 
-  // Platform owners can set mode / demo length / plan by hand (comp accounts,
+  // Platform staff can set mode / demo length / plan by hand (comp accounts,
   // manual overrides). Paying customers use Stripe checkout (wired separately).
-  const setter = p.platform
-    ? `<form method="POST" action="/admin/billing/plan" style="margin-top:18px;max-width:420px">
+  const staffSetter = p.platform
+    ? `<form class="editor" method="POST" action="/admin/billing/plan" style="max-width:420px">
          <label>Plan</label>
          <select name="plan">${PLAN_ORDER.map((k) => `<option value="${k}" ${k === plan.key ? "selected" : ""}>${esc(PLANS[k].label)} — ${esc(PLANS[k].price)}</option>`).join("")}</select>
          <label style="margin-top:10px">Billing mode</label>
@@ -436,17 +437,16 @@ adminRouter.get("/billing", async (req, res) => {
          <select name="demoDays"><option value="30">30 days</option><option value="60">60 days</option></select>
          <p style="margin-top:10px"><button class="btn" type="submit">Update account</button></p>
        </form>`
-    : `<p class="muted" style="margin-top:18px">Self-serve upgrades are coming soon. Contact us to change your plan.</p>`;
+    : null;
   res.send(
-    page({
-      title: "Plan & usage",
-      body: `<main class="admin"><div class="topbar"><h2>Plan &amp; usage</h2><a class="btn secondary" href="/admin">Back</a></div>
-        <p>Current plan: <strong>${esc(plan.label)}</strong> · ${esc(plan.price)} <span class="muted">(${esc(modeLabel)})</span></p>
-        <p style="color:${statusColor};font-weight:600">${esc(accessSummary(access))}</p>
-        <table class="usage"><tbody>${rows}</tbody></table>
-        <p style="margin-top:14px">Included: ${feats}</p>
-        ${paySection}
-        ${setter}</main>`,
+    V.billingView({
+      plan: { key: plan.key, label: plan.label, price: plan.price, features: plan.features },
+      modeLabel,
+      statusLine: accessSummary(access),
+      statusOk: access.active,
+      usageRows: rows,
+      paySection,
+      staffSetter,
     })
   );
 });
@@ -696,6 +696,8 @@ adminRouter.post("/templates/:id/delete", async (req, res) => {
 // Dealership rooftop profile fields parsed from the location editor form.
 function rooftopProfile(b: any) {
   return {
+    // Checkbox is "show footer"; absent = hide. The location form always renders it.
+    hideCardFooter: b.showFooter !== "1",
     oemBrands: parseOemBrands(b.oemBrands),
     phone: clean(b.phone),
     website: clean(b.website),

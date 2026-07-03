@@ -247,7 +247,11 @@ export function renderCardPage(
       : ""
   }
 
-  <footer class="brand">${esc(card.location.brand.name)} · ${esc(card.location.name)}</footer>
+  ${
+    (card.location as any).hideCardFooter
+      ? ""
+      : `<footer class="brand">${esc(card.location.brand.name)} · ${esc(card.location.name)}</footer>`
+  }
 </main>
 
 <script>
