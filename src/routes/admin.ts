@@ -25,6 +25,8 @@ import { computeOrgAnalytics, analyticsCsv, sendDigest } from "../reports";
 import { recordAudit, reqIp } from "../audit-log";
 import { buildOrgExport, purgeOrgData } from "../data-bundle";
 import { exportFilename } from "../dataexport";
+import { parseRetentionDays } from "../retention";
+import { pruneOrgLeads } from "../retention-prune";
 
 // Compact audit helper bound to the current principal + request.
 function audit(
@@ -1456,9 +1458,36 @@ adminRouter.get("/audit", async (req, res) => {
 adminRouter.get("/data", async (req, res) => {
   const p = reqAdmin(req);
   if (!p.global) return forbidden(res);
-  const org = await prisma.org.findUnique({ where: { id: p.orgId }, select: { name: true } });
+  const org = await prisma.org.findUnique({ where: { id: p.orgId }, select: { name: true, leadRetentionDays: true } });
   // Full org purge is platform-staff-only, and only while drilled into a client.
-  res.send(V.dataPrivacyView({ orgName: org?.name || "", canPurge: p.platform && !!p.actingOrgId, done: req.query.done === "1" }));
+  res.send(
+    V.dataPrivacyView({
+      orgName: org?.name || "",
+      canPurge: p.platform && !!p.actingOrgId,
+      done: req.query.done === "1",
+      retentionDays: org?.leadRetentionDays ?? null,
+      pruned: typeof req.query.pruned === "string" ? Number(req.query.pruned) : null,
+    })
+  );
+});
+
+// Set the lead retention policy.
+adminRouter.post("/data/retention", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  const days = parseRetentionDays(req.body?.leadRetentionDays);
+  await prisma.org.update({ where: { id: p.orgId }, data: { leadRetentionDays: days } });
+  audit(req, p, "data.retention", { targetType: "Org", targetId: p.orgId, summary: days ? `${days} days` : "keep forever" });
+  res.redirect("/admin/data");
+});
+
+// Run the retention prune for this org now (on-demand).
+adminRouter.post("/data/retention/prune", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  const org = await prisma.org.findUnique({ where: { id: p.orgId }, select: { leadRetentionDays: true } });
+  const n = await pruneOrgLeads(p.orgId, org?.leadRetentionDays ?? null);
+  res.redirect("/admin/data?pruned=" + n);
 });
 
 adminRouter.get("/data/export.json", async (req, res) => {

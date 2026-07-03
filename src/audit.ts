@@ -26,6 +26,7 @@ export const AUDIT_ACTIONS: Record<string, string> = {
   "card.delete": "Deleted / offboarded card",
   "data.export": "Exported org data",
   "data.delete": "Deleted data",
+  "data.retention": "Retention policy / prune",
 };
 
 export function auditLabel(action: string): string {

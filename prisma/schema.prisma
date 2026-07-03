@@ -27,6 +27,9 @@ model Org {
   digestEmails     String?
   digestCadence    String    @default("off") // off | weekly
   digestLastSentAt DateTime?
+  // Data-retention policy (Phase 9.3): auto-delete leads older than N days.
+  // null / 0 = keep forever.
+  leadRetentionDays Int?
   // Billing / plan state. `plan` keys into src/plans.ts. Stripe ids are set once
   // hosted checkout is wired; until then plans are assigned by a platform owner.
   plan                 String    @default("starter")

@@ -416,12 +416,30 @@ export function brandForm(
   return shell("Brand", body);
 }
 
-// Data & privacy hub (Phase 9.2): export + erasure controls.
-export function dataPrivacyView(d: { orgName: string; canPurge: boolean; done: boolean }): string {
+// Data & privacy hub (Phase 9.2/9.3): export + erasure + retention controls.
+export function dataPrivacyView(d: {
+  orgName: string;
+  canPurge: boolean;
+  done: boolean;
+  retentionDays?: number | null;
+  pruned?: number | null;
+}): string {
   const body = `
   <div class="topbar"><h2>Data &amp; privacy</h2><a class="btn secondary" href="/admin">← Back</a></div>
   ${d.done ? `<p class="auth-banner" style="max-width:none">Data purge complete.</p>` : ""}
-  <h3>Export</h3>
+  ${d.pruned != null ? `<p class="auth-banner" style="max-width:none">Retention prune complete — ${d.pruned} lead(s) removed.</p>` : ""}
+
+  <h3>Data retention</h3>
+  <p class="muted">Automatically delete leads older than a set number of days (data minimization). Leave blank / 0 to keep leads indefinitely. Runs automatically and can be triggered on demand; each prune is recorded in the audit log.</p>
+  <form class="editor" method="POST" action="/admin/data/retention" style="max-width:420px">
+    <label>Delete leads older than (days)</label>
+    <input name="leadRetentionDays" type="number" min="0" value="${d.retentionDays ?? ""}" placeholder="e.g. 365 (blank = keep forever)" />
+    <p style="margin-top:10px"><button class="btn" type="submit">Save policy</button>
+    <button class="btn secondary" type="submit" formaction="/admin/data/retention/prune">Run prune now</button></p>
+  </form>
+
+  <h3 style="margin-top:24px">Export</h3>`;
+  const rest = `
   <p class="muted">Download a full JSON copy of this account's data (brands, rooftops, cards, employees, leads, assets, campaigns) — for data-portability / GDPR access requests. Secrets (tokens, Stripe IDs) are excluded.</p>
   <p><a class="btn" href="/admin/data/export.json">⬇ Download data (JSON)</a></p>
   <h3 style="margin-top:24px">Erase a lead</h3>
@@ -440,7 +458,7 @@ export function dataPrivacyView(d: { orgName: string; canPurge: boolean; done: b
       : ""
   }
   <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;
-  return shell("Data & privacy", body);
+  return shell("Data & privacy", body + rest);
 }
 
 // Append-only audit trail viewer (Phase 9.1).
