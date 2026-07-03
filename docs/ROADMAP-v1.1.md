@@ -96,17 +96,57 @@ Features that exist in half-state, promised in v1.0 docs, or stubbed in code:
   requests, and version the API surface.
 - Notifications: lead alerts to Slack/Teams webhooks, not just email.
 
-## Phase 15: Expansion (pull, not push)
+## Phase 15: Verticalization
+
+The scaffolding exists (`Org.vertical`, the `Terminology` layer threaded
+through the views) but dealership assumptions are baked into forms, lead
+fields, and labels, and nothing ever sets a vertical. Public signup is open,
+so non-dealership orgs already land in a dealership-flavored product — Stage 1
+is a launch-adjacent cleanup, not a someday feature.
+
+### Stage 1: Make the general vertical real (launch-adjacent)
+
+- Fix the tenant bug first: `currentTerminology()` resolves terminology from
+  an **arbitrary** org (`findFirst()`), not the signed-in tenant — one org's
+  vertical leaks into every other org's admin UI.
+- Vertical picker: on the staff client form and (curated) on public signup;
+  stored on the org, changeable later.
+- Gate dealership-only UI behind the vertical: OEM brands, Sales/Service
+  URLs and timezone block in the location editor; vehicle-interest/trade-in/
+  service-need lead fields; department suggestions; "Rooftop leaderboard"
+  and similar copy; signup placeholders.
+- Audit every public surface (card, lead form, signatures, vCard) renders
+  cleanly for a general org.
+
+### Stage 2: Vertical packs (config, not code)
+
+Turn what "dealership" hardcodes into a data bundle so a new vertical is a
+pack, not a fork: terminology, department suggestions, lead-form field
+catalog, CTA suggestions, starter templates, signup placeholders. The
+dealership pack becomes the first consumer; "general" is the empty pack.
+
+### Stage 3: New verticals on demand (pull, not push)
+
+Candidates that fit the brand→location→person model with field lead capture:
+real-estate brokerages (agents/offices), home services (techs/branches),
+franchise retail, insurance agencies. Pick by actual pipeline, not appeal —
+each needs its own lead fields, integrations, and go-to-market, so treat a
+new vertical as a business decision that ships as a pack.
+
+## Phase 16: Expansion (pull, not push)
 
 Unchanged philosophy from v1.0: responsive web + wallet passes first, a mobile
 app only when field usage demands it (badge scanning, offline event capture,
-push). Revisit after Phases 11–14 with real usage data. Same for i18n — add
+push). Revisit after Phases 11–15 with real usage data. Same for i18n — add
 when the first non-English tenant is in the pipeline, not before.
 
 ## Suggested Sequence
 
 1. **11 + 12 in parallel** — different skill areas (product flows vs infra),
    both launch gates.
-2. **13** next — mostly bounded engineering with clear definitions of done.
-3. **14** continuously after launch, prioritized by what onboarding data says.
-4. **15** only on demonstrated pull.
+2. **15 Stage 1** alongside them — small, and public signup already exposes
+   the gap (the terminology tenant bug should be fixed immediately).
+3. **13** next — mostly bounded engineering with clear definitions of done.
+4. **14 + 15 Stage 2** continuously after launch, prioritized by onboarding
+   data and pipeline.
+5. **15 Stage 3 + 16** only on demonstrated pull.
