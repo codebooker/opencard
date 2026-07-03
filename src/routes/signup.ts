@@ -3,6 +3,8 @@ import { prisma, runWithOrg } from "../db";
 import { config } from "../config";
 import { hashPassword } from "../security";
 import { getPlatformConfig } from "../platform-config";
+import { issueToken } from "../account";
+import { sendMail } from "../notify";
 import { page, esc } from "../views/html";
 
 // Public self-service onboarding: create a new tenant (Org) with its first owner
@@ -93,6 +95,18 @@ signupRouter.post("/", async (req, res) => {
     const brand = await db.brand.create({ data: { orgId: org.id, name: brandName } });
     await db.location.create({ data: { orgId: org.id, brandId: brand.id, name: locationName } });
   });
+
+  // Email verification: the workspace's public surfaces stay dark until the
+  // owner confirms this address (Org.ownerVerifiedAt).
+  const raw = await issueToken("verify", email, org.id);
+  await sendMail(
+    [email],
+    "Verify your OpenCard email",
+    `Welcome to OpenCard, ${adminName}!\n\n` +
+      `Confirm your email to take ${orgName}'s cards live (link expires in 7 days):\n` +
+      `${config.baseUrl}/admin/verify?token=${raw}\n\n` +
+      `You can sign in and set everything up right away — publishing just waits for this confirmation.`
+  );
 
   res.redirect("/admin/login?welcome=1");
 });

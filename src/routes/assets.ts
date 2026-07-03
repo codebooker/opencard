@@ -24,7 +24,7 @@ const notFound = (res: any, msg = "Not found.") =>
 async function loadAsset(slug: string, orgId: string | null) {
   return prisma.asset.findFirst({
     // org.suspended gates every public surface for a suspended client.
-    where: { slug, active: true, org: { suspended: false }, ...(orgId ? { orgId } : {}) },
+    where: { slug, active: true, org: { suspended: false, ownerVerifiedAt: { not: null } }, ...(orgId ? { orgId } : {}) },
     include: {
       location: { include: { brand: true } },
       destinationCard: { select: { slug: true, active: true } },

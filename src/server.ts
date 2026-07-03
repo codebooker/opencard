@@ -60,6 +60,10 @@ const leadLimiter = rateLimit({
 });
 app.use("/admin/login", loginLimiter);
 app.use("/me/devlogin", loginLimiter);
+// Reset/invite/verify endpoints are unauthenticated and send email — throttle hard.
+app.use("/admin/forgot", rateLimit({ name: "forgot", windowMs: 15 * 60_000, max: 5, methods: ["POST"] }));
+app.use("/admin/reset", loginLimiter);
+app.use("/admin/invite", loginLimiter);
 // Signup creates resources; keep it tightly throttled.
 app.use("/signup", rateLimit({ name: "signup", windowMs: 60 * 60_000, max: 10, methods: ["POST"] }));
 

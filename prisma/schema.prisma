@@ -23,6 +23,10 @@ model Org {
   // Platform-staff kill switch: blocks admin access, self-service, the API,
   // and all public surfaces (cards, assets, campaign links) for this org.
   suspended   Boolean  @default(false)
+  // Self-signup email verification gate: public surfaces stay dark until the
+  // owner confirms their address. Staff-created clients are verified at
+  // creation; existing orgs are backfilled by the migration.
+  ownerVerifiedAt DateTime?
   // Tenant addressing. `subdomain` is the label under the platform domain
   // (e.g. "acme" -> acme.opencard.id); `customDomain` is a fully-qualified host
   // the customer points at us (e.g. cards.acmecorp.com). Both are optional and
@@ -536,11 +540,47 @@ model AdminUser {
   passwordHash String? // scrypt hash; null = SSO-only account
   mfaSecret    String? // base32 TOTP secret
   mfaEnabled   Boolean      @default(false)
+  recoveryCodes Json? // SHA-256 hashes of unused one-time MFA recovery codes
+  emailVerifiedAt DateTime? // set by the signup-verification / invite flows
   active       Boolean      @default(true)
   scopes       AdminScope[]
+  sessions     AdminSession[]
   createdAt    DateTime     @default(now())
 
   @@index([orgId])
+}
+
+// A revocable, DB-backed admin session (password/MFA sign-ins). The cookie
+// carries a random token; only its SHA-256 lands here. SSO sign-ins still use
+// the stateless signed-email cookie and don't appear in this table.
+model AdminSession {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique
+  admin       AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  adminUserId String
+  createdAt   DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  ip          String?
+  userAgent   String?
+
+  @@index([adminUserId])
+}
+
+// Single-use, expiring tokens for password reset, admin invites, and signup
+// email verification. Only the SHA-256 of the token is stored.
+model AuthToken {
+  id        String    @id @default(cuid())
+  kind      String // reset | invite | verify
+  tokenHash String    @unique
+  email     String
+  orgId     String? // for verify: the org to mark as verified
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email, kind])
 }
 
 // Scope rows for brand_admin / location_admin (an admin may have several).

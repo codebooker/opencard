@@ -2,6 +2,7 @@ import { Request } from "express";
 import { prisma } from "./db";
 import { config } from "./config";
 import { verifyEmail } from "./selfauth";
+import { findSession, SESSION_COOKIE } from "./account";
 import { defaultOrgId } from "./tenant";
 import { Role, ROLE_LABELS, roleFlags } from "./roles";
 
@@ -24,6 +25,9 @@ export interface AdminPrincipal {
   // to manage it; their `orgId` is switched to that client while this is set.
   actingOrgId: string | null;
 }
+
+const adminByEmail = (email: string) =>
+  prisma.adminUser.findUnique({ where: { email }, include: { scopes: true } });
 
 // Resolve the current admin from the request, or null if not an admin.
 export async function getAdmin(req: Request): Promise<AdminPrincipal | null> {
@@ -48,10 +52,17 @@ export async function getAdmin(req: Request): Promise<AdminPrincipal | null> {
       actingOrgId: null,
     };
   } else {
-    // 2) SSO / password session (signed email cookie) mapped to an AdminUser.
-    const email = verifyEmail(cookies.oc_emp);
-    if (!email) return null;
-    const au = await prisma.adminUser.findUnique({ where: { email }, include: { scopes: true } });
+    // 2) DB-backed session (password/MFA sign-ins; revocable) — preferred.
+    // 3) Signed email cookie (SSO sign-ins via /me; stateless) — fallback.
+    let au: (Awaited<ReturnType<typeof adminByEmail>>) | null = null;
+    const sess = await findSession(cookies[SESSION_COOKIE]);
+    if (sess) {
+      au = await prisma.adminUser.findUnique({ where: { id: sess.adminUserId }, include: { scopes: true } });
+    } else {
+      const email = verifyEmail(cookies.oc_emp);
+      if (!email) return null;
+      au = await adminByEmail(email);
+    }
     if (!au || !au.active) return null;
     const role = au.role as Role;
     const f = roleFlags(role);

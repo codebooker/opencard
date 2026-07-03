@@ -43,7 +43,7 @@ async function orgForRequest(req: any) {
 // assert an email that matches a card in a different tenant.
 async function loadOwnCard(email: string, orgId: string) {
   return prisma.card.findFirst({
-    where: { ownerEmail: { equals: email, mode: "insensitive" }, active: true, orgId, org: { suspended: false } },
+    where: { ownerEmail: { equals: email, mode: "insensitive" }, active: true, orgId, org: { suspended: false, ownerVerifiedAt: { not: null } } },
     include: { location: { include: { brand: true } }, template: true, dept: true },
   });
 }

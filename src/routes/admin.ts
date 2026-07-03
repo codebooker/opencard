@@ -4,7 +4,35 @@ import { Prisma } from "@prisma/client";
 import { prisma, Address } from "../db";
 import { config } from "../config";
 import { clearCookieOptions, cookieOptions } from "../cookies";
-import { requireAdmin, reqAdmin, forbidden, loginPage, mfaPage, enrollPage } from "../middleware/auth";
+import {
+  requireAdmin,
+  reqAdmin,
+  forbidden,
+  loginPage,
+  mfaPage,
+  forgotPage,
+  resetPage,
+  invitePage,
+  authNoticePage,
+} from "../middleware/auth";
+import {
+  issueToken,
+  peekToken,
+  consumeToken,
+  createSession,
+  findSession,
+  revokeSession,
+  revokeAllSessions,
+  listSessions,
+  generateRecoveryCodes,
+  hashRecoveryCodes,
+  consumeRecoveryCode,
+  recoveryCodeCount,
+  SESSION_COOKIE,
+  SESSION_TTL_MS,
+  sha256hex,
+} from "../account";
+import { sendMail } from "../notify";
 import { page, esc } from "../views/html";
 import { uniqueSlug, uniqueAssetSlug } from "../slug";
 import { upload, uploadedUrl } from "../upload";
@@ -101,7 +129,9 @@ adminRouter.get("/login", async (req, res) =>
   res.send(
     loginPage(
       undefined,
-      req.query.welcome ? "Account created. Sign in to continue." : undefined,
+      req.query.welcome
+        ? "Account created — check your email for a verification link, then sign in."
+        : undefined,
       await brandingFor(req)
     )
   )
@@ -134,7 +164,7 @@ adminRouter.post("/login", async (req, res) => {
     return res.send(mfaPage());
   }
   recordAudit({ orgId: au.orgId ?? (await defaultOrgId()), actor: { email, role: au.role }, action: "login.success", ip: reqIp(req) });
-  res.cookie("oc_emp", signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
+  res.cookie(SESSION_COOKIE, await createSession(au.id, reqIp(req), req.headers["user-agent"] as string), cookieOptions(SESSION_TTL_MS));
   return res.redirect("/admin");
 });
 
@@ -142,19 +172,111 @@ adminRouter.post("/login/mfa", async (req, res) => {
   const email = verifyEmail(req.cookies?.oc_pwauth);
   if (!email) return res.redirect("/admin/login");
   const au = await prisma.adminUser.findUnique({ where: { email } });
-  if (!au || !au.mfaSecret || !verifyTotp(au.mfaSecret, String(req.body?.code || ""))) {
-    return res.status(401).send(mfaPage("Incorrect code, try again."));
-  }
+  if (!au || !au.mfaSecret) return res.status(401).send(mfaPage("Incorrect code, try again."));
+  // Accept a 6-digit TOTP or one of the single-use recovery codes.
+  const input = String(req.body?.code || "");
+  const totpOk = /^\s*\d{6}\s*$/.test(input) && verifyTotp(au.mfaSecret, input.trim());
+  const recoveryOk = !totpOk && (await consumeRecoveryCode(au.id, input));
+  if (!totpOk && !recoveryOk) return res.status(401).send(mfaPage("Incorrect code, try again."));
   res.clearCookie("oc_pwauth", clearCookieOptions());
-  recordAudit({ orgId: au.orgId ?? (await defaultOrgId()), actor: { email, role: au.role }, action: "login.success", summary: "MFA", ip: reqIp(req) });
-  res.cookie("oc_emp", signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
+  recordAudit({
+    orgId: au.orgId ?? (await defaultOrgId()),
+    actor: { email, role: au.role },
+    action: "login.success",
+    summary: recoveryOk ? "MFA (recovery code)" : "MFA",
+    ip: reqIp(req),
+  });
+  res.cookie(SESSION_COOKIE, await createSession(au.id, reqIp(req), req.headers["user-agent"] as string), cookieOptions(SESSION_TTL_MS));
   res.redirect("/admin");
 });
 
-adminRouter.get("/logout", (_req, res) => {
+adminRouter.get("/logout", async (req, res) => {
+  // Revoke the DB session behind this cookie (if any) so it can't be replayed.
+  const sess = await findSession(req.cookies?.[SESSION_COOKIE]);
+  if (sess) await revokeSession(sess.id, sess.adminUserId);
+  res.clearCookie(SESSION_COOKIE, clearCookieOptions());
   res.clearCookie("oc_admin", clearCookieOptions());
   res.clearCookie("oc_emp", clearCookieOptions());
   res.redirect("/admin/login");
+});
+
+// ---------- password reset (pre-auth) ----------
+adminRouter.get("/forgot", (_req, res) => res.send(forgotPage()));
+
+adminRouter.post("/forgot", async (req, res) => {
+  const email = String(req.body?.email || "").toLowerCase().trim();
+  // Always respond identically — never reveal whether an account exists.
+  if (email) {
+    const au = await prisma.adminUser.findUnique({ where: { email } });
+    if (au && au.active) {
+      const raw = await issueToken("reset", email);
+      await sendMail(
+        [email],
+        "Reset your OpenCard password",
+        `Someone (hopefully you) asked to reset the password for ${email}.\n\n` +
+          `Reset it here (link expires in 1 hour):\n${config.baseUrl}/admin/reset?token=${raw}\n\n` +
+          `If this wasn't you, you can ignore this email — your password is unchanged.`
+      );
+      recordAudit({ orgId: au.orgId ?? (await defaultOrgId()), actor: { email }, action: "password.reset_requested", ip: reqIp(req) });
+    }
+  }
+  res.send(forgotPage({ sent: true }));
+});
+
+adminRouter.get("/reset", async (req, res) => {
+  const raw = String(req.query.token || "");
+  const t = await peekToken("reset", raw);
+  if (!t) return res.status(400).send(authNoticePage("Link expired", "This reset link is invalid or has expired. Request a new one.", { href: "/admin/forgot", label: "Request a new link" }));
+  res.send(resetPage(raw));
+});
+
+adminRouter.post("/reset", async (req, res) => {
+  const raw = String(req.body?.token || "");
+  const password = String(req.body?.password || "");
+  if (password.length < 8) return res.status(400).send(resetPage(raw, "Password must be at least 8 characters."));
+  if (password !== String(req.body?.password2 || "")) return res.status(400).send(resetPage(raw, "Passwords don't match."));
+  const t = await consumeToken("reset", raw);
+  if (!t) return res.status(400).send(authNoticePage("Link expired", "This reset link is invalid or has expired. Request a new one.", { href: "/admin/forgot", label: "Request a new link" }));
+  const au = await prisma.adminUser.findUnique({ where: { email: t.email } });
+  if (!au || !au.active) return res.status(400).send(authNoticePage("Account unavailable", "This account can't be reset. Contact your administrator.", { href: "/admin/login", label: "Back to sign in" }));
+  await prisma.adminUser.update({ where: { id: au.id }, data: { passwordHash: hashPassword(password), emailVerifiedAt: au.emailVerifiedAt ?? new Date() } });
+  const revoked = await revokeAllSessions(au.id);
+  recordAudit({ orgId: au.orgId ?? (await defaultOrgId()), actor: { email: au.email, role: au.role }, action: "password.reset", summary: `${revoked} session(s) signed out`, ip: reqIp(req) });
+  res.send(authNoticePage("Password updated", "Your password has been changed and other sessions were signed out.", { href: "/admin/login", label: "Sign in" }));
+});
+
+// ---------- signup email verification (pre-auth) ----------
+adminRouter.get("/verify", async (req, res) => {
+  const t = await consumeToken("verify", String(req.query.token || ""));
+  if (!t) return res.status(400).send(authNoticePage("Link expired", "This verification link is invalid or has expired. Sign in and use “Resend verification email”.", { href: "/admin/login", label: "Sign in" }));
+  await prisma.adminUser.updateMany({ where: { email: t.email }, data: { emailVerifiedAt: new Date() } });
+  if (t.orgId) await prisma.org.updateMany({ where: { id: t.orgId, ownerVerifiedAt: null }, data: { ownerVerifiedAt: new Date() } });
+  recordAudit({ orgId: t.orgId ?? (await defaultOrgId()), actor: { email: t.email }, action: "signup.verified", ip: reqIp(req) });
+  res.send(authNoticePage("Email verified", "Your workspace is live — cards and lead capture are now public.", { href: "/admin/login", label: "Sign in" }));
+});
+
+// ---------- admin invite acceptance (pre-auth) ----------
+adminRouter.get("/invite", async (req, res) => {
+  const raw = String(req.query.token || "");
+  const t = await peekToken("invite", raw);
+  if (!t) return res.status(400).send(authNoticePage("Invite expired", "This invite link is invalid or has expired. Ask your administrator to send a new one.", { href: "/admin/login", label: "Back to sign in" }));
+  res.send(invitePage(raw, t.email));
+});
+
+adminRouter.post("/invite", async (req, res) => {
+  const raw = String(req.body?.token || "");
+  const t0 = await peekToken("invite", raw);
+  if (!t0) return res.status(400).send(authNoticePage("Invite expired", "This invite link is invalid or has expired. Ask your administrator to send a new one.", { href: "/admin/login", label: "Back to sign in" }));
+  const password = String(req.body?.password || "");
+  if (password.length < 8) return res.status(400).send(invitePage(raw, t0.email, "Password must be at least 8 characters."));
+  if (password !== String(req.body?.password2 || "")) return res.status(400).send(invitePage(raw, t0.email, "Passwords don't match."));
+  const t = await consumeToken("invite", raw);
+  if (!t) return res.status(400).send(authNoticePage("Invite expired", "This invite link is invalid or has expired.", { href: "/admin/login", label: "Back to sign in" }));
+  const au = await prisma.adminUser.findUnique({ where: { email: t.email } });
+  if (!au || !au.active) return res.status(400).send(authNoticePage("Account unavailable", "This account no longer exists. Contact your administrator.", { href: "/admin/login", label: "Back to sign in" }));
+  await prisma.adminUser.update({ where: { id: au.id }, data: { passwordHash: hashPassword(password), emailVerifiedAt: new Date() } });
+  recordAudit({ orgId: au.orgId ?? (await defaultOrgId()), actor: { email: au.email, role: au.role }, action: "admin.invite_accepted", ip: reqIp(req) });
+  res.send(authNoticePage("You're all set", "Your password is saved. Sign in to get started.", { href: "/admin/login", label: "Sign in" }));
 });
 
 // everything below requires an admin principal (attached as req.admin)
@@ -314,6 +436,8 @@ adminRouter.post("/clients", async (req, res) => {
       plan: isPlanKey(b.plan) ? b.plan : "starter",
       billingMode: mode,
       seatLimit: parseSeatLimit(b.seatLimit),
+      // Staff-created clients skip signup email verification (staff vouches).
+      ownerVerifiedAt: new Date(),
       ...demo,
     },
   });
@@ -426,7 +550,10 @@ adminRouter.get("/", async (req, res) => {
     const org = await prisma.org.findUnique({ where: { id: p.actingOrgId }, select: { name: true } });
     actingClientName = org?.name;
   }
-  res.send(V.dashboard(brands as any, p, t, actingClientName));
+  // Unverified self-signup org: banner until the owner confirms their email.
+  const own = await prisma.org.findUnique({ where: { id: p.orgId }, select: { ownerVerifiedAt: true } });
+  const verifyState = own?.ownerVerifiedAt ? null : req.query.verify === "sent" ? ("sent" as const) : ("needed" as const);
+  res.send(V.dashboard(brands as any, p, t, actingClientName, verifyState));
 });
 
 // ---------- security (per-account two-factor) ----------
@@ -443,7 +570,26 @@ adminRouter.get("/security", async (req, res) => {
     : (await prisma.org.findUnique({ where: { id: p.orgId }, select: { name: true } }))?.name || null;
   if (!p.email) return res.send(V.securityView({ email: null, on: false, note, workspace, platform: p.platform }));
   const au = await prisma.adminUser.findUnique({ where: { email: p.email } });
-  res.send(V.securityView({ email: p.email, on: !!au?.mfaEnabled, note, workspace, platform: p.platform }));
+  const current = await findSession(req.cookies?.[SESSION_COOKIE]);
+  const sessions = au ? await listSessions(au.id) : [];
+  res.send(
+    V.securityView({
+      email: p.email,
+      on: !!au?.mfaEnabled,
+      note,
+      workspace,
+      platform: p.platform,
+      recoveryCount: recoveryCodeCount(au?.recoveryCodes),
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        current: s.id === current?.id,
+        lastSeenAt: s.lastSeenAt,
+        createdAt: s.createdAt,
+        ip: s.ip,
+        userAgent: s.userAgent,
+      })),
+    })
+  );
 });
 
 adminRouter.post("/security/mfa/start", async (req, res) => {
@@ -462,14 +608,61 @@ adminRouter.post("/security/mfa/enable", async (req, res) => {
   if (!au?.mfaSecret || !verifyTotp(au.mfaSecret, String(req.body?.code || ""))) {
     return res.status(401).send(V.mfaSetupView(await qrDataUrl(totpUri(au?.mfaSecret || "", p.email), "#111827"), au?.mfaSecret || "", "Incorrect code, try again."));
   }
-  await prisma.adminUser.update({ where: { email: p.email }, data: { mfaEnabled: true } });
-  res.redirect("/admin/security?mfa=on");
+  // Enable MFA and hand out single-use recovery codes (shown exactly once).
+  const codes = generateRecoveryCodes();
+  await prisma.adminUser.update({
+    where: { email: p.email },
+    data: { mfaEnabled: true, recoveryCodes: hashRecoveryCodes(codes) },
+  });
+  audit(req, p, "security.mfa_enabled", { targetType: "AdminUser", summary: p.email });
+  res.send(V.recoveryCodesView(codes, "Two-factor is on. Save these recovery codes now — they're shown only once."));
+});
+
+adminRouter.post("/security/recovery/regenerate", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.email) return forbidden(res);
+  const au = await prisma.adminUser.findUnique({ where: { email: p.email }, select: { mfaEnabled: true } });
+  if (!au?.mfaEnabled) return res.redirect("/admin/security");
+  const codes = generateRecoveryCodes();
+  await prisma.adminUser.update({ where: { email: p.email }, data: { recoveryCodes: hashRecoveryCodes(codes) } });
+  audit(req, p, "security.recovery_regenerated", { targetType: "AdminUser", summary: p.email });
+  res.send(V.recoveryCodesView(codes, "New recovery codes. Your previous codes no longer work."));
+});
+
+adminRouter.post("/security/sessions/:id/revoke", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.email) return forbidden(res);
+  const au = await prisma.adminUser.findUnique({ where: { email: p.email }, select: { id: true } });
+  if (au) await revokeSession(req.params.id, au.id);
+  res.redirect("/admin/security");
+});
+
+adminRouter.post("/security/sessions/revoke-others", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.email) return forbidden(res);
+  const au = await prisma.adminUser.findUnique({ where: { email: p.email }, select: { id: true } });
+  const current = await findSession(req.cookies?.[SESSION_COOKIE]);
+  if (au) await revokeAllSessions(au.id, current?.id);
+  res.redirect("/admin/security");
+});
+
+adminRouter.post("/verify/resend", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.email) return forbidden(res);
+  const raw = await issueToken("verify", p.email, p.orgId);
+  await sendMail(
+    [p.email],
+    "Verify your OpenCard email",
+    `Confirm your email to take your OpenCard workspace live (link expires in 7 days):\n` +
+      `${config.baseUrl}/admin/verify?token=${raw}`
+  );
+  res.redirect("/admin?verify=sent");
 });
 
 adminRouter.post("/security/mfa/disable", async (req, res) => {
   const p = reqAdmin(req);
   if (!p.email) return forbidden(res);
-  await prisma.adminUser.update({ where: { email: p.email }, data: { mfaEnabled: false, mfaSecret: null } });
+  await prisma.adminUser.update({ where: { email: p.email }, data: { mfaEnabled: false, mfaSecret: null, recoveryCodes: Prisma.DbNull } });
   res.redirect("/admin/security?mfa=off");
 });
 
@@ -2227,6 +2420,17 @@ adminRouter.post("/admins", async (req, res) => {
   if (b.password) data.passwordHash = hashPassword(String(b.password));
   await prisma.adminUser.create({ data });
   audit(req, p, "admin.create", { targetType: "AdminUser", summary: `${email} (${data.role})` });
+  // No password typed + invite requested: email a set-password link instead.
+  if (!b.password && b.sendInvite) {
+    const raw = await issueToken("invite", email);
+    await sendMail(
+      [email],
+      "You've been invited to OpenCard",
+      `${p.name} invited you to the OpenCard admin workspace.\n\n` +
+        `Set your password here (link expires in 7 days):\n${config.baseUrl}/admin/invite?token=${raw}`
+    );
+    audit(req, p, "admin.invite_sent", { targetType: "AdminUser", summary: email });
+  }
   res.redirect("/admin/admins");
 });
 
@@ -2241,6 +2445,7 @@ adminRouter.post("/admins/:id", async (req, res) => {
   if (b.resetMfa) {
     data.mfaEnabled = false;
     data.mfaSecret = null;
+    data.recoveryCodes = Prisma.DbNull;
   }
   await prisma.$transaction([
     prisma.adminScope.deleteMany({ where: { adminUserId: target.id } }),
@@ -2249,6 +2454,8 @@ adminRouter.post("/admins/:id", async (req, res) => {
       data: { ...data, scopes: { create: scopeRowsFromBody(b) } },
     }),
   ]);
+  // A changed password or deactivation kills the target's live sessions.
+  if (b.password || !b.active) await revokeAllSessions(target.id);
   res.redirect("/admin/admins");
 });
 
@@ -2320,8 +2527,10 @@ adminRouter.post("/staff/:id", async (req, res) => {
   if (b.resetMfa) {
     data.mfaEnabled = false;
     data.mfaSecret = null;
+    data.recoveryCodes = Prisma.DbNull;
   }
   await prisma.adminUser.update({ where: { id: s.id }, data });
+  if (b.password || !b.active) await revokeAllSessions(s.id);
   res.redirect("/admin/staff");
 });
 

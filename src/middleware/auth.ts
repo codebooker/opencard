@@ -49,6 +49,7 @@ export function loginPage(error?: string, info?: string, branding?: LoginBrandin
           <input name="password" type="password" autocomplete="current-password" placeholder="••••••••" />
           <button class="btn auth-submit" type="submit">Sign in</button>
         </form>
+        <p class="auth-foot" style="margin-top:12px"><a href="/admin/forgot">Forgot your password?</a></p>
         ${
           branding
             ? `<div class="auth-divider"><span>or</span></div>
@@ -72,6 +73,79 @@ export function loginPage(error?: string, info?: string, branding?: LoginBrandin
   });
 }
 
+// Shared minimal auth-card wrapper for the account-lifecycle pages.
+function authCard(title: string, sub: string, inner: string, opts: { error?: string; info?: string } = {}): string {
+  return page({
+    title,
+    head: OC_FAVICON,
+    body: `<div class="auth">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <img src="/opencard-logo.svg" alt="OpenCard" style="height:44px;width:auto;margin:0 auto 6px;display:block" />
+          <h1 style="font-size:20px">${esc(title)}</h1>
+          <p class="auth-sub">${esc(sub)}</p>
+        </div>
+        ${opts.info ? `<p class="auth-banner">${esc(opts.info)}</p>` : ""}
+        ${opts.error ? `<p class="auth-error">${esc(opts.error)}</p>` : ""}
+        ${inner}
+      </div>
+    </div>`,
+  });
+}
+
+export function forgotPage(opts: { sent?: boolean; error?: string } = {}): string {
+  return authCard(
+    "Reset your password",
+    "Enter your account email and we'll send a reset link.",
+    opts.sent
+      ? `<p class="auth-banner">If an account exists for that address, a reset link is on its way. It expires in 1 hour.</p>
+         <p class="auth-foot"><a href="/admin/login">Back to sign in</a></p>`
+      : `<form method="POST" action="/admin/forgot" class="auth-form">
+          <label>Email</label>
+          <input name="email" type="email" autocomplete="username" placeholder="you@company.com" required autofocus />
+          <button class="btn auth-submit" type="submit">Send reset link</button>
+        </form>
+        <p class="auth-foot"><a href="/admin/login">Back to sign in</a></p>`,
+    { error: opts.error }
+  );
+}
+
+export function resetPage(token: string, error?: string): string {
+  return authCard(
+    "Choose a new password",
+    "Your other sessions will be signed out.",
+    `<form method="POST" action="/admin/reset" class="auth-form">
+      <input type="hidden" name="token" value="${esc(token)}" />
+      <label>New password</label>
+      <input name="password" type="password" autocomplete="new-password" minlength="8" required autofocus />
+      <label>Confirm new password</label>
+      <input name="password2" type="password" autocomplete="new-password" minlength="8" required />
+      <button class="btn auth-submit" type="submit">Set password</button>
+    </form>`,
+    { error }
+  );
+}
+
+export function invitePage(token: string, email: string, error?: string): string {
+  return authCard(
+    "Set up your account",
+    `You've been invited as ${email}. Choose a password to finish.`,
+    `<form method="POST" action="/admin/invite" class="auth-form">
+      <input type="hidden" name="token" value="${esc(token)}" />
+      <label>Password</label>
+      <input name="password" type="password" autocomplete="new-password" minlength="8" required autofocus />
+      <label>Confirm password</label>
+      <input name="password2" type="password" autocomplete="new-password" minlength="8" required />
+      <button class="btn auth-submit" type="submit">Create my account</button>
+    </form>`,
+    { error }
+  );
+}
+
+export function authNoticePage(title: string, message: string, cta: { href: string; label: string }): string {
+  return authCard(title, message, `<a class="btn auth-submit auth-sso" href="${esc(cta.href)}">${esc(cta.label)}</a>`);
+}
+
 export function mfaPage(error?: string): string {
   return page({
     title: "Two-factor",
@@ -85,9 +159,10 @@ export function mfaPage(error?: string): string {
         </div>
         ${error ? `<p class="auth-error">${esc(error)}</p>` : ""}
         <form method="POST" action="/admin/login/mfa" class="auth-form">
-          <input class="auth-code" name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="••••••" autocomplete="one-time-code" autofocus />
+          <input class="auth-code" name="code" maxlength="12" placeholder="••••••" autocomplete="one-time-code" autofocus />
           <button class="btn auth-submit" type="submit">Verify</button>
         </form>
+        <p class="auth-foot" style="margin-top:12px;font-size:13px">Lost your device? Enter one of your recovery codes instead.</p>
       </div>
     </div>`,
   });

@@ -365,7 +365,8 @@ export function dashboard(
   brands: BrandWithLocations[],
   p: AdminPrincipal,
   t: Terminology = GENERAL_TERMINOLOGY,
-  actingClientName?: string
+  actingClientName?: string,
+  verifyState: "needed" | "sent" | null = null
 ): string {
   const canManage = (brandId: string) =>
     p.global || (p.role === "brand_admin" && p.brandIds.includes(brandId));
@@ -385,8 +386,18 @@ export function dashboard(
         actingClientName
       )}</strong> · <a href="/admin/clients/exit">← back to all clients</a></div>`
     : "";
+  const verifyBanner =
+    verifyState === "sent"
+      ? `<div class="stat" style="border:1px solid #16a34a;background:#f0fdf4;margin-bottom:12px">Verification email sent — check your inbox.</div>`
+      : verifyState === "needed"
+      ? `<div class="stat" style="border:1px solid #d97706;background:#fffbeb;margin-bottom:12px">
+      <strong>Verify your email to go live.</strong> Your ${esc(lower(t.cardPlural))} and lead capture stay private until you confirm the address you signed up with.
+      <form method="POST" action="/admin/verify/resend" style="display:inline;margin-left:8px"><button class="btn secondary" type="submit" style="padding:4px 10px;font-size:13px">Resend verification email</button></form>
+    </div>`
+      : "";
   const body = `
   ${banner}
+  ${verifyBanner}
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>${esc(t.brandPlural)} &amp; ${esc(lower(t.locationPlural))}</h2>
@@ -1380,10 +1391,36 @@ export function turnoverForm(opts: { card: any; rooftop: any; otherCards: any[];
   return shell("Deprovision", body);
 }
 
+// One-time display of freshly generated MFA recovery codes.
+export function recoveryCodesView(codes: string[], lede: string): string {
+  const body = `
+  <p class="crumb"><a href="/admin/security">← Security</a></p>
+  <h2>Recovery codes</h2>
+  <p class="muted" style="max-width:560px">${esc(lede)} Each code works once, in place of an authenticator code.</p>
+  <div class="stat" style="max-width:560px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;font-variant-numeric:tabular-nums">
+      ${codes.map((c) => `<code style="text-align:center;padding:8px 6px;font-size:15px">${esc(c)}</code>`).join("")}
+    </div>
+    <p class="muted" style="margin:14px 0 0">Store them in a password manager. Anyone with a code can pass your two-factor prompt.</p>
+  </div>
+  <p style="margin-top:14px"><a class="btn" href="/admin/security">I've saved them</a></p>`;
+  return shell("Recovery codes", body);
+}
+
+type SessionRow = { id: string; current: boolean; lastSeenAt: Date; createdAt: Date; ip: string | null; userAgent: string | null };
+
 // Security (two-factor) settings, in the standard admin layout. `workspace`
 // says whose account this is (an org name, or "OpenCard staff") so the page
 // reads differently for client admins vs platform staff.
-export function securityView(opts: { email: string | null; on: boolean; note?: string; workspace?: string | null; platform?: boolean }): string {
+export function securityView(opts: {
+  email: string | null;
+  on: boolean;
+  note?: string;
+  workspace?: string | null;
+  platform?: boolean;
+  recoveryCount?: number;
+  sessions?: SessionRow[];
+}): string {
   const who = opts.platform
     ? `your <strong>OpenCard staff</strong> account`
     : opts.workspace
@@ -1405,7 +1442,50 @@ export function securityView(opts: { email: string | null; on: boolean; note?: s
     </div>
   </div>
   ${opts.note || ""}
-  <div class="stat" style="max-width:560px">${inner}</div>`;
+  <div class="stat" style="max-width:560px">${inner}</div>
+  ${
+    opts.on
+      ? `<h3 style="margin-top:24px">Recovery codes</h3>
+  <div class="stat" style="max-width:560px">
+    <p style="margin:0 0 8px">${
+      (opts.recoveryCount ?? 0) > 0
+        ? `<strong>${opts.recoveryCount}</strong> unused recovery code${opts.recoveryCount === 1 ? "" : "s"} remaining.`
+        : `No recovery codes left — generate new ones now, or a lost phone locks you out.`
+    }</p>
+    <form method="POST" action="/admin/security/recovery/regenerate" onsubmit="return confirm('Generate new recovery codes? Old codes stop working.')">
+      <button class="btn secondary" type="submit">Generate new codes</button>
+    </form>
+  </div>`
+      : ""
+  }
+  ${
+    opts.sessions && opts.sessions.length
+      ? `<h3 style="margin-top:24px">Active sessions</h3>
+  <table style="max-width:720px">
+    <tr><th>Session</th><th>Last active</th><th>IP</th><th></th></tr>
+    ${opts.sessions
+      .map(
+        (s) => `<tr>
+      <td>${s.current ? `<span class="pill on">this session</span>` : `<span class="muted" style="font-size:12px">${esc((s.userAgent || "unknown device").slice(0, 60))}</span>`}</td>
+      <td class="muted">${esc(new Date(s.lastSeenAt).toISOString().slice(0, 16).replace("T", " "))}</td>
+      <td class="muted">${esc(s.ip || "—")}</td>
+      <td>${
+        s.current
+          ? ""
+          : `<form method="POST" action="/admin/security/sessions/${esc(s.id)}/revoke"><button class="btn danger" type="submit">Sign out</button></form>`
+      }</td>
+    </tr>`
+      )
+      .join("")}
+  </table>
+  ${
+    opts.sessions.length > 1
+      ? `<form method="POST" action="/admin/security/sessions/revoke-others" style="margin-top:10px"><button class="btn secondary" type="submit">Sign out all other sessions</button></form>`
+      : ""
+  }
+  <p class="muted" style="margin-top:8px;max-width:720px">Sessions from password sign-ins on this device list. SSO sign-ins (via /me) don't appear here and expire on their own.</p>`
+      : ""
+  }`;
   return shell("Security", body);
 }
 
@@ -1701,7 +1781,12 @@ export function adminForm(opts: { admin?: any; brands: any[]; locations: any[] }
     </div>
 
     <h3>Sign-in</h3>
-    <label>Password <span class="muted">${opts.admin ? "(leave blank to keep current)" : "(for password login; blank = SSO-only)"}</span></label>
+    ${
+      opts.admin
+        ? ""
+        : `<label class="chk" style="margin-bottom:10px"><input type="checkbox" name="sendInvite" value="1" checked /> Email them an invite link so they set their own password <span class="muted">(recommended)</span></label>`
+    }
+    <label>Password <span class="muted">${opts.admin ? "(leave blank to keep current — changing it signs out their sessions)" : "(optional — leave blank to use the invite link, or for SSO-only accounts)"}</span></label>
     <input name="password" type="password" autocomplete="new-password" />
     <p class="muted" style="margin:6px 0 0">Password admins must enroll an authenticator app on first sign-in. SSO admins inherit MFA from your identity provider.</p>
     ${
