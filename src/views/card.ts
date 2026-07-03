@@ -1,5 +1,6 @@
 import type { Card, Brand, Location, Template, Department } from "@prisma/client";
 import { asLabeled, asSocials, Address } from "../types";
+import { safeUrl } from "../parse";
 import { esc, page } from "./html";
 import { rooftopCtas, parseOemBrands, ctasFromJson, mergeCtas } from "../dealership";
 import { asStringArray, isHidden, resolveShowQr, renderSignature } from "../roletemplate";
@@ -100,10 +101,12 @@ export function renderCardPage(
     contacts.push(contactRow("📞", p.label || "Phone", p.value, `tel:${p.value}`, `click:phone`));
   for (const e of emails)
     contacts.push(contactRow("✉️", e.label || "Email", e.value, `mailto:${e.value}`, `click:email`));
-  for (const w of sites)
-    contacts.push(
-      contactRow("🌐", w.label || "Website", w.value, w.value, `click:website`)
-    );
+  for (const w of sites) {
+    // Whitelist the URL scheme: these values are cardholder-supplied and esc()
+    // alone doesn't stop a javascript: href.
+    const url = safeUrl(w.value);
+    if (url) contacts.push(contactRow("🌐", w.label || "Website", w.value, url, `click:website`));
+  }
   if (addr) {
     const addrText = [addr.line1, addr.city, addr.region, addr.postal, addr.country]
       .filter(Boolean)
@@ -112,11 +115,14 @@ export function renderCardPage(
     contacts.push(contactRow("📍", "Address", addrText, maps, `click:address`));
   }
 
-  const socialHtml = socials.length
-    ? `<div class="socials">${socials
+  const socialLinks = socials
+    .map((s) => ({ ...s, href: safeUrl(s.value) }))
+    .filter((s): s is typeof s & { href: string } => !!s.href);
+  const socialHtml = socialLinks.length
+    ? `<div class="socials">${socialLinks
         .map(
           (s) =>
-            `<a class="social" href="${esc(s.value)}" data-track="click:social:${esc(
+            `<a class="social" href="${esc(s.href)}" data-track="click:social:${esc(
               s.type
             )}" title="${esc(s.type)}">${esc(SOCIAL_ICONS[s.type.toLowerCase()] || s.type[0] || "•")}</a>`
         )

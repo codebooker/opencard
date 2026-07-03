@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
-import { prisma, LabeledValue, SocialLink, Address } from "../db";
+import { prisma, Address } from "../db";
 import { config } from "../config";
 import { clearCookieOptions, cookieOptions } from "../cookies";
 import { requireAdmin, reqAdmin, forbidden, loginPage, mfaPage, enrollPage } from "../middleware/auth";
@@ -22,10 +22,12 @@ import { sendTestSync, retrySync } from "../crmsync-dispatch";
 import { isGaId, isGtmId, normalizeCampaignCode } from "../marketing";
 import { resolveRange, conversionPct, sortLeaderboard, buildFunnel, topGroups, ANALYTICS_RANGES } from "../analytics";
 import { computeOrgAnalytics, analyticsCsv, sendDigest } from "../reports";
+import { toCsv } from "../csv";
 import { recordAudit, reqIp } from "../audit-log";
 import { buildOrgExport, purgeOrgData } from "../data-bundle";
 import { exportFilename } from "../dataexport";
 import { parseRetentionDays } from "../retention";
+import { clean, parseLabeled, parseSocials, parseAddress } from "../parse";
 import { pruneOrgLeads } from "../retention-prune";
 
 // Compact audit helper bound to the current principal + request.
@@ -178,44 +180,8 @@ adminRouter.use(async (req, res, next) => {
 });
 
 // ---------- helpers ----------
-function parseLabeled(text: string): LabeledValue[] {
-  return String(text || "")
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((l) => {
-      const [label, ...rest] = l.split("|");
-      const value = rest.join("|").trim();
-      return value ? { label: label.trim() || "", value } : { label: "", value: label.trim() };
-    })
-    .filter((x) => x.value);
-}
-function parseSocials(text: string): SocialLink[] {
-  return String(text || "")
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((l) => {
-      const [type, ...rest] = l.split("|");
-      return { type: (type || "").trim().toLowerCase(), value: rest.join("|").trim() };
-    })
-    .filter((x) => x.value);
-}
-// Returns a plain string map (no undefined values) so it's cleanly assignable
-// to a Prisma JSON field, or null when empty.
-function parseAddress(b: any): Record<string, string> | null {
-  const out: Record<string, string> = {};
-  const put = (k: string, v: any) => {
-    if (v && String(v).trim()) out[k] = String(v).trim();
-  };
-  put("line1", b.addr_line1);
-  put("city", b.addr_city);
-  put("region", b.addr_region);
-  put("postal", b.addr_postal);
-  put("country", b.addr_country);
-  return Object.keys(out).length ? out : null;
-}
-const clean = (s: any) => (s && String(s).trim() ? String(s).trim() : null);
+// parseLabeled / parseSocials / parseAddress / clean are shared with the
+// self-service routes and live in ../parse.
 
 // Normalize an HTML checkbox group (absent | single string | string[]) to string[].
 function asArray(v: any): string[] {
@@ -1752,7 +1718,7 @@ adminRouter.get("/leads.csv", async (req, res) => {
       l.card?.department || "",
     ]),
   ];
-  const csv = rows.map((r) => r.map((f) => `"${String(f).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const csv = toCsv(rows);
   res.setHeader("Content-Type", "text/csv");
   res.setHeader("Content-Disposition", 'attachment; filename="leads.csv"');
   res.send(csv);

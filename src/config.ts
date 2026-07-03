@@ -34,6 +34,11 @@ export const config = {
   nodeEnv: NODE_ENV,
   isProduction,
   port: parseInt(process.env.PORT || "3000", 10),
+  // Number of reverse-proxy hops in front of the app (Express `trust proxy`).
+  // The standard deploy runs behind one proxy (Caddy) = 1. Set 0 when the app
+  // is directly exposed, N when there are N proxies. Never `true`/-all: that
+  // would let clients spoof their IP (and bypass rate limits) via X-Forwarded-For.
+  trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS || "1", 10),
   baseUrl,
   cardUrl,
   secureCookies: baseUrl.startsWith("https://"),

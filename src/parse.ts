@@ -2,6 +2,28 @@ import { LabeledValue, SocialLink } from "./types";
 
 export const clean = (s: any): string | null => (s && String(s).trim() ? String(s).trim() : null);
 
+// Allowed link schemes for user-supplied URLs (websites, socials). Anything else
+// (javascript:, data:, vbscript:, ...) is rejected: these values end up in href
+// attributes on public card pages and in vCards, where esc() protects the HTML
+// but not the URL scheme.
+const SAFE_SCHEMES = new Set(["http:", "https:", "mailto:", "tel:"]);
+
+// Returns a safe href for a user-supplied URL, or null when the value must not
+// be rendered as a link. Scheme-less values ("example.com") are treated as
+// https websites.
+export function safeUrl(raw: unknown): string | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  // Browsers ignore control characters and whitespace inside a scheme
+  // ("java\tscript:alert(1)"), so strip them before detecting the scheme.
+  const probe = s.replace(/[\u0000-\u0020]+/g, "").toLowerCase();
+  const scheme = probe.match(/^([a-z][a-z0-9+.-]*:)/)?.[1];
+  if (scheme) return SAFE_SCHEMES.has(scheme) ? s : null;
+  if (probe.startsWith("//")) return "https:" + s; // scheme-relative
+  if (probe.startsWith("/")) return null; // path-relative — not a website
+  return "https://" + s; // bare domain
+}
+
 // "Work | +1 555..." (one per line) -> [{label, value}]
 export function parseLabeled(text: string): LabeledValue[] {
   return String(text || "")

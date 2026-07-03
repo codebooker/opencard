@@ -12,6 +12,14 @@ test("csvCell quotes commas/quotes/newlines only", () => {
   assert.equal(csvCell(null), "");
 });
 
+test("csvCell neutralizes formula-leading characters", () => {
+  assert.equal(csvCell("=HYPERLINK(\"http://evil\")"), `"'=HYPERLINK(""http://evil"")"`);
+  assert.equal(csvCell("+15551234567"), "'+15551234567");
+  assert.equal(csvCell("-cmd"), "'-cmd");
+  assert.equal(csvCell("@import"), "'@import");
+  assert.equal(csvCell(-5), "-5"); // real numbers pass through
+});
+
 test("toCsv joins rows with CRLF", () => {
   const out = toCsv([
     ["Rooftop", "Views", "Leads"],

@@ -26,8 +26,9 @@ export function recordAudit(e: {
     .catch(() => {});
 }
 
-// Best-effort client IP from proxy headers.
+// Best-effort client IP. req.ip honors the `trust proxy` hop count configured
+// in server.ts; never read X-Forwarded-For directly (leftmost value is
+// client-controlled).
 export function reqIp(req: any): string | null {
-  const xff = String(req?.headers?.["x-forwarded-for"] || "").split(",")[0].trim();
-  return xff || req?.ip || null;
+  return req?.ip || req?.socket?.remoteAddress || null;
 }

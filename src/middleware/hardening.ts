@@ -1,9 +1,12 @@
 import { Request, Response, NextFunction } from "express";
 import { config } from "../config";
 
+// Client IP for rate-limit keys and logs. Relies on Express's `trust proxy`
+// (set to the proxy hop count in server.ts) rather than reading X-Forwarded-For
+// directly: the leftmost XFF value is client-controlled, so trusting it lets an
+// attacker rotate the header and bypass per-IP rate limits.
 export function clientIp(req: Request): string {
-  const xff = (req.headers["x-forwarded-for"] as string) || "";
-  return xff.split(",")[0].trim() || req.ip || req.socket.remoteAddress || "";
+  return req.ip || req.socket.remoteAddress || "";
 }
 
 function log(entry: Record<string, unknown>): void {

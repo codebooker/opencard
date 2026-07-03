@@ -27,7 +27,10 @@ import {
 } from "./middleware/hardening";
 
 const app = express();
-app.set("trust proxy", true);
+// Trust exactly the configured number of proxy hops (default 1: Caddy). With a
+// hop count, req.ip is the address the trusted proxy saw — not the spoofable
+// leftmost X-Forwarded-For value that `trust proxy: true` would yield.
+app.set("trust proxy", config.trustProxyHops);
 app.disable("x-powered-by");
 
 app.use(requestLogger);

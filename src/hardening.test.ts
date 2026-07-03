@@ -42,6 +42,21 @@ test("rateLimit allows up to max, then 429s", () => {
   assert.ok(r3.headers["Retry-After"]);
 });
 
+test("rateLimit key ignores spoofed X-Forwarded-For", () => {
+  const mw = rateLimit({ name: "spoof", windowMs: 60_000, max: 2 });
+  let nextCount = 0;
+  const next = () => {
+    nextCount++;
+  };
+  // Same req.ip, rotating XFF each request — must share one bucket and 429.
+  for (let i = 0; i < 3; i++) {
+    var res = fakeRes();
+    mw(fakeReq({ headers: { "x-forwarded-for": `10.0.0.${i}` } }) as any, res as any, next);
+  }
+  assert.equal(nextCount, 2);
+  assert.equal(res!.statusCode, 429);
+});
+
 test("rateLimit only counts configured methods", () => {
   const mw = rateLimit({ name: "post-only", windowMs: 60_000, max: 1, methods: ["POST"] });
   let nextCount = 0;

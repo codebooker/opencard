@@ -1,5 +1,6 @@
 import type { Card } from "@prisma/client";
 import { asLabeled, asSocials, Address } from "./types";
+import { safeUrl } from "./parse";
 
 function esc(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
@@ -25,11 +26,14 @@ export function buildVCard(card: Card): string {
   for (const e of asLabeled(card.emails)) {
     if (e.value) lines.push(`EMAIL;TYPE=${esc((e.label || "WORK").toUpperCase())}:${esc(e.value)}`);
   }
+  // URL scheme whitelist: contact apps open these, so never emit javascript:/data: etc.
   for (const w of asLabeled(card.websites)) {
-    if (w.value) lines.push(`URL:${esc(w.value)}`);
+    const url = safeUrl(w.value);
+    if (url) lines.push(`URL:${esc(url)}`);
   }
   for (const s of asSocials(card.socials)) {
-    if (s.value) lines.push(`URL:${esc(s.value)}`);
+    const url = safeUrl(s.value);
+    if (url) lines.push(`URL:${esc(url)}`);
   }
 
   const addr = card.address as Address | null;

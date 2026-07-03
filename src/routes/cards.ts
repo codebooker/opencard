@@ -19,8 +19,10 @@ import { findDuplicate } from "../leadstatus";
 
 export const cardsRouter = Router();
 
+// req.ip honors the `trust proxy` hop count configured in server.ts; never read
+// X-Forwarded-For directly (leftmost value is client-controlled).
 function clientIp(req: Request): string {
-  return (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "";
+  return req.ip || req.socket.remoteAddress || "";
 }
 
 // Public read. When the request host maps to a specific tenant (a subdomain
@@ -131,9 +133,14 @@ cardsRouter.get("/:slug/qr.png", async (req, res) => {
   res.send(buf);
 });
 
-// Click / interaction beacon
+// Click / interaction beacon. Host/org-scoped like every other card lookup so
+// a tenant host can't write analytics events onto another org's card.
 cardsRouter.post("/:slug/event", async (req, res) => {
-  const card = await prisma.card.findUnique({ where: { slug: req.params.slug } });
+  const orgId = await hostOrg(req);
+  const card = await prisma.card.findFirst({
+    where: { slug: req.params.slug, active: true, ...(orgId ? { orgId } : {}) },
+    select: { id: true, orgId: true },
+  });
   if (!card) return res.status(204).end();
   let type = "click";
   let meta: string | undefined;
