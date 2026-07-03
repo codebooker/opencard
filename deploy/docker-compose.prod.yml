@@ -59,6 +59,9 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      # Proxy hops in front of the app for client-IP resolution (rate limits,
+      # logs, audit). This deploy is client -> Cloudflare -> Caddy -> app = 2.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-2}
       PORT: "3000"
     volumes:
       - uploads_data:/app/uploads
