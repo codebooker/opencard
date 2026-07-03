@@ -65,7 +65,26 @@ model Org {
   crmIntegrations   CrmIntegration[]
   crmSyncLogs       CrmSyncLog[]
   campaigns         Campaign[]
+  auditLogs         AuditLog[]
   createdAt   DateTime @default(now())
+}
+
+// Append-only audit trail (Phase 9.1): who did what security/compliance-relevant
+// action in this org, when. Written fire-and-forget from the routes.
+model AuditLog {
+  id         String   @id @default(cuid())
+  org        Org      @relation(fields: [orgId], references: [id])
+  orgId      String
+  actorEmail String? // who performed it (null = system / break-glass token)
+  actorRole  String?
+  action     String // e.g. login.success, admin.create, integration.create, billing.plan
+  targetType String?
+  targetId   String?
+  summary    String?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([orgId, createdAt])
 }
 
 // A trackable campaign short link (Phase 7.4). Public URL /k/:code redirects to

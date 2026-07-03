@@ -22,6 +22,17 @@ import { sendTestSync, retrySync } from "../crmsync-dispatch";
 import { isGaId, isGtmId, normalizeCampaignCode } from "../marketing";
 import { resolveRange, conversionPct, sortLeaderboard, buildFunnel, topGroups, ANALYTICS_RANGES } from "../analytics";
 import { computeOrgAnalytics, analyticsCsv, sendDigest } from "../reports";
+import { recordAudit, reqIp } from "../audit-log";
+
+// Compact audit helper bound to the current principal + request.
+function audit(
+  req: any,
+  p: { orgId: string; email: string | null; role: string },
+  action: string,
+  extra?: { targetType?: string; targetId?: string | null; summary?: string }
+) {
+  recordAudit({ orgId: p.orgId, actor: { email: p.email, role: p.role }, action, ip: reqIp(req), ...extra });
+}
 import { promises as dns } from "dns";
 import { evaluateDomain, CNAME_TARGET } from "../domainstatus";
 
@@ -93,8 +104,10 @@ adminRouter.get("/login", async (req, res) =>
 adminRouter.post("/login/token", async (req, res) => {
   if ((req.body?.token || "") === config.adminToken) {
     res.cookie("oc_admin", config.adminToken, cookieOptions(12 * 60 * 60 * 1000));
+    recordAudit({ orgId: await defaultOrgId(), actor: { role: "platform_owner" }, action: "login.token", ip: reqIp(req) });
     return res.redirect("/admin");
   }
+  recordAudit({ orgId: await defaultOrgId(), action: "login.failed", summary: "break-glass token", ip: reqIp(req) });
   res.status(401).send(loginPage("Invalid token.", undefined, await brandingFor(req)));
 });
 
@@ -106,12 +119,14 @@ adminRouter.post("/login", async (req, res) => {
   const password = String(req.body?.password || "");
   const au = await prisma.adminUser.findUnique({ where: { email } });
   if (!au || !au.active || !verifyPassword(password, au.passwordHash)) {
+    recordAudit({ orgId: await defaultOrgId(), actor: { email }, action: "login.failed", ip: reqIp(req) });
     return res.status(401).send(loginPage("Invalid email or password.", undefined, await brandingFor(req)));
   }
   if (au.mfaEnabled && au.mfaSecret) {
     res.cookie("oc_pwauth", signEmail(email), cookieOptions(5 * 60 * 1000));
     return res.send(mfaPage());
   }
+  recordAudit({ orgId: au.orgId ?? (await defaultOrgId()), actor: { email, role: au.role }, action: "login.success", ip: reqIp(req) });
   res.cookie("oc_emp", signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
   return res.redirect("/admin");
 });
@@ -124,6 +139,7 @@ adminRouter.post("/login/mfa", async (req, res) => {
     return res.status(401).send(mfaPage("Incorrect code, try again."));
   }
   res.clearCookie("oc_pwauth", clearCookieOptions());
+  recordAudit({ orgId: au.orgId ?? (await defaultOrgId()), actor: { email, role: au.role }, action: "login.success", summary: "MFA", ip: reqIp(req) });
   res.cookie("oc_emp", signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
   res.redirect("/admin");
 });
@@ -482,7 +498,10 @@ adminRouter.post("/billing/plan", async (req, res) => {
       data.subscriptionStatus = "trialing";
     }
   }
-  if (Object.keys(data).length) await prisma.org.update({ where: { id: p.orgId }, data });
+  if (Object.keys(data).length) {
+    await prisma.org.update({ where: { id: p.orgId }, data });
+    audit(req, p, "billing.plan", { targetType: "Org", targetId: p.orgId, summary: JSON.stringify(data) });
+  }
   res.redirect("/admin/billing");
 });
 
@@ -628,6 +647,7 @@ adminRouter.post("/brands/:id/delete", async (req, res) => {
     prisma.location.deleteMany({ where: { brandId: brand.id } }),
     prisma.brand.delete({ where: { id: brand.id } }),
   ]);
+  audit(req, reqAdmin(req), "brand.delete", { targetType: "Brand", targetId: brand.id, summary: brand.name });
   res.redirect("/admin");
 });
 
@@ -825,6 +845,7 @@ adminRouter.post("/domains", async (req, res) => {
   }
   if (!(await RBAC.canManageBrandScoped(p, brandForPerm))) return forbidden(res);
   await setTenantDomain(orgId, scope, kind as "admin" | "user", host);
+  audit(req, p, "domain.add", { targetType: "TenantDomain", summary: `${host} (${kind})` });
   res.redirect("/admin/domains?added=1");
 });
 
@@ -852,6 +873,7 @@ adminRouter.post("/domains/:id/delete", async (req, res) => {
   const brandId = domainBrandId(d);
   if (!brandId || !(await RBAC.canManageBrandScoped(p, brandId))) return forbidden(res);
   await prisma.tenantDomain.delete({ where: { id: d.id } });
+  audit(req, p, "domain.remove", { targetType: "TenantDomain", targetId: d.id, summary: d.host });
   res.redirect("/admin/domains");
 });
 
@@ -1418,6 +1440,16 @@ adminRouter.post("/reports/digest/test", async (req, res) => {
   res.redirect("/admin/analytics?digest=sent");
 });
 
+// ---------- audit log (Phase 9.1) ----------
+adminRouter.get("/audit", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.super) return forbidden(res);
+  const action = typeof req.query.action === "string" && req.query.action ? String(req.query.action) : null;
+  const where = { ...(RBAC.seesAllOrgs(p) ? {} : { orgId: p.orgId }), ...(action ? { action } : {}) };
+  const logs = await prisma.auditLog.findMany({ where, orderBy: { createdAt: "desc" }, take: 250 });
+  res.send(V.auditView(logs, action));
+});
+
 // ---------- leads ----------
 // Scope leads to what the admin may see: cards in their locations OR assets in
 // their locations (global admins see all).
@@ -1639,6 +1671,7 @@ adminRouter.post("/crm", async (req, res) => {
       enabled: true,
     },
   });
+  audit(req, p, "crm.create", { targetType: "CrmIntegration", summary: `${provider}: ${name}` });
   res.redirect("/admin/integrations");
 });
 
@@ -1648,6 +1681,7 @@ adminRouter.post("/crm/:id/delete", async (req, res) => {
   await prisma.crmIntegration.deleteMany({
     where: RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
   });
+  audit(req, p, "crm.delete", { targetType: "CrmIntegration", targetId: req.params.id });
   res.redirect("/admin/integrations");
 });
 
@@ -1734,6 +1768,7 @@ adminRouter.post("/api-keys", async (req, res) => {
   const scopes = sanitizeScopes(asArray(req.body?.scopes));
   const { raw, hash, prefix } = generateApiKey();
   await prisma.apiKey.create({ data: { name, keyHash: hash, prefix, orgId: p.orgId, scopes } });
+  audit(req, p, "apikey.create", { targetType: "ApiKey", summary: name });
   // Render directly (not a redirect) so the raw key never lands in a URL/log.
   await renderIntegrations(res, p, raw);
 });
@@ -1746,6 +1781,7 @@ adminRouter.post("/api-keys/:id/revoke", async (req, res) => {
     where: RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
     data: { revoked: true },
   });
+  audit(req, p, "apikey.revoke", { targetType: "ApiKey", targetId: req.params.id });
   res.redirect("/admin/integrations");
 });
 
@@ -1760,6 +1796,7 @@ adminRouter.post("/webhooks", async (req, res) => {
   await prisma.webhookEndpoint.create({
     data: { url, secret, events: events.length ? events : ["lead.captured"], orgId: p.orgId },
   });
+  audit(req, p, "webhook.create", { targetType: "WebhookEndpoint", summary: url });
   res.redirect("/admin/integrations");
 });
 
@@ -1769,6 +1806,7 @@ adminRouter.post("/webhooks/:id/delete", async (req, res) => {
   await prisma.webhookEndpoint.deleteMany({
     where: RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
   });
+  audit(req, p, "webhook.delete", { targetType: "WebhookEndpoint", targetId: req.params.id });
   res.redirect("/admin/integrations");
 });
 
@@ -1816,6 +1854,7 @@ adminRouter.post("/scim-token/generate", async (req, res) => {
   if (!(await ensureFeature(res, p.orgId, "scim", "SCIM provisioning"))) return;
   const { raw, hash } = generateScimToken();
   await prisma.org.update({ where: { id: p.orgId }, data: { scimTokenHash: hash } });
+  audit(req, p, "scim.token", { targetType: "Org", targetId: p.orgId });
   // Show the raw token once (never stored in plaintext / never in a URL).
   await renderIntegrations(res, p, null, raw);
 });
@@ -1857,6 +1896,7 @@ adminRouter.post("/saml-config", async (req, res) => {
     create: { orgId: p.orgId, enabled, entryPoint, idpIssuer, idpCert },
     update: { enabled, entryPoint, idpIssuer, idpCert },
   });
+  audit(req, p, "sso.update", { targetType: "SamlConfig", targetId: p.orgId, summary: enabled ? "enabled" : "disabled" });
   res.redirect("/admin/integrations");
 });
 
@@ -1938,6 +1978,7 @@ adminRouter.post("/admins", async (req, res) => {
   };
   if (b.password) data.passwordHash = hashPassword(String(b.password));
   await prisma.adminUser.create({ data });
+  audit(req, p, "admin.create", { targetType: "AdminUser", summary: `${email} (${data.role})` });
   res.redirect("/admin/admins");
 });
 
@@ -1969,6 +2010,7 @@ adminRouter.post("/admins/:id/delete", async (req, res) => {
   const target = await manageableAdmin(p, req.params.id);
   if (!target) return res.status(404).send("Not found");
   await prisma.adminUser.delete({ where: { id: target.id } });
+  audit(req, p, "admin.delete", { targetType: "AdminUser", targetId: target.id, summary: target.email });
   res.redirect("/admin/admins");
 });
 
@@ -2006,6 +2048,7 @@ adminRouter.post("/staff", async (req, res) => {
   const data: any = { email, name: clean(b.name), role: b.role, orgId: null };
   if (b.password) data.passwordHash = hashPassword(String(b.password));
   await prisma.adminUser.create({ data });
+  audit(req, p, "staff.create", { targetType: "AdminUser", summary: `${email} (${b.role})` });
   res.redirect("/admin/staff");
 });
 
@@ -2041,6 +2084,7 @@ adminRouter.post("/staff/:id/delete", async (req, res) => {
   if (!s) return forbidden(res);
   if (p.email && s.email === p.email) return res.status(400).send("You can't delete your own account.");
   await prisma.adminUser.delete({ where: { id: s.id } });
+  audit(req, p, "staff.delete", { targetType: "AdminUser", targetId: s.id, summary: s.email });
   res.redirect("/admin/staff");
 });
 

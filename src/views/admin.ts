@@ -32,6 +32,7 @@ import { campaignRoutingToLines } from "../routing";
 import { LEAD_STATUSES, STATUS_LABELS, nextStatuses } from "../leadstatus";
 import { SIGNATURE_THEMES, SIGNATURE_ELEMENTS, asLockList, SignatureTheme } from "../signature";
 import { CRM_SOURCE_FIELDS } from "../crmsync";
+import { auditLabel, formatAuditActor } from "../audit";
 
 // Shared lead-form config block for the template + brand editors.
 function leadFormConfig(opts: {
@@ -244,6 +245,7 @@ export function dashboard(
     ${p.super ? `<a class="btn secondary" href="/admin/admins">Admins</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/integrations">Integrations</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/marketing">Marketing</a>` : ""}
+    ${p.super ? `<a class="btn secondary" href="/admin/audit">Audit</a>` : ""}
     ${p.global ? `<a class="btn" href="/admin/brands/new">+ New ${lower(t.brandSingular)}</a>` : ""}`;
   const banner = actingClientName
     ? `<div class="stat" style="border:1px solid #2563eb;background:#eff6ff;margin-bottom:12px">Managing client <strong>${esc(
@@ -411,6 +413,35 @@ export function brandForm(
   }
   ${designScripts()}`;
   return shell("Brand", body);
+}
+
+// Append-only audit trail viewer (Phase 9.1).
+export function auditView(logs: any[], action: string | null = null): string {
+  const rows = logs.length
+    ? logs
+        .map((l) => {
+          const when = new Date(l.createdAt).toISOString().slice(0, 16).replace("T", " ");
+          return `<tr>
+        <td class="muted" style="white-space:nowrap">${esc(when)}</td>
+        <td>${esc(formatAuditActor(l.actorEmail, l.actorRole))}</td>
+        <td>${esc(auditLabel(l.action))} <span class="muted" style="font-size:11px">${esc(l.action)}</span></td>
+        <td class="muted" style="max-width:280px;overflow:hidden;text-overflow:ellipsis">${esc(l.summary || l.targetType || "")}</td>
+        <td class="muted" style="font-size:12px">${esc(l.ip || "")}</td>
+      </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="5" class="muted">No audit entries${action ? " for this action" : ""} yet.</td></tr>`;
+  const body = `
+  <div class="topbar"><h2>Audit log</h2><a class="btn secondary" href="/admin">← Back</a></div>
+  <p class="muted">Security &amp; compliance trail of admin, sign-in, integration, SSO/SCIM, billing, and domain changes. Newest first (last 250).${
+    action ? ` Filtered to <code>${esc(action)}</code> · <a href="/admin/audit">clear</a>` : ""
+  }</p>
+  <table>
+    <tr><th>When (UTC)</th><th>Actor</th><th>Action</th><th>Details</th><th>IP</th></tr>
+    ${rows}
+  </table>
+  <p style="margin-top:14px"><a class="btn secondary" href="/admin">← Back</a></p>`;
+  return shell("Audit log", body);
 }
 
 // Marketing: per-org GA4/GTM tags injected into public pages + trackable
