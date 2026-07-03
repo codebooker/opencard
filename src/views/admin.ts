@@ -138,7 +138,7 @@ export function clientsConsole(orgs: any[], p: AdminPrincipal): string {
             o.subdomain ? `<br><span class="muted" style="font-size:11px">${esc(o.subdomain)}</span>` : ""
           }</td>
       <td>${esc(o.plan)}</td>
-      <td>${modePill(o.billingMode)}</td>
+      <td>${o.suspended ? `<span class="pill off">suspended</span>` : modePill(o.billingMode)}</td>
       <td class="muted">${esc(o.subscriptionStatus)}</td>
       <td class="muted" style="font-size:12px">${o._count.brands} brands · ${o._count.cards} cards · ${o._count.leads} leads</td>
       <td style="white-space:nowrap"><a class="btn secondary" href="/admin/clients/${esc(o.id)}/settings">Edit</a>
@@ -302,7 +302,33 @@ export function clientForm(org?: any): string {
     if(!m||!w) return;
     function u(){ w.style.display = m.value==='demo' ? '' : 'none'; }
     m.addEventListener('change',u); u();
-  })();</script>`;
+  })();</script>
+  ${
+    org
+      ? `<div class="danger-zone" style="max-width:560px">
+    <h3>${o.suspended ? "Workspace is suspended" : "Suspend this client"}</h3>
+    <p class="muted">${
+      o.suspended
+        ? "Everything is dark: their admins see a suspension notice, self-service and the API are blocked, and public cards, QR codes and campaign links stop resolving. Unsuspend to restore everything as it was."
+        : "Immediately takes the workspace dark — admin access, self-service, the API, and all public cards, QR codes and campaign links. No data is deleted; unsuspend restores everything."
+    }</p>
+    <form method="POST" action="/admin/clients/${esc(o.id)}/suspend" onsubmit="return confirm('${
+      o.suspended ? "Unsuspend" : "Suspend"
+    } ${esc(o.name)}?')">
+      <button class="btn ${o.suspended ? "" : "danger"}" type="submit">${o.suspended ? "Unsuspend client" : "Suspend client"}</button>
+    </form>
+    <h3 style="margin-top:20px">Delete this client</h3>
+    <p class="muted">Permanently deletes <strong>${esc(o.name)}</strong>: every brand, rooftop, card, lead, asset, campaign, integration, admin account and audit entry. This cannot be undone — consider suspending instead.</p>
+    <form method="POST" action="/admin/clients/${esc(o.id)}/delete" onsubmit="return confirm('Permanently delete ${esc(
+      o.name
+    )} and ALL of its data? This cannot be undone.')">
+      <label>Type the client name to confirm: <strong>${esc(o.name)}</strong></label>
+      <input name="confirmName" autocomplete="off" placeholder="${esc(o.name)}" />
+      <button class="btn danger" type="submit">Delete client permanently</button>
+    </form>
+  </div>`
+      : ""
+  }`;
   return shell(org ? "Edit client" : "New client", body);
 }
 

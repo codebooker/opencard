@@ -165,8 +165,26 @@ adminRouter.use(requireAdmin);
 // and the billing/logout routes are always allowed.
 adminRouter.use(async (req, res, next) => {
   const p = reqAdmin(req);
-  if (p.platform || req.method !== "POST") return next();
-  if (req.path === "/logout" || req.path.startsWith("/billing")) return next();
+  if (p.platform) return next();
+  if (req.path === "/logout") return next();
+  // Suspension is a hard lock: client admins get a notice page, nothing else
+  // (platform staff pass above so they can manage/unsuspend the workspace).
+  const orgState = await prisma.org.findUnique({ where: { id: p.orgId }, select: { suspended: true } });
+  if (orgState?.suspended) {
+    return res.status(403).send(
+      page({
+        title: "Workspace suspended",
+        body: `<div class="auth"><div class="auth-card">
+          <div class="auth-brand"><img src="/opencard-logo.svg" alt="OpenCard" style="height:44px;width:auto;margin:0 auto 6px;display:block" />
+          <h1 style="font-size:20px">Workspace suspended</h1>
+          <p class="auth-sub">This workspace has been suspended. Please contact support to restore access.</p></div>
+          <a class="btn secondary auth-sso" href="/admin/logout">Sign out</a>
+        </div></div>`,
+      })
+    );
+  }
+  if (req.method !== "POST") return next();
+  if (req.path.startsWith("/billing")) return next();
   const access = await orgAccessState(p.orgId);
   if (access.active) return next();
   return res.status(402).send(
@@ -244,7 +262,7 @@ adminRouter.get("/clients", async (req, res) => {
   const orgs = await prisma.org.findMany({
     orderBy: { createdAt: "asc" },
     select: {
-      id: true, name: true, subdomain: true, plan: true, billingMode: true, subscriptionStatus: true,
+      id: true, name: true, subdomain: true, plan: true, billingMode: true, subscriptionStatus: true, suspended: true,
       _count: { select: { brands: true, cards: true, leads: true } },
     },
   });
@@ -304,6 +322,50 @@ adminRouter.post("/clients/:orgId/settings", async (req, res) => {
     }
   }
   await prisma.org.update({ where: { id: req.params.orgId }, data });
+  res.redirect("/admin/clients");
+});
+
+// Suspend / unsuspend a client workspace (platform staff only). A suspended
+// org is fully dark: admin UI, self-service, API, and all public surfaces.
+adminRouter.post("/clients/:orgId/suspend", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.platform) return forbidden(res);
+  const org = await prisma.org.findUnique({ where: { id: req.params.orgId }, select: { id: true, suspended: true, name: true } });
+  if (!org) return res.status(404).send("Client not found");
+  const suspended = !org.suspended;
+  await prisma.org.update({ where: { id: org.id }, data: { suspended } });
+  audit(req, p, suspended ? "client.suspend" : "client.unsuspend", {
+    targetType: "Org",
+    targetId: org.id,
+    summary: org.name,
+  });
+  res.redirect(`/admin/clients/${org.id}/settings`);
+});
+
+// Permanently delete a client: purge all tenant data, then remove the org's
+// admin accounts, audit trail, and the org row itself. Platform staff only,
+// gated on typing the client name exactly.
+adminRouter.post("/clients/:orgId/delete", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.platform) return forbidden(res);
+  const org = await prisma.org.findUnique({ where: { id: req.params.orgId }, select: { id: true, name: true } });
+  if (!org) return res.status(404).send("Client not found");
+  if (String(req.body?.confirmName || "") !== org.name) {
+    return res.status(400).send(
+      page({
+        title: "Name mismatch",
+        body: `<main class="admin"><h2>Name didn't match</h2><p class="muted">To delete <strong>${esc(
+          org.name
+        )}</strong>, type its name exactly.</p><a class="btn secondary" href="/admin/clients/${esc(org.id)}/settings">Back</a></main>`,
+      })
+    );
+  }
+  // Audit first, attributed to the platform org, so the record outlives the client.
+  audit(req, p, "client.delete", { targetType: "Org", targetId: org.id, summary: org.name });
+  await purgeOrgData(org.id);
+  await prisma.auditLog.deleteMany({ where: { orgId: org.id } });
+  await prisma.adminUser.deleteMany({ where: { orgId: org.id } }); // scopes cascade
+  await prisma.org.delete({ where: { id: org.id } });
   res.redirect("/admin/clients");
 });
 

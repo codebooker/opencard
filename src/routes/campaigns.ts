@@ -8,7 +8,7 @@ export const campaignRouter = Router();
 
 campaignRouter.get("/:code", async (req, res) => {
   const code = normalizeCampaignCode(req.params.code);
-  const c = code ? await prisma.campaign.findUnique({ where: { code } }) : null;
+  const c = code ? await prisma.campaign.findFirst({ where: { code, org: { suspended: false } } }) : null;
   if (!c || !c.active) return res.status(404).send("Campaign link not found.");
   prisma.campaign.update({ where: { id: c.id }, data: { clicks: { increment: 1 } } }).catch(() => {});
   const url = campaignRedirectUrl(c.landingUrl, {

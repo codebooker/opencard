@@ -33,7 +33,8 @@ function clientIp(req: Request): string {
 // before any tenant context exists.
 async function loadCard(slug: string, orgId: string | null) {
   return prisma.card.findFirst({
-    where: { slug, active: true, ...(orgId ? { orgId } : {}) },
+    // org.suspended gates every public surface for a suspended client.
+    where: { slug, active: true, org: { suspended: false }, ...(orgId ? { orgId } : {}) },
     include: { location: { include: { brand: true } }, template: true, dept: true },
   });
 }
@@ -50,7 +51,7 @@ cardsRouter.get("/:slug", async (req, res) => {
   if (!card) {
     // Turnover: a deactivated card can redirect scanned NFC/QR visitors onward.
     const dead = await prisma.card.findFirst({
-      where: { slug: req.params.slug, active: false, ...(orgId ? { orgId } : {}) },
+      where: { slug: req.params.slug, active: false, org: { suspended: false }, ...(orgId ? { orgId } : {}) },
       select: { redirectUrl: true },
     });
     if (dead?.redirectUrl) return res.redirect(302, dead.redirectUrl);
@@ -138,7 +139,7 @@ cardsRouter.get("/:slug/qr.png", async (req, res) => {
 cardsRouter.post("/:slug/event", async (req, res) => {
   const orgId = await hostOrg(req);
   const card = await prisma.card.findFirst({
-    where: { slug: req.params.slug, active: true, ...(orgId ? { orgId } : {}) },
+    where: { slug: req.params.slug, active: true, org: { suspended: false }, ...(orgId ? { orgId } : {}) },
     select: { id: true, orgId: true },
   });
   if (!card) return res.status(204).end();

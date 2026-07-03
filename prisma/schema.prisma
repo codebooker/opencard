@@ -12,6 +12,9 @@ model Org {
   id          String   @id @default(cuid())
   name        String
   vertical    String   @default("general")
+  // Platform-staff kill switch: blocks admin access, self-service, the API,
+  // and all public surfaces (cards, assets, campaign links) for this org.
+  suspended   Boolean  @default(false)
   // Tenant addressing. `subdomain` is the label under the platform domain
   // (e.g. "acme" -> acme.opencard.id); `customDomain` is a fully-qualified host
   // the customer points at us (e.g. cards.acmecorp.com). Both are optional and
