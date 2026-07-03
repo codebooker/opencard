@@ -56,6 +56,22 @@ Features that exist in half-state, promised in v1.0 docs, or stubbed in code:
   change (both platforms).
 - LDAP sync job: promised as v1.1 in ARCHITECTURE.md for on-prem AD shops —
   reuse the SCIM upsert logic on a schedule.
+- Directory import and sync (Azure AD / Entra). SCIM provisioning exists but
+  only covers users pushed *after* the integration is assigned; there's no
+  backfill, no JIT, and no visibility. Add:
+  - **Bulk import wizard** via Microsoft Graph: connect with the existing
+    Azure app credentials, pick groups/OUs, preview the mapped cards
+    (name/title/department/location from store codes), dry-run, then create —
+    the day-one on-ramp for an org with 500 existing employees.
+  - **SAML JIT provisioning** (opt-in per org): first SSO sign-in at /me
+    creates the card from assertion attributes instead of "no card assigned",
+    using the same mapping as SCIM.
+  - **Sync health dashboard**: per-org view of what SCIM created/updated/
+    deactivated, last-seen timestamps, orphaned cards (owner no longer in the
+    directory), and mapping conflicts — with a reconcile action.
+  - **Group → brand/location/department mapping rules** managed in the UI,
+    shared by SCIM, Graph import, JIT, and the future LDAP job so all four
+    paths provision identically.
 - Signature deployment: Google Workspace and Microsoft 365 push (Gmail API /
   Graph), so signatures roll out org-wide instead of copy/paste per employee.
 - CRM depth: the dispatcher has an explicit "provider not yet supported"
@@ -67,7 +83,8 @@ Features that exist in half-state, promised in v1.0 docs, or stubbed in code:
 ## Phase 14: Admin Experience And Growth
 
 - Bulk employee import: CSV upload with column mapping, preview, and
-  dry-run — the missing on-ramp for orgs that don't run SCIM.
+  dry-run — the on-ramp for orgs without a directory; shares the preview/
+  dry-run machinery with the Graph import wizard in Phase 13.
 - Onboarding checklist: first-run panel for a new org (create brand → add
   location → make a card → share it → capture a lead), driving activation.
 - Analytics visualization: the dashboards are all tables; add simple charts
