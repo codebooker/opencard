@@ -1,0 +1,95 @@
+# OpenCard Roadmap v1.1 — From Feature-Complete To Launch-Ready
+
+The v1.0 roadmap (Phases 0–10) is complete: multi-tenant core, billing and
+plans, SSO/SCIM/API/webhooks, the dealership product layer, lead capture and
+attribution, email signatures, CRM sync, analytics, governance/compliance,
+custom domains, wallet passes (Google), and events mode. The security pass and
+UI modernization landed on top of that.
+
+v1.1 is about a different question: **what breaks, embarrasses, or blocks us
+when real customers show up?** The phases are ordered by that risk, not by
+feature appeal. Phases 11–13 are launch gates; 14–15 are growth.
+
+## Phase 11: Account Lifecycle Basics (launch gate)
+
+The biggest functional holes are not features — they're table-stakes account
+flows every SaaS is assumed to have. Right now there is **no password reset,
+no signup email verification, and no MFA recovery**, so a locked-out owner is
+a support ticket and a typo'd signup email is a silently broken account.
+
+- Password reset: time-limited single-use token, emailed via the existing
+  SMTP path; rate-limited; audited. Works for admin accounts on all tiers.
+- Email verification on signup: unverified orgs can look around but not go
+  live (cards unpublished) until the owner confirms the address.
+- MFA recovery codes: one-time codes generated at enrollment, hashed at rest,
+  shown once — so "lost my phone" doesn't require staff intervention.
+- Session management: list active sessions per admin, revoke one/all;
+  invalidate sessions on password change and on suspension.
+- Admin invite flow: invite-by-email with a set-password link, replacing the
+  current "admin types a password for you" pattern.
+
+## Phase 12: Operations And Reliability (launch gate)
+
+Everything runs on one VM deployed by rsync from a laptop, backups are a
+documented-but-manual `pg_dump`, and nothing alerts anyone when it breaks.
+Fine for a test box; not for paying tenants.
+
+- CI: GitHub Actions running typecheck + the test suite on every push/PR.
+- CD: push-to-deploy via SSH from Actions (deploy key in repo secrets),
+  replacing double-click deploys; keep `deploy.command` as the manual fallback.
+- Automated backups: nightly `pg_dump` cron on the VM, shipped off-box
+  (object storage), retention window, and a **documented, rehearsed restore**.
+  Include the uploads volume.
+- Monitoring: uptime checks on `/healthz` for both domains, error tracking in
+  the app (Sentry or similar), disk/memory alerts on the VM.
+- Staging environment: a second compose stack (or second VM) that CI deploys
+  first; production promotes from it.
+- Performance pass: review Prisma indexes against the analytics and leads
+  queries; load-test the public card path (it's the traffic magnet).
+
+## Phase 13: Finish What's Started
+
+Features that exist in half-state, promised in v1.0 docs, or stubbed in code:
+
+- Apple Wallet: `.pkpass` packaging/signing is a 501 stub behind the cert
+  config. Finish manifest + PKCS#7 signing, and update passes when cards
+  change (both platforms).
+- LDAP sync job: promised as v1.1 in ARCHITECTURE.md for on-prem AD shops —
+  reuse the SCIM upsert logic on a schedule.
+- Signature deployment: Google Workspace and Microsoft 365 push (Gmail API /
+  Graph), so signatures roll out org-wide instead of copy/paste per employee.
+- CRM depth: the dispatcher has an explicit "provider not yet supported"
+  path — decide the next first-class provider (likely a real Salesforce API
+  integration beyond Web-to-Lead) and add Meta/Google Ads conversion hooks.
+- NFC workflow: ordering, encoding instructions, assignment and replacement
+  flows — listed in Phase 10 but never built; pairs naturally with events.
+
+## Phase 14: Admin Experience And Growth
+
+- Bulk employee import: CSV upload with column mapping, preview, and
+  dry-run — the missing on-ramp for orgs that don't run SCIM.
+- Onboarding checklist: first-run panel for a new org (create brand → add
+  location → make a card → share it → capture a lead), driving activation.
+- Analytics visualization: the dashboards are all tables; add simple charts
+  (views over time, funnel, source mix) — server-rendered SVG keeps the
+  no-framework stance.
+- Template tooling: duplicate templates, cross-brand copy, and a small
+  starter gallery so new orgs don't design from scratch.
+- API docs: publish `docs/API.md` as a real reference page, add example
+  requests, and version the API surface.
+- Notifications: lead alerts to Slack/Teams webhooks, not just email.
+
+## Phase 15: Expansion (pull, not push)
+
+Unchanged philosophy from v1.0: responsive web + wallet passes first, a mobile
+app only when field usage demands it (badge scanning, offline event capture,
+push). Revisit after Phases 11–14 with real usage data. Same for i18n — add
+when the first non-English tenant is in the pipeline, not before.
+
+## Suggested Sequence
+
+1. **11 + 12 in parallel** — different skill areas (product flows vs infra),
+   both launch gates.
+2. **13** next — mostly bounded engineering with clear definitions of done.
+3. **14** continuously after launch, prioritized by what onboarding data says.
+4. **15** only on demonstrated pull.
