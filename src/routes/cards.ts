@@ -12,6 +12,9 @@ import { assembleLead } from "../leadform";
 import { notifyLead } from "../notify";
 import { syncLeadToCrm } from "../crmsync-dispatch";
 import { orgAnalyticsHead } from "../marketing-tags";
+import { appleWalletEnabled, googleWalletEnabled } from "../config";
+import { buildGoogleGenericObject, googleSaveClaims, googleSaveUrl } from "../wallet";
+import { signGoogleJwt } from "../wallet-sign";
 import { findDuplicate } from "../leadstatus";
 
 export const cardsRouter = Router();
@@ -71,7 +74,38 @@ cardsRouter.get("/:slug", async (req, res) => {
 
   const primary = cardPrimary(card);
   const qr = await qrDataUrl(`${config.cardUrl}/c/${card.slug}`, primary);
-  res.send(renderCardPage(card, qr, config.cardUrl, parseUtm(req.query as any), await orgAnalyticsHead(card.orgId)));
+  res.send(
+    renderCardPage(card, qr, config.cardUrl, parseUtm(req.query as any), await orgAnalyticsHead(card.orgId), {
+      apple: appleWalletEnabled,
+      google: googleWalletEnabled,
+    })
+  );
+});
+
+// Save to Google Wallet: build + RS256-sign a save JWT, redirect to the save URL.
+cardsRouter.get("/:slug/wallet/google", async (req, res) => {
+  if (!googleWalletEnabled) return res.status(404).send("Google Wallet isn't configured on this instance.");
+  const card = await loadCard(req.params.slug, await hostOrg(req));
+  if (!card) return res.status(404).send("Not found");
+  const cardUrl = `${config.cardUrl}/c/${card.slug}`;
+  const obj = buildGoogleGenericObject(card, config.wallet.googleIssuerId, cardUrl);
+  const claims = googleSaveClaims(obj, { serviceEmail: config.wallet.googleServiceEmail, origins: [config.cardUrl] });
+  const jwt = signGoogleJwt(claims, config.wallet.googleServiceKey);
+  runWithOrg(card.orgId, (db) =>
+    db.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "wallet", meta: "google", ip: clientIp(req) } })
+  ).catch(() => {});
+  return res.redirect(302, googleSaveUrl(jwt));
+});
+
+// Add to Apple Wallet (.pkpass). Requires the Apple Pass Type ID cert/key/WWDR to
+// package + sign the pass; inert until those are configured.
+cardsRouter.get("/:slug/wallet/apple.pkpass", async (req, res) => {
+  if (!appleWalletEnabled) return res.status(404).send("Apple Wallet isn't configured on this instance.");
+  const card = await loadCard(req.params.slug, await hostOrg(req));
+  if (!card) return res.status(404).send("Not found");
+  // pass.json is built by buildApplePass(); .pkpass packaging (manifest + PKCS#7
+  // signature via openssl + zip) is wired once the Apple certs are provided.
+  return res.status(501).send("Apple Wallet packaging is pending certificate configuration.");
 });
 
 // vCard download (Add to Contacts)

@@ -74,7 +74,26 @@ export const config = {
     pass: process.env.SMTP_PASS || "",
     from: process.env.SMTP_FROM || "OpenCard <no-reply@opencard.id>",
   },
+  // Wallet passes (Phase 10). Optional — inert until credentials are provided.
+  wallet: {
+    // Apple Wallet: Pass Type ID + Team ID + cert/key/WWDR file paths (a signed
+    // .pkpass is only produced once these exist).
+    applePassTypeId: process.env.WALLET_APPLE_PASS_TYPE_ID || "",
+    appleTeamId: process.env.WALLET_APPLE_TEAM_ID || "",
+    appleCertPath: process.env.WALLET_APPLE_CERT_PATH || "",
+    appleKeyPath: process.env.WALLET_APPLE_KEY_PATH || "",
+    appleWwdrPath: process.env.WALLET_APPLE_WWDR_PATH || "",
+    // Google Wallet: issuer id + service-account email + private key (PEM).
+    googleIssuerId: process.env.WALLET_GOOGLE_ISSUER_ID || "",
+    googleServiceEmail: process.env.WALLET_GOOGLE_SERVICE_EMAIL || "",
+    googleServiceKey: (process.env.WALLET_GOOGLE_SERVICE_KEY || "").replace(/\\n/g, "\n"),
+  },
 };
 
 export const stripeEnabled = !!config.stripe.secretKey;
 export const mailEnabled = !!config.smtp.host;
+// Apple needs the identifiers + all three cert files; Google needs issuer + key.
+export const appleWalletEnabled =
+  !!config.wallet.applePassTypeId && !!config.wallet.appleTeamId && !!config.wallet.appleCertPath && !!config.wallet.appleKeyPath && !!config.wallet.appleWwdrPath;
+export const googleWalletEnabled =
+  !!config.wallet.googleIssuerId && !!config.wallet.googleServiceEmail && !!config.wallet.googleServiceKey;

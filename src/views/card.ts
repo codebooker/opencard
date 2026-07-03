@@ -69,7 +69,8 @@ export function renderCardPage(
   qrDataUrl: string,
   baseUrl: string,
   attribution: LeadAttribution = {},
-  analyticsHead: string = ""
+  analyticsHead: string = "",
+  wallet: { apple: boolean; google: boolean } = { apple: false, google: false }
 ): string {
   const t = theme(card);
   // Role template: which fields to hide on the public card, QR behavior.
@@ -196,6 +197,16 @@ export function renderCardPage(
   ${socialHtml}
 
   <a class="cta" href="${esc(baseUrl)}/c/${esc(card.slug)}/vcard" data-track="vcard">+ Add to Contacts</a>
+  ${
+    wallet.google
+      ? `<a class="cta secondary" href="${esc(baseUrl)}/c/${esc(card.slug)}/wallet/google" data-track="wallet">Save to Google Wallet</a>`
+      : ""
+  }
+  ${
+    wallet.apple
+      ? `<a class="cta secondary" href="${esc(baseUrl)}/c/${esc(card.slug)}/wallet/apple.pkpass" data-track="wallet">Add to Apple Wallet</a>`
+      : ""
+  }
 
   ${dealerSection}
 
