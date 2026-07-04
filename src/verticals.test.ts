@@ -43,6 +43,21 @@ test("one pack's fields never leak into another pack's choices", () => {
   assert.deepEqual(defaultLeadFieldsFor("general"), ["email", "phone", "note", "consent"]);
 });
 
+test("Stage 3 packs: all six verticals registered and behave", () => {
+  const keys = VERTICAL_PACKS.map((p) => p.key);
+  assert.deepEqual(keys, ["general", "dealership", "realestate", "homeservices", "retail", "insurance"]);
+  // shared field ownership: home services and dealership both claim serviceNeed…
+  assert.ok(leadFieldChoicesFor("homeservices").some(([k]) => k === "serviceNeed"));
+  assert.ok(leadFieldChoicesFor("dealership").some(([k]) => k === "serviceNeed"));
+  // …but it stays hidden from packs that don't
+  assert.ok(!leadFieldChoicesFor("realestate").some(([k]) => k === "serviceNeed"));
+  // and dealership-only fields never leak into home services
+  assert.ok(!leadFieldChoicesFor("homeservices").some(([k]) => k === "vehicleInterest"));
+  assert.equal(terminologyForVertical("realestate").locationSingular, "Office");
+  assert.equal(terminologyForVertical("insurance").leadPlural, "Quote requests");
+  assert.equal(packFor("retail").ctaLabels.sales, "Shop online");
+});
+
 test("CTA labels follow the pack; dealership wording stays the default", () => {
   const profile = { salesUrl: "a.com/x", serviceUrl: null, phone: "555-123-4567", website: null };
   const dealer = rooftopCtas(profile, packFor("dealership").ctaLabels);

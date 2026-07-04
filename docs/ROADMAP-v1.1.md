@@ -140,13 +140,16 @@ one pack entry (plus any new Lead columns it needs); the Business type
 dropdown, admin UI and public cards pick it up automatically. Registry
 integrity is unit-tested (verticals.test.ts).
 
-### Stage 3: New verticals on demand (pull, not push)
+### Stage 3: New verticals on demand — SHIPPED (first four)
 
-Candidates that fit the brand→location→person model with field lead capture:
-real-estate brokerages (agents/offices), home services (techs/branches),
-franchise retail, insurance agencies. Pick by actual pipeline, not appeal —
-each needs its own lead fields, integrations, and go-to-market, so treat a
-new vertical as a business decision that ships as a pack.
+Live packs: real-estate brokerages (Offices, listings/showings buttons),
+home services (Branches, quote/booking buttons, shares the service-need
+lead field with dealerships), franchise retail (Stores, shop/appointment
+buttons), insurance agencies (Offices, quote/claims buttons, "Quote
+requests" as the lead noun). All four appear in the signup Business type
+dropdown automatically. Vertical-specific lead COLUMNS (e.g. property
+interest) are still added only on real customer pull — packs currently
+draw from the shared field catalog.
 
 ## Post-launch: customer docs / knowledge base
 

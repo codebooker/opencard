@@ -27,12 +27,18 @@ export type VerticalPack = {
   defaultLeadFields: string[];
   // Labels for the location-level CTA buttons on public cards.
   ctaLabels: CtaLabels;
-  // The location editor's vertical profile section.
+  // The location editor's vertical profile section. Packs that show the two
+  // CTA URL inputs can relabel them (they map to Location.salesUrl /
+  // serviceUrl and drive the pack's sales/service card buttons).
   locationEditor: {
     heading: string;
     blurb: string;
     showOemBrands: boolean;
     showSalesServiceUrls: boolean;
+    salesUrlLabel?: string;
+    serviceUrlLabel?: string;
+    salesUrlPlaceholder?: string;
+    serviceUrlPlaceholder?: string;
   };
   // Example copy on the events page.
   eventsExamples: string;
@@ -101,6 +107,127 @@ export const VERTICAL_PACKS: VerticalPack[] = [
       showSalesServiceUrls: true,
     },
     eventsExamples: "Auto shows, tent sales, hiring events",
+  },
+  {
+    key: "realestate",
+    label: "Real estate brokerage",
+    terminology: {
+      ...COMMON_TERMS,
+      locationSingular: "Office",
+      locationPlural: "Offices",
+      locationCodeLabel: "Office code",
+      leadSingular: "Client lead",
+      leadPlural: "Client leads",
+    },
+    departments: ["Residential", "Commercial", "Rentals", "Property Management", "New Development"],
+    roleSuggestions: [
+      "Real Estate Agent",
+      "Broker",
+      "Managing Broker",
+      "Listing Specialist",
+      "Buyer's Agent",
+      "Transaction Coordinator",
+    ],
+    extraLeadFieldKeys: [],
+    defaultLeadFields: ["email", "phone", "preferredContact", "note", "consent"],
+    ctaLabels: { sales: "View listings", service: "Book a showing", call: "Call the office", site: "Visit website" },
+    locationEditor: {
+      heading: "Office profile",
+      blurb: "Shown on this office's cards as click-to-call, listings and showing buttons.",
+      showOemBrands: false,
+      showSalesServiceUrls: true,
+      salesUrlLabel: "Listings URL",
+      serviceUrlLabel: "Book-a-showing URL",
+      salesUrlPlaceholder: "acmerealty.com/listings",
+      serviceUrlPlaceholder: "acmerealty.com/schedule",
+    },
+    eventsExamples: "Open houses, broker tours, community events",
+  },
+  {
+    key: "homeservices",
+    label: "Home services (HVAC, plumbing, electrical…)",
+    terminology: {
+      ...COMMON_TERMS,
+      locationSingular: "Branch",
+      locationPlural: "Branches",
+      locationCodeLabel: "Branch code",
+      leadSingular: "Service lead",
+      leadPlural: "Service leads",
+    },
+    departments: ["HVAC", "Plumbing", "Electrical", "Roofing", "Dispatch", "Sales"],
+    roleSuggestions: ["Service Technician", "Field Supervisor", "Estimator", "Dispatcher", "Sales Representative"],
+    // Shares "serviceNeed" with the dealership pack — claimed fields appear
+    // for every pack that claims them, and stay hidden from the rest.
+    extraLeadFieldKeys: ["serviceNeed"],
+    defaultLeadFields: ["email", "phone", "serviceNeed", "appointmentRequest", "consent"],
+    ctaLabels: { sales: "Request a quote", service: "Book a service call", call: "Call us", site: "Visit website" },
+    locationEditor: {
+      heading: "Branch profile",
+      blurb: "Shown on this branch's cards as click-to-call, quote and booking buttons.",
+      showOemBrands: false,
+      showSalesServiceUrls: true,
+      salesUrlLabel: "Quote request URL",
+      serviceUrlLabel: "Booking URL",
+      salesUrlPlaceholder: "acmehvac.com/quote",
+      serviceUrlPlaceholder: "acmehvac.com/book",
+    },
+    eventsExamples: "Home shows, trade expos, community fairs",
+  },
+  {
+    key: "retail",
+    label: "Franchise retail",
+    terminology: {
+      ...COMMON_TERMS,
+      locationSingular: "Store",
+      locationPlural: "Stores",
+      locationCodeLabel: "Store code",
+      leadSingular: "Lead",
+      leadPlural: "Leads",
+    },
+    departments: ["Sales Floor", "Customer Service", "Management"],
+    roleSuggestions: ["Store Manager", "Assistant Manager", "Sales Associate", "Customer Service Lead"],
+    extraLeadFieldKeys: [],
+    defaultLeadFields: ["email", "phone", "note", "consent"],
+    ctaLabels: { sales: "Shop online", service: "Book an appointment", call: "Call the store", site: "Visit website" },
+    locationEditor: {
+      heading: "Store profile",
+      blurb: "Shown on this store's cards as click-to-call, shop and appointment buttons.",
+      showOemBrands: false,
+      showSalesServiceUrls: true,
+      salesUrlLabel: "Online shop URL",
+      serviceUrlLabel: "Appointment URL",
+      salesUrlPlaceholder: "acmestore.com/shop",
+      serviceUrlPlaceholder: "acmestore.com/book",
+    },
+    eventsExamples: "Grand openings, seasonal sales, hiring events",
+  },
+  {
+    key: "insurance",
+    label: "Insurance agency",
+    terminology: {
+      ...COMMON_TERMS,
+      locationSingular: "Office",
+      locationPlural: "Offices",
+      locationCodeLabel: "Office code",
+      leadSingular: "Quote request",
+      leadPlural: "Quote requests",
+    },
+    departments: ["Personal Lines", "Commercial Lines", "Life & Health", "Claims"],
+    roleSuggestions: ["Insurance Agent", "Agency Owner", "Producer", "Account Manager", "Claims Specialist"],
+    extraLeadFieldKeys: [],
+    defaultLeadFields: ["email", "phone", "preferredContact", "note", "consent"],
+    ctaLabels: { sales: "Get a quote", service: "File a claim", call: "Call the agency", site: "Visit website" },
+    locationEditor: {
+      heading: "Agency profile",
+      blurb: "Shown on this office's cards as click-to-call, quote and claims buttons.",
+      showOemBrands: false,
+      showSalesServiceUrls: true,
+      salesUrlLabel: "Quote URL",
+      serviceUrlLabel: "Claims URL",
+      salesUrlPlaceholder: "acmeinsurance.com/quote",
+      serviceUrlPlaceholder: "acmeinsurance.com/claims",
+    },
+    eventsExamples: "Community events, benefits fairs, open enrollment",
   },
 ];
 

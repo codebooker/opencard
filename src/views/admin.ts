@@ -1152,14 +1152,15 @@ export function locationForm(
       <div><label>Main phone</label><input name="phone" value="${esc(l.phone)}" placeholder="(555) 123-4567" /></div>
       <div><label>Website</label><input name="website" value="${esc(l.website)}" placeholder="acme.com" /></div>
     </div>
-    ${
-      packFor(t.vertical).locationEditor.showSalesServiceUrls
+    ${(() => {
+      const le = packFor(t.vertical).locationEditor;
+      return le.showSalesServiceUrls
         ? `<div class="grid2">
-      <div><label>Sales URL</label><input name="salesUrl" value="${esc(l.salesUrl)}" placeholder="acmeford.com/inventory" /></div>
-      <div><label>Service URL</label><input name="serviceUrl" value="${esc(l.serviceUrl)}" placeholder="acmeford.com/service" /></div>
+      <div><label>${esc(le.salesUrlLabel || "Sales URL")}</label><input name="salesUrl" value="${esc(l.salesUrl)}" placeholder="${esc(le.salesUrlPlaceholder || "acmeford.com/inventory")}" /></div>
+      <div><label>${esc(le.serviceUrlLabel || "Service URL")}</label><input name="serviceUrl" value="${esc(l.serviceUrl)}" placeholder="${esc(le.serviceUrlPlaceholder || "acmeford.com/service")}" /></div>
     </div>`
-        : ""
-    }
+        : "";
+    })()}
     <label>Timezone</label>
     <select name="timezone"><option value="">(none)</option>${DEALERSHIP_TIMEZONES.map(
       (tz) => `<option ${l.timezone === tz ? "selected" : ""}>${esc(tz)}</option>`
