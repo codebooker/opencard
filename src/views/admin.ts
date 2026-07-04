@@ -1815,7 +1815,7 @@ export function importView(d: {
           <button class="btn" type="submit" name="source" value="all">Preview all directory users</button>
         </div>
         <div>
-          <label>…or one group <span class="muted">(search by name)</span></label>
+          <label>…or one group <span class="muted">(matches any word in the group name)</span></label>
           <div style="display:flex;gap:8px">
             <input name="groupQuery" value="${esc(d.groupQuery || "")}" placeholder="e.g. Sales Team" style="flex:1" />
             <button class="btn secondary" type="submit" name="source" value="groupsearch">Search</button>

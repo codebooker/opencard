@@ -80,8 +80,11 @@ export async function listDirectoryUsers(groupId?: string): Promise<any[]> {
 }
 
 export async function searchGroups(q: string): Promise<{ id: string; displayName: string }[]> {
-  const safe = q.replace(/'/g, "''").slice(0, 60);
-  const json = await graphGet(`/groups?$filter=startswith(displayName,'${encodeURIComponent(safe)}')&$select=id,displayName&$top=25`);
+  // $search matches any WORD in the group name (prefix per token), unlike a
+  // startswith filter — "IT" finds "Tawes IT Team". Requires the
+  // ConsistencyLevel: eventual header, which graphGet always sends.
+  const safe = q.replace(/["\\]/g, "").slice(0, 60);
+  const json = await graphGet(`/groups?$search=${encodeURIComponent(`"displayName:${safe}"`)}&$select=id,displayName&$top=25`);
   return (json.value || []).map((g: any) => ({ id: g.id, displayName: g.displayName }));
 }
 
