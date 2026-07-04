@@ -1,10 +1,9 @@
 name: Deploy
 
-# Push-to-deploy for the production VM. Change the branch to `main` when the
-# repo's default branch changes at launch.
+# Push-to-deploy for the production VM.
 on:
   push:
-    branches: [dealership-vertical]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches-ignore: [dealership-vertical] # deploy.yml runs CI for this branch
+    branches-ignore: [main] # deploy.yml runs CI for main
   pull_request:
   workflow_call:
 
