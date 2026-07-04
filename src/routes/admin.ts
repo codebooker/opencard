@@ -434,9 +434,11 @@ adminRouter.get("/platform", async (req, res) => {
 async function importCtx(req: any) {
   const p = reqAdmin(req);
   const t = await currentTerminology(p.orgId);
-  const resolved = await credsForOrg(p.orgId, p.platform);
+  // Org-level credentials ONLY — no platform/env fallback (a staff fallback
+  // once leaked the platform's directory into every client workspace).
+  const resolved = await credsForOrg(p.orgId);
   const summary = await directoryConfigSummary(p.orgId);
-  return { p, t, resolved, config: summary ? { ...summary, source: "org" as const } : resolved ? { tenantId: "", clientId: "", source: "env" as const } : null };
+  return { p, t, resolved, config: summary ? { ...summary, source: "org" as const } : null };
 }
 
 adminRouter.get("/import", async (req, res) => {
@@ -457,7 +459,7 @@ adminRouter.post("/import/config", async (req, res) => {
   try {
     if (!tenantId || !clientId) throw new Error("Directory (tenant) ID and Application (client) ID are required.");
     await saveDirectoryConfig(p.orgId, { tenantId, clientId, clientSecret });
-    const resolved = await credsForOrg(p.orgId, false);
+    const resolved = await credsForOrg(p.orgId);
     const test = resolved ? await testGraphCreds(resolved.creds) : { ok: false as const, message: "Saved, but the secret could not be read back." };
     audit(req, p, "import.config", { summary: `Azure directory connection ${test.ok ? "verified" : "saved (test failed)"}` });
     res.send(

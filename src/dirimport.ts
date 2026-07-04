@@ -1,4 +1,3 @@
-import { config } from "./config";
 import { prisma, runWithOrg } from "./db";
 import { uniqueSlug } from "./slug";
 import { emitEvent, cardPayload } from "./webhooks";
@@ -13,23 +12,17 @@ import * as secretbox from "./secretbox";
 
 export type GraphCreds = { tenantId: string; clientId: string; clientSecret: string };
 
-function envGraphCreds(): GraphCreds | null {
-  const { tenantId, clientId, clientSecret } = config.azure;
-  return tenantId && clientId && clientSecret ? { tenantId, clientId, clientSecret } : null;
-}
-
-// Resolve the credentials to use for an org: the org's own self-service config
-// first; the platform-level env credentials ONLY for OpenCard staff (so one
-// tenant can never import from the platform's directory by omission).
-export async function credsForOrg(orgId: string, isPlatformStaff: boolean): Promise<{ creds: GraphCreds; source: "org" | "env" } | null> {
+// STRICTLY the org's own self-service config — no fallback of any kind. An
+// earlier revision fell back to platform env credentials for staff, which
+// surfaced the PLATFORM's directory inside every client workspace a staff
+// member opened. Directory data is tenant data: each org connects its own
+// Azure app on the Import page, or the wizard stays unconfigured.
+export async function credsForOrg(orgId: string): Promise<{ creds: GraphCreds; source: "org" } | null> {
   const row = await prisma.directoryConfig.findUnique({ where: { orgId } });
-  if (row) {
-    const secret = secretbox.open(row.clientSecret);
-    if (secret) return { creds: { tenantId: row.tenantId, clientId: row.clientId, clientSecret: secret }, source: "org" };
-  }
-  const env = envGraphCreds();
-  if (env && isPlatformStaff) return { creds: env, source: "env" };
-  return null;
+  if (!row) return null;
+  const secret = secretbox.open(row.clientSecret);
+  if (!secret) return null;
+  return { creds: { tenantId: row.tenantId, clientId: row.clientId, clientSecret: secret }, source: "org" };
 }
 
 // Public shape for the settings form (never includes the secret).

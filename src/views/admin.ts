@@ -1784,7 +1784,7 @@ export function billingView(d: {
 export function importView(d: {
   configured: boolean;
   t: Terminology;
-  config?: { tenantId: string; clientId: string; source: "org" | "env" } | null;
+  config?: { tenantId: string; clientId: string; source: "org" } | null;
   showSettings?: boolean;
   testResult?: string | null;
   groups?: { id: string; displayName: string }[];
@@ -1837,11 +1837,7 @@ export function importView(d: {
     }
   </section>`;
   const connectedLine = d.configured
-    ? `<p class="muted" style="margin:0 0 14px">${
-        d.config?.source === "org"
-          ? `Connected to Azure tenant <code>${esc(d.config.tenantId)}</code> · <a href="/admin/import?settings=1">Update connection</a>`
-          : `Using this server's platform test credentials (OpenCard staff only) · <a href="/admin/import?settings=1">Connect this workspace's own directory</a>`
-      }</p>`
+    ? `<p class="muted" style="margin:0 0 14px">Connected to Azure tenant <code>${esc(d.config?.tenantId || "")}</code> · <a href="/admin/import?settings=1">Update connection</a></p>`
     : "";
   const picker = `
   <section class="panel">
