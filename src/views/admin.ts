@@ -28,6 +28,7 @@ import {
 import { HIDEABLE_FIELDS, SIGNATURE_TOKENS, ROLE_SUGGESTIONS, asStringArray } from "../roletemplate";
 import { ASSET_TYPES, ASSET_DEST_TYPES, assetTypeLabel } from "../assets";
 import { LEAD_FIELDS, DEFAULT_LEAD_FIELDS, leadFieldChoicesFor, defaultLeadFieldsFor } from "../leadform";
+import { CSV_TARGETS } from "../csvimport";
 import { campaignRoutingToLines } from "../routing";
 import { LEAD_STATUSES, STATUS_LABELS, nextStatuses } from "../leadstatus";
 import { SIGNATURE_THEMES, SIGNATURE_ELEMENTS, asLockList, SignatureTheme } from "../signature";
@@ -1930,7 +1931,7 @@ export function importView(d: {
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>Import from Azure AD</h2>
-      <p class="muted" style="margin:0">Backfill your existing team into ${esc(lower(t.cardPlural))} — SCIM keeps future hires in sync automatically.</p>
+      <p class="muted" style="margin:0">Backfill your existing team into ${esc(lower(t.cardPlural))} — SCIM keeps future hires in sync automatically. No Azure? <a href="/admin/import/csv">Import from a spreadsheet</a> instead.</p>
     </div>
   </div>
   ${d.result ? `<p class="auth-banner" style="max-width:none">Import complete: ${d.result.created} created, ${d.result.skipped} skipped.</p>` : ""}
@@ -1941,6 +1942,125 @@ export function importView(d: {
   return shell("Import from Azure AD", body);
 }
 
+// CSV employee import (Phase 14): upload -> map columns -> preview -> pick who
+// comes in. Mirrors the Graph wizard's preview/selection UX.
+export function importCsvView(d: {
+  t: Terminology;
+  stage?: {
+    headers: string[];
+    mapping: string[];
+    data: string[][];
+    csvB64: string;
+    plan: any[] | null;
+    skippedNoEmail: number;
+  } | null;
+  result?: { created: number; skipped: number } | null;
+  error?: string | null;
+}): string {
+  const t = d.t;
+  const statusPill = (s: string) =>
+    s === "create" ? `<span class="pill on">will create</span>` : `<span class="pill">already here</span>`;
+  const upload = `
+  <section class="panel">
+    <h3>Upload a spreadsheet</h3>
+    <p class="muted">A CSV export from Excel, Google Sheets or your HR system — one row per person, with a header row. Needs at least an email column; name, title, department, phones and ${esc(lower(t.locationSingular))} are picked up when present. Nothing is created until you confirm the preview.</p>
+    <form class="editor" method="POST" action="/admin/import/csv/preview" enctype="multipart/form-data" style="max-width:560px">
+      <input type="file" name="csvFile" accept=".csv,text/csv" required />
+      <div class="actions" style="margin-top:12px"><button class="btn" type="submit">Upload &amp; preview</button></div>
+    </form>
+  </section>`;
+  const stage = d.stage;
+  const mappingPanel = stage
+    ? `
+  <section class="panel">
+    <h3>Column mapping</h3>
+    <p class="muted">We guessed from your headers — fix anything that's wrong and hit Re-preview. Columns set to "ignore" are simply skipped.${
+      stage.skippedNoEmail ? ` <strong>${stage.skippedNoEmail} row${stage.skippedNoEmail === 1 ? "" : "s"} without a valid email will be skipped.</strong>` : ""
+    }</p>
+    <form method="POST" action="/admin/import/csv/preview" id="mapForm">
+      <input type="hidden" name="csvData" value="${esc(stage.csvB64)}" />
+      <table class="rsp">
+        <tr><th>Your column</th><th>Example values</th><th>Maps to</th></tr>
+        ${stage.headers
+          .map(
+            (h, i) => `<tr>
+          <td><strong>${esc(h)}</strong></td>
+          <td data-label="Examples" class="muted" style="font-size:12px">${esc(
+            stage.data.slice(0, 3).map((r) => r[i] || "").filter(Boolean).join(" · ").slice(0, 60)
+          )}</td>
+          <td data-label="Maps to"><select name="map">${CSV_TARGETS.map(
+            ([v, label]) => `<option value="${esc(v)}" ${stage.mapping[i] === v ? "selected" : ""}>${esc(label)}</option>`
+          ).join("")}</select></td>
+        </tr>`
+          )
+          .join("")}
+      </table>
+      <div class="actions" style="margin-top:12px"><button class="btn secondary" type="submit">Re-preview with this mapping</button></div>
+    </form>
+  </section>`
+    : "";
+  const creatable = stage?.plan ? stage.plan.filter((r: any) => r.status === "create") : [];
+  const planPanel =
+    stage && stage.plan
+      ? `
+  <section class="panel">
+    <h3>Preview — ${stage.plan.length} ${stage.plan.length === 1 ? "person" : "people"}</h3>
+    <p class="muted">${creatable.length} can be created · ${stage.plan.length - creatable.length} already exist (always skipped). Tick who to import — each new person gets a ${esc(
+          lower(t.cardSingular)
+        )} and self-service access via their email.</p>
+    <form method="POST" action="/admin/import/csv/apply" onsubmit="return confirm('Create ' + document.querySelectorAll('.selbox:checked').length + ' ${esc(lower(t.cardPlural))} now?')">
+      <input type="hidden" name="csvData" value="${esc(stage.csvB64)}" />
+      ${stage.mapping.map((m) => `<input type="hidden" name="map" value="${esc(m)}" />`).join("")}
+      ${
+        creatable.length
+          ? `<p class="muted" style="margin:0 0 8px"><a href="#" onclick="document.querySelectorAll('.selbox').forEach(c=>c.checked=true);selCount();return false">Select all</a> · <a href="#" onclick="document.querySelectorAll('.selbox').forEach(c=>c.checked=false);selCount();return false">Select none</a></p>`
+          : ""
+      }
+      <table class="rsp">
+        <tr><th></th><th>Person</th><th>Email</th><th>Title</th><th>Department</th><th>${esc(t.locationSingular)}</th><th>Status</th></tr>
+        ${stage.plan
+          .slice(0, 200)
+          .map(
+            (r: any) => `<tr>
+          <td data-label="Import">${
+            r.status === "create" ? `<input type="checkbox" class="selbox" name="sel" value="${esc(r.email)}" checked onchange="selCount()" />` : ""
+          }</td>
+          <td>${esc(`${r.firstName} ${r.lastName}`.trim())}</td>
+          <td data-label="Email" class="muted" style="font-size:12px">${esc(r.email)}</td>
+          <td data-label="Title" class="muted">${esc(r.title || "—")}</td>
+          <td data-label="Dept" class="muted">${esc(r.department || "—")}</td>
+          <td data-label="${esc(t.locationSingular)}">${r.location ? esc(r.location.name) : `<span class="pill off">no ${esc(lower(t.locationSingular))}!</span>`}</td>
+          <td data-label="Status">${statusPill(r.status)}</td>
+        </tr>`
+          )
+          .join("")}
+      </table>
+      ${stage.plan.length > 200 ? `<p class="muted">Showing the first 200 of ${stage.plan.length}.</p>` : ""}
+      ${
+        creatable.length
+          ? `<div class="actions" style="margin-top:14px"><button class="btn" type="submit" id="applyBtn">Import ${creatable.length} selected</button></div>`
+          : `<p class="muted" style="margin-top:14px">Nothing new to import from this file.</p>`
+      }
+    </form>
+    <script>
+      function selCount(){var n=document.querySelectorAll('.selbox:checked').length;var b=document.getElementById('applyBtn');if(b){b.textContent='Import '+n+' selected';b.disabled=n===0;}}
+    </script>
+  </section>`
+      : "";
+  const body = `
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>Import from a spreadsheet</h2>
+      <p class="muted" style="margin:0">Backfill your team from a CSV — no directory required. Have Azure AD? The <a href="/admin/import">Azure import</a> maps everything automatically.</p>
+    </div>
+  </div>
+  ${d.result ? `<p class="auth-banner" style="max-width:none">Import complete: ${d.result.created} created, ${d.result.skipped} skipped.</p>` : ""}
+  ${d.error ? `<p class="auth-error" style="max-width:none">${esc(d.error)}</p>` : ""}
+  ${stage ? mappingPanel + planPanel : d.result ? "" : upload}`;
+  return shell("Import from a spreadsheet", body);
+}
+
 // Sync health (Phase 13): what SCIM / import / JIT created, and drift between
 // the directory and active cards.
 export function syncView(d: {
@@ -1948,6 +2068,7 @@ export function syncView(d: {
   overview: {
     scim: { count: number; last: Date | null };
     imported: { count: number; last: Date | null };
+    csv: { count: number; last: Date | null };
     jit: { count: number; last: Date | null };
     manual: { count: number; last: Date | null };
     scimTokenSet: boolean;
@@ -2007,6 +2128,7 @@ export function syncView(d: {
       <tr><th>Source</th><th>People</th><th>Last created</th><th></th></tr>
       ${srcRow("SCIM (automatic)", o.scim, o.scimTokenSet ? "token configured" : "no SCIM token set")}
       ${srcRow("Azure import wizard", o.imported, o.dirConfigured ? "directory connected" : "directory not connected")}
+      ${srcRow("Spreadsheet import (CSV)", o.csv, "")}
       ${srcRow("SSO first sign-in (JIT)", o.jit, "enable on the Integrations page")}
       ${srcRow("Created by admins", o.manual, "")}
     </table>

@@ -204,6 +204,11 @@ export type PlanRow = ImportCandidate & {
 // Build the preview: what would happen for each directory user.
 export async function planImport(orgId: string, rawUsers: any[], fallbackLocationId?: string): Promise<PlanRow[]> {
   const candidates = rawUsers.map(mapGraphUser).filter((c): c is ImportCandidate => !!c);
+  return planCandidates(orgId, candidates, fallbackLocationId);
+}
+
+// Source-agnostic core (Graph wizard and CSV import both land here).
+export async function planCandidates(orgId: string, candidates: ImportCandidate[], fallbackLocationId?: string): Promise<PlanRow[]> {
   const emails = candidates.map((c) => c.email);
   const existingUsers = await prisma.user.findMany({ where: { orgId, email: { in: emails } }, select: { email: true } });
   const existingCards = await prisma.card.findMany({
@@ -234,8 +239,9 @@ export function onlySelected(rows: PlanRow[], selected: string[]): PlanRow[] {
 }
 
 // Create User + Card pairs for every "create" row — identical shape to SCIM
-// provisioning, so both paths produce the same records.
-export async function applyImport(orgId: string, rows: PlanRow[]): Promise<{ created: number; skipped: number }> {
+// provisioning, so all paths produce the same records. `source` tags
+// User.provisionedBy for the sync health dashboard ("import" | "csv").
+export async function applyImport(orgId: string, rows: PlanRow[], source: "import" | "csv" = "import"): Promise<{ created: number; skipped: number }> {
   let created = 0;
   let skipped = 0;
   for (const row of rows) {
@@ -251,7 +257,7 @@ export async function applyImport(orgId: string, rows: PlanRow[]): Promise<{ cre
           orgId,
           email: row.email,
           displayName: `${row.firstName} ${row.lastName}`.trim(),
-          provisionedBy: "import",
+          provisionedBy: source,
           active: true,
           card: {
             create: {

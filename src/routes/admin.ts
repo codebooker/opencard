@@ -71,7 +71,10 @@ import {
   applyImport,
   onlySelected,
   mapGraphUser,
+  planCandidates,
 } from "../dirimport";
+import { parseCsv, guessMapping, mapCsvRow, CsvTarget } from "../csvimport";
+import multer from "multer";
 import { runWithOrg } from "../db";
 import { uploadDir } from "../upload";
 import { isVertical } from "../terminology";
@@ -548,6 +551,78 @@ adminRouter.post("/import/apply", async (req, res) => {
   }
 });
 
+// ---------- CSV employee import (Phase 14) ----------
+// Same preview/selective-apply flow as the Graph wizard, fed by a spreadsheet.
+// Stateless: the parsed CSV travels between steps as a base64 hidden field
+// (capped at 1 MB / 2000 rows), so nothing is stored until Apply.
+
+const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1024 * 1024 } });
+const CSV_ROW_CAP = 2000;
+
+function csvStage(csvText: string, mappingIn?: string[]) {
+  const rows = parseCsv(csvText);
+  if (rows.length < 2) throw new Error("That file needs a header row plus at least one data row.");
+  const headers = rows[0];
+  const mapping = (
+    mappingIn && mappingIn.length === headers.length ? mappingIn : guessMapping(headers)
+  ) as CsvTarget[];
+  const data = rows.slice(1, 1 + CSV_ROW_CAP);
+  const candidates = data.map((r) => mapCsvRow(mapping, r)).filter((c): c is NonNullable<ReturnType<typeof mapCsvRow>> => !!c);
+  return { headers, mapping, data, candidates, skippedNoEmail: data.length - candidates.length };
+}
+
+adminRouter.get("/import/csv", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.super) return forbidden(res);
+  res.send(V.importCsvView({ t: await currentTerminology(p.orgId) }));
+});
+
+adminRouter.post("/import/csv/preview", csvUpload.single("csvFile"), async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.super) return forbidden(res);
+  const t = await currentTerminology(p.orgId);
+  try {
+    const csvText = (req as any).file
+      ? (req as any).file.buffer.toString("utf8")
+      : Buffer.from(String(req.body?.csvData || ""), "base64").toString("utf8");
+    if (!csvText.trim()) throw new Error("Choose a CSV file to upload.");
+    const mappingIn = Array.isArray(req.body?.map) ? req.body.map.map(String) : undefined;
+    const stage = csvStage(csvText, mappingIn);
+    if (!stage.mapping.includes("email"))
+      return res.send(
+        V.importCsvView({
+          t,
+          stage: { ...stage, csvB64: Buffer.from(csvText).toString("base64"), plan: null },
+          error: "Map one column to Email — it's how existing people are recognized and skipped.",
+        })
+      );
+    const plan = await planCandidates(p.orgId, stage.candidates);
+    res.send(V.importCsvView({ t, stage: { ...stage, csvB64: Buffer.from(csvText).toString("base64"), plan } }));
+  } catch (e: any) {
+    res.send(V.importCsvView({ t, error: String(e?.message || e).slice(0, 400) }));
+  }
+});
+
+adminRouter.post("/import/csv/apply", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.super) return forbidden(res);
+  const t = await currentTerminology(p.orgId);
+  try {
+    const csvText = Buffer.from(String(req.body?.csvData || ""), "base64").toString("utf8");
+    const mappingIn = Array.isArray(req.body?.map) ? req.body.map.map(String) : undefined;
+    const selRaw = req.body?.sel;
+    const selected = (Array.isArray(selRaw) ? selRaw : selRaw ? [selRaw] : []).map((s: any) => String(s)).slice(0, CSV_ROW_CAP);
+    if (!selected.length) throw new Error("Nobody is selected — tick at least one person in the preview.");
+    const stage = csvStage(csvText, mappingIn);
+    const rows = onlySelected(await planCandidates(p.orgId, stage.candidates), selected);
+    const result = await applyImport(p.orgId, rows, "csv");
+    audit(req, p, "import.csv", { summary: `${result.created} created, ${result.skipped} skipped (${selected.length} selected)` });
+    res.send(V.importCsvView({ t, result }));
+  } catch (e: any) {
+    res.send(V.importCsvView({ t, error: String(e?.message || e).slice(0, 400) }));
+  }
+});
+
 // ---------- sync health (Phase 13): what the directory paths created ----------
 
 async function syncOverview(orgId: string) {
@@ -566,6 +641,7 @@ async function syncOverview(orgId: string) {
   return {
     scim: row("scim"),
     imported: row("import"),
+    csv: row("csv"),
     jit: row("jit"),
     manual: row(null),
     scimTokenSet: !!org?.scimTokenHash,
