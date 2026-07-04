@@ -2294,8 +2294,8 @@ export function integrationsView(data: {
   </div>
   ${
     data.samlHost
-      ? `<details style="margin:0 0 12px">
-    <summary style="cursor:pointer;font-weight:600">Setup instructions (Entra / Okta)</summary>
+      ? `<details style="margin:0 0 12px;padding:10px 14px;background:var(--wash-2, #f8fafc);border:1px solid var(--line, #e5e7eb);border-radius:10px">
+    <summary style="cursor:pointer;font-weight:600;color:var(--accent, #1F5BEA)">Setup instructions (Entra / Okta) — click to expand</summary>
     <p class="muted" style="margin-top:8px">
     1. Create a SAML app in your IdP.<br>
     &nbsp;&nbsp;&nbsp;<strong>Microsoft Entra:</strong> portal.azure.com → <strong>Microsoft Entra ID</strong> → <strong>Enterprise applications</strong> → <strong>New application</strong> → <strong>Create your own application</strong> → "Integrate any other application you don't find in the gallery" → then <strong>Single sign-on → SAML</strong>.<br>
