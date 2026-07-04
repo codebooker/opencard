@@ -205,7 +205,7 @@ signupRouter.post("/", async (req, res) => {
   if (await prisma.adminUser.findUnique({ where: { email } })) {
     return res.status(409).send(signupPage({ values, error: "An account with that email already exists. Try signing in." }));
   }
-  await createTenant({ email, ...values, password, verified: true }); // can't gate on mail that can't send
+  await createTenant({ ...values, email, password, verified: true }); // can't gate on mail that can't send
   res.redirect("/admin/login?welcome=1");
 });
 
