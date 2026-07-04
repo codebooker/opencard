@@ -415,3 +415,82 @@ export function tplPickScript(): string {
 export function editorScripts(): string {
   return `<script>${cropperScript()}</script><script>${socialsScript()}</script><script>${labeledRowsScript()}</script><script>${tplPickScript()}</script>`;
 }
+
+// Live card preview for the CARD editor: rebuilds the /preview/card?live=1
+// iframe from the form's current state as the admin types. Design comes from
+// the selected template's data-* attributes, falling back to the brand/store
+// default embedded on the rail, plus any per-card overrides.
+export function cardLivePreviewScript(): string {
+  return `(function(){
+    var rail=document.getElementById('card-live-rail'); if(!rail) return;
+    var iframe=document.getElementById('card-live-preview');
+    var form=document.querySelector('form.editor'); if(!form||!iframe) return;
+    var base={}; try{ base=JSON.parse(rail.getAttribute('data-base')||'{}'); }catch(_){}
+    var photoObjUrl=null;
+    var photoInput=document.getElementById('photoFile');
+    if(photoInput){ photoInput.addEventListener('change', function(){
+      var f=photoInput.files&&photoInput.files[0];
+      if(f){ if(photoObjUrl) try{URL.revokeObjectURL(photoObjUrl);}catch(_){ } photoObjUrl=URL.createObjectURL(f); schedule(); }
+    }); }
+    function val(name){ var el=form.querySelector('[name="'+name+'"]'); return el?el.value.trim():''; }
+    function rows(container){
+      var out=[]; var list=document.querySelectorAll('.labeled-rows[data-name="'+container+'"] .lr-row');
+      for(var i=0;i<list.length&&i<4;i++){
+        var v=list[i].querySelector('.lr-value'); var l=list[i].querySelector('.lr-label');
+        if(v&&v.value.trim()) out.push({label:l?l.value:'',value:v.value.trim()});
+      }
+      return out;
+    }
+    function socials(){
+      var out=[]; var list=document.querySelectorAll('#socials-rows .social-row');
+      for(var i=0;i<list.length&&i<8;i++){
+        var t=list[i].querySelector('.social-type'); var u=list[i].querySelector('.social-url');
+        if(t&&u&&u.value.trim()) out.push({type:t.value,value:u.value.trim()});
+      }
+      return out;
+    }
+    function design(){
+      var d={layout:base.layout||'classic',primary:base.primary||'#1f6f43',text:base.text||'#111827',bg:base.bg||'#ffffff',font:base.font||'system',logo:base.logo||''};
+      var sel=form.querySelector('input[name=templateId]:checked');
+      if(sel&&sel.getAttribute('data-primary')){
+        d.layout=sel.getAttribute('data-layout')||d.layout;
+        d.primary=sel.getAttribute('data-primary')||d.primary;
+        d.text=sel.getAttribute('data-text')||d.text;
+        d.bg=sel.getAttribute('data-bg')||d.bg;
+        d.font=sel.getAttribute('data-font')||d.font;
+      }
+      var lo=val('layout'); if(lo) d.layout=lo;
+      var po=val('primaryColor'); if(/^#[0-9a-fA-F]{3,8}$/.test(po)) d.primary=po;
+      return d;
+    }
+    function build(){
+      var d=design();
+      var dept='';
+      var deptSel=form.querySelector('select[name=departmentId]');
+      if(deptSel&&deptSel.value){ dept=deptSel.options[deptSel.selectedIndex].text; } else { dept=val('department'); }
+      var photo=photoObjUrl||val('photoUrl');
+      var p='/preview/card?live=1'
+        +'&layout='+encodeURIComponent(d.layout)+'&primary='+encodeURIComponent(d.primary)
+        +'&text='+encodeURIComponent(d.text)+'&bg='+encodeURIComponent(d.bg)+'&font='+encodeURIComponent(d.font)
+        +(d.logo?'&logo='+encodeURIComponent(d.logo):'')
+        +(photo?'&photo='+encodeURIComponent(photo):'')
+        +'&name='+encodeURIComponent((val('firstName')+' '+val('lastName')).trim())
+        +'&pronouns='+encodeURIComponent(val('pronouns'))
+        +'&title='+encodeURIComponent(val('title'))
+        +'&department='+encodeURIComponent(dept)
+        +'&company='+encodeURIComponent(val('company'))
+        +'&bio='+encodeURIComponent(val('bio'))
+        +'&phones='+encodeURIComponent(JSON.stringify(rows('phones')))
+        +'&emails='+encodeURIComponent(JSON.stringify(rows('emails')))
+        +'&websites='+encodeURIComponent(JSON.stringify(rows('websites')))
+        +'&socials='+encodeURIComponent(JSON.stringify(socials()))
+        +'&qr=0';
+      return p;
+    }
+    var t=null;
+    function schedule(){ if(t) clearTimeout(t); t=setTimeout(function(){ iframe.src=build(); },350); }
+    form.addEventListener('input', schedule);
+    form.addEventListener('change', schedule);
+    iframe.src=build();
+  })();`;
+}

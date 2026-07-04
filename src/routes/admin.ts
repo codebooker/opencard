@@ -1714,6 +1714,20 @@ function brandFields(brand: { selfEditFields: unknown } | null): string[] | unde
   return brand && Array.isArray(brand.selfEditFields) ? (brand.selfEditFields as string[]) : undefined;
 }
 
+// Effective design a card inherits with no template: location overrides, then
+// brand. Feeds the card editor's live preview as its starting point.
+function baseDesign(loc: any) {
+  const b = loc.brand;
+  return {
+    layout: loc.layout || b.layout || "classic",
+    primary: loc.primaryColor || b.primaryColor || "#1f6f43",
+    text: b.textColor || "#111827",
+    bg: b.bgColor || "#ffffff",
+    font: b.font || "system",
+    logo: loc.logoUrl || b.logoUrl || "",
+  };
+}
+
 adminRouter.get("/cards/new", async (req, res) => {
   const t = await currentTerminology(reqAdmin(req).orgId);
   const locationId = String(req.query.locationId || "");
@@ -1725,7 +1739,9 @@ adminRouter.get("/cards/new", async (req, res) => {
   if (!loc) return res.status(404).send(`${t.locationSingular} not found`);
   const templates = await prisma.template.findMany({ where: { brandId: loc.brandId } });
   const departments = await prisma.department.findMany({ where: { locationId }, orderBy: { name: "asc" } });
-  res.send(V.cardForm({ locationId, templates, departments, brandSelfFields: brandFields(loc.brand), terminology: t }));
+  res.send(
+    V.cardForm({ locationId, templates, departments, brandSelfFields: brandFields(loc.brand), terminology: t, baseDesign: baseDesign(loc) })
+  );
 });
 
 adminRouter.get("/cards/:id/edit", async (req, res) => {
@@ -1749,6 +1765,7 @@ adminRouter.get("/cards/:id/edit", async (req, res) => {
       departments,
       brandSelfFields: brandFields(card.location.brand),
       terminology: t,
+      baseDesign: baseDesign(card.location),
     })
   );
 });

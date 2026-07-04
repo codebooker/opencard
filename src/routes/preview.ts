@@ -8,8 +8,25 @@ import { CARD_LAYOUTS } from "../layouts";
 export const previewRouter = Router();
 
 const isHex = (s: string) => /^#[0-9a-fA-F]{3,8}$/.test(s);
-const isImg = (s: string) => /^https:\/\//.test(s) || /^\/uploads\//.test(s);
+// blob: is allowed so the card editor's live preview can show a just-picked
+// photo before upload — blob URLs only resolve same-origin, grant nothing
+// remote, and are attribute-escaped like everything else.
+const isImg = (s: string) => /^https:\/\//.test(s) || /^\/uploads\//.test(s) || /^blob:https?:\/\//.test(s);
 const LAYOUTS: readonly string[] = CARD_LAYOUTS;
+
+// Parse a JSON list param of {label,value} (or {type,value}) pairs, hard-capped.
+function pairList(raw: unknown, keyA: string, keyB: string, cap = 4): any[] {
+  try {
+    const arr = JSON.parse(String(raw || "[]"));
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .slice(0, cap)
+      .map((x: any) => ({ [keyA]: String(x?.[keyA] || "").slice(0, 40), [keyB]: String(x?.[keyB] || "").slice(0, 120) }))
+      .filter((x: any) => x[keyB]);
+  } catch {
+    return [];
+  }
+}
 
 // Renders a sample card styled by the query design params. Used as a live
 // preview iframe in the brand/template/card design editors. No DB access.
@@ -23,26 +40,34 @@ previewRouter.get("/card", async (req, res) => {
   const logo = isImg(String(q.logo)) ? String(q.logo) : null;
   const photo = isImg(String(q.photo)) ? String(q.photo) : null;
   const showQr = String(q.qr) !== "0";
-  const name = (q.name ? String(q.name) : "Jordan Avery").slice(0, 60);
+  // live=1: the card editor's live preview. Every content field comes from
+  // the form (empty stays empty). Without it, the design editors get the
+  // usual fully-populated sample person.
+  const live = String(q.live) === "1";
+  const str = (v: unknown, fallback: string, max = 60) => (live ? String(v || "").slice(0, max) : v ? String(v).slice(0, max) : fallback);
+  const name = str(q.name, "Jordan Avery") || "Your Name";
   const [firstName, ...rest] = name.split(" ");
-  const lastName = rest.join(" ") || "Avery";
-  const title = (q.title ? String(q.title) : "Sales Director").slice(0, 60);
-  const company = (q.company ? String(q.company) : "Acme Co.").slice(0, 60);
+  const lastName = rest.join(" ") || (live ? "" : "Avery");
+  const title = str(q.title, "Sales Director");
+  const company = str(q.company, "Acme Co.");
+  const pronouns = str(q.pronouns, "she/her", 30) || null;
+  const bio = str(q.bio, "Helping customers succeed, one connection at a time.", 300) || null;
+  const department = live ? String(q.department || "").slice(0, 60) || null : null;
 
   const sample: any = {
     prefix: null,
     firstName,
     lastName,
-    pronouns: "she/her",
-    title,
-    department: null,
-    company,
-    bio: "Helping customers succeed, one connection at a time.",
+    pronouns,
+    title: title || null,
+    department,
+    company: company || null,
+    bio,
     photoUrl: photo,
-    phones: [{ label: "Work", value: "+1 555 123 4567" }],
-    emails: [{ label: "Work", value: "hello@example.com" }],
-    websites: [{ label: "Website", value: "https://example.com" }],
-    socials: [{ type: "linkedin", value: "https://linkedin.com" }],
+    phones: live ? pairList(q.phones, "label", "value") : [{ label: "Work", value: "+1 555 123 4567" }],
+    emails: live ? pairList(q.emails, "label", "value") : [{ label: "Work", value: "hello@example.com" }],
+    websites: live ? pairList(q.websites, "label", "value") : [{ label: "Website", value: "https://example.com" }],
+    socials: live ? pairList(q.socials, "type", "value", 8) : [{ type: "linkedin", value: "https://linkedin.com" }],
     address: null,
     slug: "preview",
     layout,

@@ -10,6 +10,7 @@ import {
   labeledRowsField,
   socialsField,
   editorScripts,
+  cardLivePreviewScript,
   designControls,
   designScripts,
   SELF_FIELDS,
@@ -1342,6 +1343,7 @@ export function cardForm(opts: {
   departments?: any[];
   brandSelfFields?: string[];
   terminology?: Terminology;
+  baseDesign?: { layout: string; primary: string; text: string; bg: string; font: string; logo: string };
 }): string {
   const t = opts.terminology || GENERAL_TERMINOLOGY;
   const c = opts.card || {};
@@ -1365,7 +1367,8 @@ export function cardForm(opts: {
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/turnover">Deprovision</a>
     </div>` : ""}
   </div>
-  <form class="editor" method="POST" action="${action}" enctype="multipart/form-data">
+  <div class="card-editor-flex">
+  <form class="editor" method="POST" action="${action}" enctype="multipart/form-data" style="flex:1;min-width:0">
     <input type="hidden" name="locationId" value="${esc(opts.locationId)}" />
     <h3>Person</h3>
     <div class="grid2">
@@ -1422,7 +1425,8 @@ export function cardForm(opts: {
       ${opts.templates
         .map(
           (t) => `<label class="${c.templateId === t.id ? "sel" : ""}">
-        <input type="radio" name="templateId" value="${esc(t.id)}" ${c.templateId === t.id ? "checked" : ""} />
+        <input type="radio" name="templateId" value="${esc(t.id)}" ${c.templateId === t.id ? "checked" : ""}
+          data-layout="${esc(t.layout || "classic")}" data-primary="${esc(t.primaryColor || "")}" data-text="${esc(t.textColor || "")}" data-bg="${esc(t.bgColor || "")}" data-font="${esc(t.font || "system")}" />
         <div class="tpl-mini"><iframe src="${previewSrc(t)}" loading="lazy" title="${esc(t.name)}"></iframe></div>
         <div class="tpl-cap">${esc(t.name)}</div>
       </label>`
@@ -1457,6 +1461,11 @@ export function cardForm(opts: {
       <a class="btn secondary" href="/admin/cards?locationId=${esc(opts.locationId)}">Cancel</a>
     </div>
   </form>
+  <aside class="card-live-rail" id="card-live-rail" data-base="${esc(JSON.stringify(opts.baseDesign || {}))}">
+    <div class="device"><iframe id="card-live-preview" title="Live card preview"></iframe></div>
+    <p class="muted" style="text-align:center;margin-top:8px">Live preview — updates as you type</p>
+  </aside>
+  </div>
   ${
     opts.card
       ? `<div class="danger-zone">
@@ -1468,7 +1477,8 @@ export function cardForm(opts: {
   </div>`
       : ""
   }
-  ${editorScripts()}`;
+  ${editorScripts()}
+  <script>${cardLivePreviewScript()}</script>`;
   return shell(`${t.cardSingular} editor`, body);
 }
 
