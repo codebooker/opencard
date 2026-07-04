@@ -70,7 +70,9 @@ import {
   planImport,
   applyImport,
   onlySelected,
+  mapGraphUser,
 } from "../dirimport";
+import { runWithOrg } from "../db";
 import { uploadDir } from "../upload";
 import { isVertical } from "../terminology";
 import { clean, parseLabeled, parseSocials, parseAddress } from "../parse";
@@ -544,6 +546,93 @@ adminRouter.post("/import/apply", async (req, res) => {
   } catch (e: any) {
     res.send(V.importView({ configured: true, t, config: ctx.config, error: String(e?.message || e).slice(0, 400) }));
   }
+});
+
+// ---------- sync health (Phase 13): what the directory paths created ----------
+
+async function syncOverview(orgId: string) {
+  const groups = await prisma.user.groupBy({
+    by: ["provisionedBy"],
+    where: { orgId },
+    _count: { _all: true },
+    _max: { createdAt: true },
+  });
+  const bySource = (s: string | null) => groups.find((g) => g.provisionedBy === s);
+  const row = (s: string | null) => ({
+    count: bySource(s)?._count._all || 0,
+    last: bySource(s)?._max.createdAt || null,
+  });
+  const org = await prisma.org.findUnique({ where: { id: orgId }, select: { scimTokenHash: true } });
+  return {
+    scim: row("scim"),
+    imported: row("import"),
+    jit: row("jit"),
+    manual: row(null),
+    scimTokenSet: !!org?.scimTokenHash,
+    dirConfigured: !!(await credsForOrg(orgId)),
+  };
+}
+
+adminRouter.get("/sync", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.super) return forbidden(res);
+  res.send(V.syncView({ t: await currentTerminology(p.orgId), overview: await syncOverview(p.orgId) }));
+});
+
+// Compare the live directory against active cards: who no longer exists (or is
+// disabled) in Azure but still has a public card here. Read-only.
+adminRouter.post("/sync/check", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.super) return forbidden(res);
+  const t = await currentTerminology(p.orgId);
+  const overview = await syncOverview(p.orgId);
+  try {
+    const resolved = await credsForOrg(p.orgId);
+    if (!resolved) throw new Error("Connect your Azure directory on the Import page first.");
+    const dirUsers = (await listDirectoryUsers(resolved.creds)).map(mapGraphUser).filter((c): c is NonNullable<typeof c> => !!c);
+    const inDirectory = new Set(dirUsers.map((u) => u.email));
+    const disabled = new Set(dirUsers.filter((u) => !u.enabled).map((u) => u.email));
+    const cards = await prisma.card.findMany({
+      where: { orgId: p.orgId, active: true, ownerEmail: { not: null } },
+      select: { id: true, firstName: true, lastName: true, ownerEmail: true },
+    });
+    const orphans = cards
+      .map((c) => {
+        const email = (c.ownerEmail || "").toLowerCase();
+        const reason = !inDirectory.has(email) ? "not in directory" : disabled.has(email) ? "disabled in directory" : null;
+        return reason ? { id: c.id, name: `${c.firstName} ${c.lastName}`.trim(), email, reason } : null;
+      })
+      .filter((x): x is NonNullable<typeof x> => !!x);
+    res.send(V.syncView({ t, overview, checked: { total: cards.length, directorySize: dirUsers.length, orphans } }));
+  } catch (e: any) {
+    res.send(V.syncView({ t, overview, error: String(e?.message || e).slice(0, 400) }));
+  }
+});
+
+// Deactivate the selected orphaned cards (card unpublished + user deactivated).
+// Reversible from the card editor; nothing is deleted.
+adminRouter.post("/sync/deactivate", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.super) return forbidden(res);
+  const t = await currentTerminology(p.orgId);
+  const selRaw = req.body?.sel;
+  const ids = (Array.isArray(selRaw) ? selRaw : selRaw ? [selRaw] : []).map((s: any) => String(s)).slice(0, 5000);
+  let deactivated = 0;
+  if (ids.length) {
+    // Org-scoped: ids from another tenant simply don't match.
+    const cards = await prisma.card.findMany({
+      where: { id: { in: ids }, orgId: p.orgId },
+      select: { id: true, userId: true },
+    });
+    await runWithOrg(p.orgId, async (db) => {
+      await db.card.updateMany({ where: { id: { in: cards.map((c) => c.id) } }, data: { active: false } });
+      const userIds = cards.map((c) => c.userId).filter((x): x is string => !!x);
+      if (userIds.length) await db.user.updateMany({ where: { id: { in: userIds } }, data: { active: false } });
+      deactivated = cards.length;
+    });
+    audit(req, p, "sync.deactivate", { summary: `${deactivated} orphaned ${deactivated === 1 ? "card" : "cards"} deactivated` });
+  }
+  res.send(V.syncView({ t, overview: await syncOverview(p.orgId), flash: `${deactivated} deactivated.` }));
 });
 
 // ---------- backups & per-client restore (platform owner/admin) ----------
@@ -2524,12 +2613,17 @@ adminRouter.post("/saml-config", async (req, res) => {
     throw e;
   }
 
+  const jitEnabled = !!req.body?.jitEnabled;
   await prisma.samlConfig.upsert({
     where: { orgId: p.orgId },
-    create: { orgId: p.orgId, enabled, entryPoint, idpIssuer, idpCert },
-    update: { enabled, entryPoint, idpIssuer, idpCert },
+    create: { orgId: p.orgId, enabled, entryPoint, idpIssuer, idpCert, jitEnabled },
+    update: { enabled, entryPoint, idpIssuer, idpCert, jitEnabled },
   });
-  audit(req, p, "sso.update", { targetType: "SamlConfig", targetId: p.orgId, summary: enabled ? "enabled" : "disabled" });
+  audit(req, p, "sso.update", {
+    targetType: "SamlConfig",
+    targetId: p.orgId,
+    summary: `${enabled ? "enabled" : "disabled"}${jitEnabled ? ", JIT on" : ""}`,
+  });
   res.redirect("/admin/integrations");
 });
 

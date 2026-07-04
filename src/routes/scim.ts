@@ -163,6 +163,7 @@ scimRouter.post("/Users", async (req, res) => {
         email,
         displayName: scim.displayName || `${firstName} ${lastName}`.trim(),
         externalId: scim.externalId || null,
+        provisionedBy: "scim",
         active: scim.active !== false,
         card: {
           create: {

@@ -384,6 +384,9 @@ model User {
   displayName String
   externalId  String?  @unique // SCIM externalId / AD objectId
   scimId      String?  @unique
+  // Which automated path created this user: "scim" | "import" | "jit".
+  // Null = created by an admin by hand. Drives the sync health dashboard.
+  provisionedBy String?
   active      Boolean  @default(true)
   card        Card?
   createdAt   DateTime @default(now())
@@ -626,6 +629,9 @@ model SamlConfig {
   entryPoint String? // IdP SSO URL (where we send the user to authenticate)
   idpIssuer  String? // IdP entityID (optional, validated if set)
   idpCert    String? // IdP signing certificate (PEM or bare base64)
+  // JIT provisioning: first SSO sign-in auto-creates the person's card from
+  // assertion attributes (same shape as SCIM), instead of "no card assigned".
+  jitEnabled Boolean  @default(false)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }

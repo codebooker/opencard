@@ -1837,7 +1837,7 @@ export function importView(d: {
     }
   </section>`;
   const connectedLine = d.configured
-    ? `<p class="muted" style="margin:0 0 14px">Connected to Azure tenant <code>${esc(d.config?.tenantId || "")}</code> · <a href="/admin/import?settings=1">Update connection</a></p>`
+    ? `<p class="muted" style="margin:0 0 14px">Connected to Azure tenant <code>${esc(d.config?.tenantId || "")}</code> · <a href="/admin/import?settings=1">Update connection</a> · <a href="/admin/sync">Sync health</a></p>`
     : "";
   const picker = `
   <section class="panel">
@@ -1939,6 +1939,87 @@ export function importView(d: {
   ${connectedLine}
   ${d.configured && !d.showSettings ? picker + planTable : settingsForm}`;
   return shell("Import from Azure AD", body);
+}
+
+// Sync health (Phase 13): what SCIM / import / JIT created, and drift between
+// the directory and active cards.
+export function syncView(d: {
+  t: Terminology;
+  overview: {
+    scim: { count: number; last: Date | null };
+    imported: { count: number; last: Date | null };
+    jit: { count: number; last: Date | null };
+    manual: { count: number; last: Date | null };
+    scimTokenSet: boolean;
+    dirConfigured: boolean;
+  };
+  checked?: { total: number; directorySize: number; orphans: { id: string; name: string; email: string; reason: string }[] };
+  flash?: string | null;
+  error?: string | null;
+}): string {
+  const t = d.t;
+  const o = d.overview;
+  const when = (dt: Date | null) => (dt ? new Date(dt).toISOString().slice(0, 16).replace("T", " ") : "—");
+  const srcRow = (label: string, r: { count: number; last: Date | null }, note: string) =>
+    `<tr><td>${esc(label)}</td><td data-label="People">${r.count}</td><td data-label="Last created" class="muted">${when(r.last)}</td><td data-label="Notes" class="muted">${esc(note)}</td></tr>`;
+  const orphanSection = d.checked
+    ? d.checked.orphans.length
+      ? `
+  <section class="panel">
+    <h3>Directory check — ${d.checked.orphans.length} orphaned ${d.checked.orphans.length === 1 ? esc(lower(t.cardSingular)) : esc(lower(t.cardPlural))}</h3>
+    <p class="muted">Compared ${d.checked.total} active ${esc(lower(t.cardPlural))} against ${d.checked.directorySize} directory users. These people are gone from (or disabled in) Azure but still have a live public ${esc(lower(t.cardSingular))}. Deactivating unpublishes the ${esc(lower(t.cardSingular))} and disables self-service — nothing is deleted, and it's reversible from the ${esc(lower(t.cardSingular))} editor.</p>
+    <form method="POST" action="/admin/sync/deactivate" onsubmit="return confirm('Deactivate ' + document.querySelectorAll('.selbox:checked').length + ' ${esc(lower(t.cardPlural))}?')">
+      <table class="rsp">
+        <tr><th></th><th>Person</th><th>Email</th><th>Reason</th></tr>
+        ${d.checked.orphans
+          .map(
+            (x) => `<tr>
+          <td data-label="Select"><input type="checkbox" class="selbox" name="sel" value="${esc(x.id)}" checked /></td>
+          <td>${esc(x.name)}</td>
+          <td data-label="Email" class="muted" style="font-size:12px">${esc(x.email)}</td>
+          <td data-label="Reason"><span class="pill off">${esc(x.reason)}</span></td>
+        </tr>`
+          )
+          .join("")}
+      </table>
+      <div class="actions" style="margin-top:14px"><button class="btn danger" type="submit">Deactivate selected</button></div>
+    </form>
+  </section>`
+      : `
+  <section class="panel">
+    <h3>Directory check — all clear</h3>
+    <p class="muted">All ${d.checked.total} active ${esc(lower(t.cardPlural))} correspond to enabled people in your directory (${d.checked.directorySize} directory users checked).</p>
+  </section>`
+    : "";
+  const body = `
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>Sync health</h2>
+      <p class="muted" style="margin:0">Where your people records come from, and whether they still match your directory.</p>
+    </div>
+  </div>
+  ${d.flash ? `<p class="auth-banner" style="max-width:none">${esc(d.flash)}</p>` : ""}
+  ${d.error ? `<p class="auth-error" style="max-width:none">${esc(d.error)}</p>` : ""}
+  <section class="panel">
+    <h3>Provisioning sources</h3>
+    <table class="rsp">
+      <tr><th>Source</th><th>People</th><th>Last created</th><th></th></tr>
+      ${srcRow("SCIM (automatic)", o.scim, o.scimTokenSet ? "token configured" : "no SCIM token set")}
+      ${srcRow("Azure import wizard", o.imported, o.dirConfigured ? "directory connected" : "directory not connected")}
+      ${srcRow("SSO first sign-in (JIT)", o.jit, "enable on the Integrations page")}
+      ${srcRow("Created by admins", o.manual, "")}
+    </table>
+  </section>
+  <section class="panel">
+    <h3>Check against the directory</h3>
+    <p class="muted">Read-only comparison: finds active ${esc(lower(t.cardPlural))} whose owner no longer exists (or is disabled) in Azure — departed employees whose public pages are still live. ${o.dirConfigured ? "" : `Requires the Azure connection from the <a href="/admin/import">Import page</a>.`}</p>
+    <form method="POST" action="/admin/sync/check">
+      <button class="btn" type="submit" ${o.dirConfigured ? "" : "disabled"}>Run directory check</button>
+    </form>
+  </section>
+  ${orphanSection}`;
+  return shell("Sync health", body);
 }
 
 export function adminsView(admins: any[]): string {
@@ -2334,6 +2415,10 @@ export function integrationsView(data: {
     <textarea name="idpCert" rows="8" placeholder="-----BEGIN CERTIFICATE-----...">${esc(
       saml.idpCert || ""
     )}</textarea>
+    <label class="chk" style="margin-top:12px"><input type="checkbox" name="jitEnabled" value="1" ${
+      saml.jitEnabled ? "checked" : ""
+    } /> Auto-create cards on first sign-in (JIT provisioning)</label>
+    <p class="muted" style="margin:4px 0 0">When someone signs in through your IdP and has no card yet, one is created from their name/title in the SAML assertion — instead of a "no card assigned" page. People who already have a card are never touched. Anyone your IdP lets into this app gets a card, so scope the app's user assignment accordingly.</p>
     <p style="margin-top:10px"><button class="btn" type="submit">Save SSO settings</button></p>
   </form>
   </section>
@@ -2352,6 +2437,7 @@ export function integrationsView(data: {
     <p style="margin:0 0 6px">Token: ${data.scimTokenSet ? `<span class="pill on">configured</span>` : `<span class="pill off">not set</span>`}</p>
     <p class="muted" style="margin:0">Tenant URL (SCIM 2.0): <code>${esc(data.scimBaseUrl)}</code></p>
     <p class="muted">In Entra/Okta, set the Tenant URL above and paste the generated token as the Secret Token. Provisioned users land in this org only.</p>
+    <p class="muted" style="margin-top:6px"><a href="/admin/sync">Sync health →</a> — see what SCIM/import/JIT created and find cards for people who left.</p>
   </div>
   <form method="POST" action="/admin/scim-token/generate" onsubmit="return confirm('${
     data.scimTokenSet ? "Regenerate the SCIM token? The current token will stop working." : "Generate a SCIM token?"

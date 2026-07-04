@@ -8,6 +8,7 @@ import { clean, parseLabeled, parseSocials } from "../parse";
 import { emitEvent, cardPayload } from "../webhooks";
 import { DEFAULT_SELF_FIELDS } from "../views/widgets";
 import { emailFromSamlProfile, getEnabledSamlForOrg } from "../saml";
+import { jitProvision } from "../jit";
 import { resolveOrgId, orgIdForHost, requestHost, loginBrandingForHost } from "../tenant-resolver";
 import { roleFlags, Role } from "../roles";
 import { effectiveSelfFields, asStringArray } from "../roletemplate";
@@ -135,6 +136,11 @@ selfRouter.post("/saml/acs", async (req, res) => {
     if (!result.profile) return res.status(401).send("SAML sign-in failed.");
     const email = emailFromSamlProfile(result.profile);
     if (!email) return res.status(401).send("SAML response did not include an email address.");
+    // JIT provisioning (opt-in): first sign-in creates the card instead of
+    // "no card assigned". Never blocks the sign-in itself.
+    if (org.samlConfig?.jitEnabled) {
+      await jitProvision(org.id, result.profile as unknown as Record<string, unknown>, email);
+    }
     res.cookie(COOKIE, signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
     res.redirect(await postLoginDest(email, org.id));
   } catch {

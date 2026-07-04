@@ -251,6 +251,7 @@ export async function applyImport(orgId: string, rows: PlanRow[]): Promise<{ cre
           orgId,
           email: row.email,
           displayName: `${row.firstName} ${row.lastName}`.trim(),
+          provisionedBy: "import",
           active: true,
           card: {
             create: {
