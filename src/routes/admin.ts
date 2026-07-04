@@ -33,7 +33,10 @@ import {
   SESSION_TTL_MS,
   sha256hex,
 } from "../account";
-import { sendMail } from "../notify";
+import { sendMail, postChatWebhook } from "../notify";
+import fs from "fs";
+import path from "path";
+import { mdToHtml } from "../md";
 import { page, esc } from "../views/html";
 import { uniqueSlug, uniqueAssetSlug } from "../slug";
 import { upload, uploadedUrl } from "../upload";
@@ -2509,7 +2512,7 @@ async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: stri
     getSamlConfigForOrg(p.orgId),
     prisma.org.findUnique({
       where: { id: p.orgId },
-      select: { scimTokenHash: true, subdomain: true, customDomain: true },
+      select: { scimTokenHash: true, subdomain: true, customDomain: true, leadWebhookUrl: true },
     }),
     prisma.crmIntegration.findMany({
       where: orgFilter,
@@ -2538,6 +2541,7 @@ async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: stri
       newScimToken,
       crmIntegrations,
       crmLocations,
+      leadWebhookUrl: org?.leadWebhookUrl || "",
     })
   );
 }
@@ -2546,6 +2550,49 @@ adminRouter.get("/integrations", (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canManageIntegrations(p)) return forbidden(res);
   return renderIntegrations(res, p);
+});
+
+// ---------- lead alerts to Slack / Teams (Phase 14) ----------
+adminRouter.post("/lead-webhook", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  const url = clean(req.body?.leadWebhookUrl) || null;
+  if (url && !/^https:\/\//.test(url)) return res.status(400).send("Webhook URL must start with https://");
+  await prisma.org.update({ where: { id: p.orgId }, data: { leadWebhookUrl: url } });
+  audit(req, p, "leadwebhook.update", { summary: url ? "set" : "cleared" });
+  res.redirect("/admin/integrations");
+});
+
+adminRouter.post("/lead-webhook/test", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  const org = await prisma.org.findUnique({ where: { id: p.orgId }, select: { leadWebhookUrl: true, name: true } });
+  if (!org?.leadWebhookUrl) return res.status(400).send("Save a webhook URL first.");
+  const r = await postChatWebhook(org.leadWebhookUrl, `✅ OpenCard test — lead alerts for ${org.name} will arrive here.`);
+  res.send(
+    page({
+      title: "Webhook test",
+      body: `<main class="card" style="padding:32px"><p>${
+        r.ok ? "Test message sent — check the channel." : `Test failed: ${esc(r.error || "unknown error")}`
+      }</p><p><a href="/admin/integrations">← Back to integrations</a></p></main>`,
+    })
+  );
+});
+
+// ---------- API reference (Phase 14): docs/API.md rendered in-app ----------
+let apiDocsCache: string | null = null;
+adminRouter.get("/api-docs", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!RBAC.canManageIntegrations(p)) return forbidden(res);
+  if (!apiDocsCache) {
+    try {
+      const raw = fs.readFileSync(path.join(process.cwd(), "docs", "API.md"), "utf8");
+      apiDocsCache = mdToHtml(raw.replace(/<BASE_URL>/g, config.baseUrl));
+    } catch {
+      apiDocsCache = "<p class='muted'>API reference not found on this deployment.</p>";
+    }
+  }
+  res.send(V.apiDocsView(apiDocsCache));
 });
 
 // ---------- CRM / marketing sync (Phase 7.1) ----------

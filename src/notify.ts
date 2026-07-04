@@ -1,6 +1,7 @@
 import nodemailer, { Transporter } from "nodemailer";
 import { config, mailEnabled } from "./config";
 import { resolveRecipients, buildLeadEmail } from "./routing";
+import { prisma } from "./db";
 
 // Lead notifications: resolve recipients via routing, then email them (or log the
 // intended delivery when SMTP isn't configured). Never throws into the caller.
@@ -40,9 +41,53 @@ export async function sendMail(to: string[], subject: string, text: string): Pro
   }
 }
 
+// POST a plain-text message to a Slack or Teams incoming webhook. Both accept
+// { "text": "..." }. Never throws; 6s timeout. Exposed for the settings
+// page's "Send test" button.
+export async function postChatWebhook(url: string, text: string): Promise<{ ok: boolean; status?: number; error?: string }> {
+  try {
+    if (!/^https:\/\//.test(url)) return { ok: false, error: "Webhook URL must be https." };
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(6000),
+    });
+    return resp.ok ? { ok: true, status: resp.status } : { ok: false, status: resp.status, error: `HTTP ${resp.status}` };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message || e).slice(0, 150) };
+  }
+}
+
+// One-line chat summary for a new lead.
+export function leadChatText(lead: any, source: { card?: any; asset?: any }): string {
+  const loc = source.card?.location || source.asset?.location;
+  const who = [lead.name, lead.phone, lead.email].filter(Boolean).join(" · ") || "Anonymous";
+  const via = source.card
+    ? `${source.card.firstName || ""} ${source.card.lastName || ""}`.trim() + "'s card"
+    : "a QR asset";
+  const extras = [lead.vehicleInterest, lead.serviceNeed, lead.campaign || lead.utmCampaign].filter(Boolean).join(" · ");
+  return `🪪 New lead: ${who} — via ${via}${loc?.name ? ` at ${loc.name}` : ""}${extras ? ` (${extras})` : ""}\n${config.baseUrl}/admin/leads`;
+}
+
 // Fire-and-forget lead notification. `source` carries the loaded card (with dept
 // + location) or asset (with location) used to resolve routing.
 export function notifyLead(lead: any, source: { card?: any; asset?: any }): void {
+  // Chat webhook (Slack/Teams) alongside email — independent failure domains.
+  (async () => {
+    try {
+      const orgId = lead.orgId || source.card?.orgId || source.asset?.orgId;
+      if (!orgId) return;
+      const org = await prisma.org.findUnique({ where: { id: orgId }, select: { leadWebhookUrl: true } });
+      if (!org?.leadWebhookUrl) return;
+      const r = await postChatWebhook(org.leadWebhookUrl, leadChatText(lead, source));
+      // eslint-disable-next-line no-console
+      console.log(JSON.stringify({ msg: "lead-chat-webhook", leadId: lead.id, delivered: r.ok ? "webhook" : `failed (${r.error})` }));
+    } catch (e: any) {
+      // eslint-disable-next-line no-console
+      console.log(JSON.stringify({ msg: "lead-chat-webhook-error", error: String(e?.message || e).slice(0, 200) }));
+    }
+  })();
   (async () => {
     try {
       const loc = source.card?.location || source.asset?.location;

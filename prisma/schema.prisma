@@ -44,6 +44,8 @@ model Org {
   digestEmails     String?
   digestCadence    String    @default("off") // off | weekly
   digestLastSentAt DateTime?
+  // Instant lead alerts to a Slack / Teams incoming webhook (Phase 14).
+  leadWebhookUrl   String?
   // Data-retention policy (Phase 9.3): auto-delete leads older than N days.
   // null / 0 = keep forever.
   leadRetentionDays Int?

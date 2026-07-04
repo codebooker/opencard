@@ -2234,6 +2234,20 @@ export function syncView(d: {
   return shell("Sync health", body);
 }
 
+// API reference (Phase 14): docs/API.md rendered server-side.
+export function apiDocsView(html: string): string {
+  const body = `
+  <p class="crumb"><a href="/admin/integrations">← Integrations</a></p>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>API reference</h2>
+      <p class="muted" style="margin:0">REST API for CRMs, HRIS and automation — authenticate with an API key from the Integrations page.</p>
+    </div>
+  </div>
+  <section class="panel md-doc" style="max-width:860px">${html}</section>`;
+  return shell("API reference", body);
+}
+
 export function adminsView(admins: any[]): string {
   const rows = admins.length
     ? admins
@@ -2375,6 +2389,7 @@ export function integrationsView(data: {
   newScimToken?: string | null;
   crmIntegrations?: any[];
   crmLocations?: { id: string; name: string }[];
+  leadWebhookUrl?: string;
 }): string {
   const keyScopes = (k: any) => {
     const s = Array.isArray(k.scopes) ? k.scopes : [];
@@ -2538,6 +2553,7 @@ export function integrationsView(data: {
       <h2>Integrations</h2>
       <p class="muted" style="margin:0">API keys, single sign-on, provisioning, webhooks and CRM sync for this workspace.</p>
     </div>
+    <div><a class="btn secondary" href="/admin/api-docs">API reference</a></div>
   </div>
 
   ${
@@ -2564,6 +2580,20 @@ export function integrationsView(data: {
       (s) => `<label class="chk"><input type="checkbox" name="scopes" value="${esc(s)}" /> ${esc(SCOPE_LABELS[s])}</label>`
     ).join("")}</div>
     <p style="margin-top:10px"><button class="btn" type="submit">Create key</button></p>
+  </form>
+  </section>
+
+  <section class="panel">
+  <h3>Lead alerts in Slack / Teams</h3>
+  <p class="muted">Post every new lead to a channel the moment it lands — alongside the email notifications, not instead of them.</p>
+  <p class="muted" style="margin-top:6px">
+  <strong>Slack:</strong> channel → ⚙ → Integrations → Add an app → <em>Incoming Webhooks</em> → copy the webhook URL.<br>
+  <strong>Teams:</strong> channel → ⋯ → Connectors (or Workflows → "Post to a channel when a webhook request is received") → copy the URL.</p>
+  <form class="editor" method="POST" action="/admin/lead-webhook" style="max-width:760px;margin-top:10px">
+    <label>Incoming webhook URL <span class="muted">(blank to turn off)</span></label>
+    <input name="leadWebhookUrl" type="url" value="${esc(data.leadWebhookUrl || "")}" placeholder="https://hooks.slack.com/services/…" />
+    <p style="margin-top:10px"><button class="btn" type="submit">Save</button>
+    ${data.leadWebhookUrl ? `<button class="btn secondary" type="submit" formaction="/admin/lead-webhook/test">Send test message</button>` : ""}</p>
   </form>
   </section>
 

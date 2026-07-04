@@ -35,5 +35,7 @@ COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma
 COPY prisma ./prisma
 COPY src/public ./dist/public
+# In-app API reference (/admin/api-docs) renders this at runtime.
+COPY docs ./docs
 EXPOSE 3000
 CMD ["node", "dist/server.js"]

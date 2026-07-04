@@ -557,6 +557,19 @@ form.editor.item-card h3 { margin-left: 0; margin-right: 0; padding-left: 0; pad
    ============================================================ */
 .design-editor { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
 .design-controls { flex: 1 1 320px; min-width: 280px; }
+/* Rendered markdown docs (API reference). */
+.md-doc h1 { font-size: 24px; margin: 4px 0 12px; }
+.md-doc h2 { font-size: 19px; margin: 26px 0 8px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
+.md-doc h3 { font-size: 15px; margin: 18px 0 6px; }
+.md-doc pre { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
+.md-doc pre code { background: none; border: none; color: inherit; padding: 0; }
+.md-doc table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; }
+.md-doc th, .md-doc td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.md-doc th { color: var(--ink-3); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.md-doc blockquote { margin: 10px 0; padding: 8px 14px; border-left: 3px solid var(--accent); background: var(--wash-2); border-radius: 0 8px 8px 0; color: var(--ink-2); }
+.md-doc ul { padding-left: 22px; }
+.md-doc hr { border: none; border-top: 1px solid var(--line-soft); margin: 20px 0; }
+
 /* Card editor: form + sticky live phone preview side by side. */
 .card-editor-flex { display: flex; gap: 28px; align-items: flex-start; }
 .card-live-rail { flex: 0 0 296px; position: sticky; top: 16px; }
