@@ -49,11 +49,15 @@ if [ -f "$ENV_FILE" ]; then
     export RCLONE_CONFIG_OFFSITE_ENDPOINT="$S3_ENDPOINT"
     export RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}"
     export RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}"
+    # The scoped key may not HeadBucket/CreateBucket — just upload.
+    export RCLONE_S3_NO_CHECK_BUCKET=true
     echo "$LOG_PREFIX uploading to $S3_BUCKET"
     rclone copy "$BACKUP_DIR/db-$STAMP.dump" "offsite:$S3_BUCKET/db/" --no-traverse
     [ -f "$BACKUP_DIR/uploads-$STAMP.tar.gz" ] && rclone copy "$BACKUP_DIR/uploads-$STAMP.tar.gz" "offsite:$S3_BUCKET/uploads/" --no-traverse
     echo "$LOG_PREFIX pruning remote copies older than $KEEP_REMOTE_DAYS days"
-    rclone delete "offsite:$S3_BUCKET" --min-age "${KEEP_REMOTE_DAYS}d" || true
+    # Only touch the folders this script owns — never the rest of the bucket.
+    rclone delete "offsite:$S3_BUCKET/db" --min-age "${KEEP_REMOTE_DAYS}d" || true
+    rclone delete "offsite:$S3_BUCKET/uploads" --min-age "${KEEP_REMOTE_DAYS}d" || true
   fi
 else
   echo "$LOG_PREFIX no backup.env — local backup only (offsite disabled)"
