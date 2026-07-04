@@ -2292,6 +2292,27 @@ export function integrationsView(data: {
         : `<p class="muted" style="margin:0;color:#b45309">Set a workspace address (subdomain or custom domain) below first — your IdP needs a stable reply URL tied to this tenant.</p>`
     }
   </div>
+  ${
+    data.samlHost
+      ? `<details style="margin:0 0 12px">
+    <summary style="cursor:pointer;font-weight:600">Setup instructions (Entra / Okta)</summary>
+    <p class="muted" style="margin-top:8px">
+    1. Create a SAML app in your IdP.<br>
+    &nbsp;&nbsp;&nbsp;<strong>Microsoft Entra:</strong> portal.azure.com → <strong>Microsoft Entra ID</strong> → <strong>Enterprise applications</strong> → <strong>New application</strong> → <strong>Create your own application</strong> → "Integrate any other application you don't find in the gallery" → then <strong>Single sign-on → SAML</strong>.<br>
+    &nbsp;&nbsp;&nbsp;<strong>Okta:</strong> Admin console → <strong>Applications</strong> → <strong>Create App Integration</strong> → <strong>SAML 2.0</strong>.<br>
+    2. Paste the two values from above into the app:<br>
+    &nbsp;&nbsp;&nbsp;<strong>SP entity ID</strong> → Entra calls it <em>Identifier (Entity ID)</em>; Okta calls it <em>Audience URI (SP Entity ID)</em>.<br>
+    &nbsp;&nbsp;&nbsp;<strong>ACS / reply URL</strong> → Entra: <em>Reply URL (Assertion Consumer Service URL)</em>; Okta: <em>Single sign-on URL</em>.<br>
+    3. Make sure the assertion identifies people by <strong>email</strong>: Entra — leave the Unique User Identifier as <code>user.userprincipalname</code> if that's their email (otherwise pick <code>user.mail</code>); Okta — Name ID format <em>EmailAddress</em>, application username <em>Email</em>.<br>
+    4. Copy three values from the IdP into the form below:<br>
+    &nbsp;&nbsp;&nbsp;<strong>IdP SSO URL</strong> → Entra: <em>Login URL</em>; Okta: <em>Sign on URL</em> (on the app's Sign On tab / metadata).<br>
+    &nbsp;&nbsp;&nbsp;<strong>IdP issuer</strong> → Entra: <em>Microsoft Entra Identifier</em>; Okta: <em>Issuer</em>.<br>
+    &nbsp;&nbsp;&nbsp;<strong>Signing certificate</strong> → Entra: download <em>Certificate (Base64)</em>; Okta: the <em>X.509 Certificate</em>. Paste the whole thing, BEGIN/END lines included.<br>
+    5. Assign your users to the app in the IdP, tick <strong>Enable SAML sign-in</strong> below, and save.</p>
+    <p class="muted">After that, your team signs in at the address above. Access is matched by <strong>email</strong> — the address your IdP sends must equal the email on the person's card (or admin account). Sign-in only: nothing is ever written to your directory. To auto-create cards for new hires, use SCIM below or the Azure import wizard.</p>
+  </details>`
+      : ""
+  }
   <form class="editor" method="POST" action="/admin/saml-config" style="margin-top:12px;max-width:760px">
     <label>Workspace subdomain ${
       data.platformDomain
