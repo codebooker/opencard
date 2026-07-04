@@ -145,6 +145,16 @@ franchise retail, insurance agencies. Pick by actual pipeline, not appeal —
 each needs its own lead fields, integrations, and go-to-market, so treat a
 new vertical as a business decision that ships as a pack.
 
+## Post-launch: customer docs / knowledge base
+
+Decision (Jul 2026): self-host **Outline** (getoutline.com, open source) as the
+customer-facing docs/KB once we're in production — not before. It joins the
+compose stack (needs Postgres + Redis + an OIDC/SAML login), served at a docs
+subdomain via Caddy. Evaluated against Intercom's Knowledge Hub (too
+expensive), GitBook (per-seat pricing), static generators (no editor for
+non-devs), BookStack (weaker editor). Until then, the in-app API reference
+covers developer docs.
+
 ## Phase 16: Expansion (pull, not push)
 
 Unchanged philosophy from v1.0: responsive web + wallet passes first, a mobile
