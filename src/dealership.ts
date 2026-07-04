@@ -35,18 +35,28 @@ export function telHref(phone: string | null | undefined): string | null {
   return "tel:" + plus + digits;
 }
 
-// Ordered dealership CTAs for a card, derived from its rooftop profile. Invalid
-// or empty entries are dropped, so the returned list is always render-ready.
-export function rooftopCtas(r: RooftopProfile): Cta[] {
+// Default (dealership) button labels — callers that know the org's vertical
+// pass packFor(vertical).ctaLabels instead, so a general business never
+// shows "Call the dealership".
+const DEFAULT_CTA_LABELS = {
+  sales: "View inventory",
+  service: "Schedule service",
+  call: "Call the dealership",
+  site: "Visit website",
+};
+
+// Ordered location CTAs for a card, derived from its profile. Invalid or
+// empty entries are dropped, so the returned list is always render-ready.
+export function rooftopCtas(r: RooftopProfile, labels: typeof DEFAULT_CTA_LABELS = DEFAULT_CTA_LABELS): Cta[] {
   const out: Cta[] = [];
   const sales = httpUrl(r.salesUrl);
-  if (sales) out.push({ label: "View inventory", href: sales, track: "cta:sales", kind: "sales" });
+  if (sales) out.push({ label: labels.sales, href: sales, track: "cta:sales", kind: "sales" });
   const service = httpUrl(r.serviceUrl);
-  if (service) out.push({ label: "Schedule service", href: service, track: "cta:service", kind: "service" });
+  if (service) out.push({ label: labels.service, href: service, track: "cta:service", kind: "service" });
   const call = telHref(r.phone);
-  if (call) out.push({ label: "Call the dealership", href: call, track: "cta:call", kind: "call" });
+  if (call) out.push({ label: labels.call, href: call, track: "cta:call", kind: "call" });
   const site = httpUrl(r.website);
-  if (site) out.push({ label: "Visit website", href: site, track: "cta:site", kind: "site" });
+  if (site) out.push({ label: labels.site, href: site, track: "cta:site", kind: "site" });
   return out;
 }
 

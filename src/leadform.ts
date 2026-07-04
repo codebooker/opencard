@@ -1,5 +1,6 @@
 import { asStringArray } from "./roletemplate";
 import { parseUtm, deviceFromUa, normalizePreferredContact, cleanReferrer } from "./attribution";
+import { VERTICAL_PACKS, packFor } from "./verticals";
 
 // Pure lead-form helpers — no db/express, unit-testable. `assembleLead` takes the
 // raw form body + user-agent; the route adds cardId/assetId/orgId.
@@ -21,19 +22,25 @@ export const LEAD_FIELDS: [string, string][] = [
 export const DEFAULT_LEAD_FIELDS = ["email", "phone", "vehicleInterest", "note", "consent"];
 export const DEFAULT_CONSENT_TEXT = "I agree to be contacted about my inquiry.";
 
-// Vertical-specific fields: offered and defaulted only for dealerships.
-export const DEALERSHIP_LEAD_FIELDS = ["vehicleInterest", "tradeIn", "serviceNeed"];
-export const GENERAL_DEFAULT_LEAD_FIELDS = ["email", "phone", "note", "consent"];
+// Vertical-specific behavior comes from the pack registry (verticals.ts):
+// each pack claims its own field keys from the catalog above and defines its
+// default set. Kept exports below preserve existing call sites/tests.
+export const DEALERSHIP_LEAD_FIELDS = packFor("dealership").extraLeadFieldKeys;
+export const GENERAL_DEFAULT_LEAD_FIELDS = packFor("general").defaultLeadFields;
 
-// The lead-form field choices an admin may enable, per vertical.
+// Fields claimed by ANY pack are hidden from every other pack.
+const packOwnedKeys = new Set(VERTICAL_PACKS.flatMap((p) => p.extraLeadFieldKeys));
+
+// The lead-form field choices an admin may enable, per vertical: the common
+// catalog plus the pack's own fields, in catalog order.
 export function leadFieldChoicesFor(vertical?: string | null): [string, string][] {
-  if (vertical === "dealership") return LEAD_FIELDS;
-  return LEAD_FIELDS.filter(([k]) => !DEALERSHIP_LEAD_FIELDS.includes(k));
+  const own = new Set(packFor(vertical).extraLeadFieldKeys);
+  return LEAD_FIELDS.filter(([k]) => !packOwnedKeys.has(k) || own.has(k));
 }
 
 // The built-in default field set, per vertical.
 export function defaultLeadFieldsFor(vertical?: string | null): string[] {
-  return vertical === "dealership" ? DEFAULT_LEAD_FIELDS : GENERAL_DEFAULT_LEAD_FIELDS;
+  return packFor(vertical).defaultLeadFields;
 }
 
 // Which fields to show: template override -> brand default -> built-in defaults.

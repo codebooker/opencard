@@ -1,17 +1,18 @@
 import { prisma } from "./db";
+import { VERTICAL_PACKS, packFor } from "./verticals";
 
-// Supported verticals. Labels are customer-facing ("Business type") — never
-// say "vertical" in the UI. Adding a vertical pack later = one entry here.
-export type Vertical = "general" | "dealership";
-export const VERTICALS: [Vertical, string][] = [
-  ["general", "General business"],
-  ["dealership", "Car dealership"],
-];
+// Verticals derive from the pack registry (verticals.ts) — adding a pack
+// there automatically extends the customer-facing "Business type" dropdown
+// and everything below. Labels never say "vertical" in the UI.
+
+export type Vertical = string;
+export const VERTICALS: [string, string][] = VERTICAL_PACKS.map((p) => [p.key, p.label]);
+
 export function isVertical(v: unknown): v is Vertical {
-  return v === "general" || v === "dealership";
+  return VERTICAL_PACKS.some((p) => p.key === v);
 }
 export function verticalLabel(v: string | null | undefined): string {
-  return VERTICALS.find(([k]) => k === v)?.[1] || "General business";
+  return packFor(v).label;
 }
 
 export type Terminology = {
@@ -27,35 +28,14 @@ export type Terminology = {
   leadPlural: string;
 };
 
-export const GENERAL_TERMINOLOGY: Terminology = {
-  vertical: "general",
-  brandSingular: "Brand",
-  brandPlural: "Brands",
-  locationSingular: "Location",
-  locationPlural: "Locations",
-  locationCodeLabel: "Location code",
-  cardSingular: "Card",
-  cardPlural: "Cards",
-  leadSingular: "Lead",
-  leadPlural: "Leads",
-};
-
-export const DEALERSHIP_TERMINOLOGY: Terminology = {
-  vertical: "dealership",
-  brandSingular: "Brand",
-  brandPlural: "Brands",
-  locationSingular: "Rooftop",
-  locationPlural: "Rooftops",
-  locationCodeLabel: "Rooftop code",
-  cardSingular: "Card",
-  cardPlural: "Cards",
-  leadSingular: "Customer lead",
-  leadPlural: "Customer leads",
-};
-
 export function terminologyForVertical(vertical?: string | null): Terminology {
-  return vertical === "dealership" ? DEALERSHIP_TERMINOLOGY : GENERAL_TERMINOLOGY;
+  const p = packFor(vertical);
+  return { vertical: p.key, ...p.terminology };
 }
+
+// Kept as named exports for the many existing call sites and tests.
+export const GENERAL_TERMINOLOGY: Terminology = terminologyForVertical("general");
+export const DEALERSHIP_TERMINOLOGY: Terminology = terminologyForVertical("dealership");
 
 export function mergeTerminology(vertical: string | null | undefined, value: unknown): Terminology {
   const base = terminologyForVertical(vertical);

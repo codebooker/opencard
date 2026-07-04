@@ -130,12 +130,15 @@ is a launch-adjacent cleanup, not a someday feature.
 - Audit every public surface (card, lead form, signatures, vCard) renders
   cleanly for a general org.
 
-### Stage 2: Vertical packs (config, not code)
+### Stage 2: Vertical packs (config, not code) — DONE
 
-Turn what "dealership" hardcodes into a data bundle so a new vertical is a
-pack, not a fork: terminology, department suggestions, lead-form field
-catalog, CTA suggestions, starter templates, signup placeholders. The
-dealership pack becomes the first consumer; "general" is the empty pack.
+`src/verticals.ts` is the registry: terminology, department + role
+suggestions, pack-owned lead-form fields + defaults, CTA button labels, the
+location editor's profile section, and events copy all derive from it.
+Dealership is the first pack, general the baseline. Adding a vertical =
+one pack entry (plus any new Lead columns it needs); the Business type
+dropdown, admin UI and public cards pick it up automatically. Registry
+integrity is unit-tested (verticals.test.ts).
 
 ### Stage 3: New verticals on demand (pull, not push)
 

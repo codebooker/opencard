@@ -23,13 +23,13 @@ import {
   KNOWN_OEMS,
   DEALERSHIP_TIMEZONES,
   parseOemBrands,
-  DEPARTMENTS,
   ctaLinesFromJson,
 } from "../dealership";
-import { HIDEABLE_FIELDS, SIGNATURE_TOKENS, ROLE_SUGGESTIONS, asStringArray } from "../roletemplate";
+import { HIDEABLE_FIELDS, SIGNATURE_TOKENS, asStringArray } from "../roletemplate";
 import { ASSET_TYPES, ASSET_DEST_TYPES, assetTypeLabel } from "../assets";
 import { LEAD_FIELDS, DEFAULT_LEAD_FIELDS, leadFieldChoicesFor, defaultLeadFieldsFor } from "../leadform";
 import { CSV_TARGETS } from "../csvimport";
+import { packFor } from "../verticals";
 import { svgAreaChart, svgBars } from "../charts";
 import { TEMPLATE_PRESETS } from "../layouts";
 import { campaignRoutingToLines } from "../routing";
@@ -713,7 +713,7 @@ export function eventsView(data: { events: any[]; locations: { id: string; name:
   const body = `
   <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar"><h2>Events</h2></div>
-  <p class="muted">${t.vertical === "dealership" ? "Auto shows, tent sales, hiring events" : "Trade shows, open houses, hiring events"}: create an event, add QR codes that capture leads, and track its performance. Event QR codes only work while the event is live.</p>
+  <p class="muted">${esc(packFor(t.vertical).eventsExamples)}: create an event, add QR codes that capture leads, and track its performance. Event QR codes only work while the event is live.</p>
   <table>
     <tr><th>Event</th><th>Status</th><th>${esc(t.locationSingular)}</th><th>Dates</th><th>QR</th></tr>
     ${rows}
@@ -1136,22 +1136,24 @@ export function locationForm(
       <div><label>Country</label><input name="addr_country" value="${esc(addr.country)}" /></div>
     </div>
 
+    ${(() => {
+      const vp = packFor(t.vertical);
+      return `<h3>${esc(vp.locationEditor.heading)}</h3>
+    <p class="muted">${esc(vp.locationEditor.blurb)}</p>
     ${
-      t.vertical === "dealership"
-        ? `<h3>Dealership profile</h3>
-    <p class="muted">Shown on this ${esc(lower(t.locationSingular))}'s cards as click-to-call and Sales/Service buttons.</p>
-    <label>OEM brands <span class="muted">(comma-separated)</span></label>
+      vp.locationEditor.showOemBrands
+        ? `<label>OEM brands <span class="muted">(comma-separated)</span></label>
     <input name="oemBrands" list="oem-list" value="${esc(parseOemBrands(l.oemBrands).join(", "))}" placeholder="e.g. Ford, Lincoln" />
     <datalist id="oem-list">${KNOWN_OEMS.map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>`
-        : `<h3>Contact</h3>
-    <p class="muted">Shown on this ${esc(lower(t.locationSingular))}'s cards as click-to-call and website buttons.</p>`
-    }
+        : ""
+    }`;
+    })()}
     <div class="grid2">
       <div><label>Main phone</label><input name="phone" value="${esc(l.phone)}" placeholder="(555) 123-4567" /></div>
       <div><label>Website</label><input name="website" value="${esc(l.website)}" placeholder="acme.com" /></div>
     </div>
     ${
-      t.vertical === "dealership"
+      packFor(t.vertical).locationEditor.showSalesServiceUrls
         ? `<div class="grid2">
       <div><label>Sales URL</label><input name="salesUrl" value="${esc(l.salesUrl)}" placeholder="acmeford.com/inventory" /></div>
       <div><label>Service URL</label><input name="serviceUrl" value="${esc(l.serviceUrl)}" placeholder="acmeford.com/service" /></div>
@@ -1195,7 +1197,7 @@ export function locationForm(
 export function departmentsView(data: { location: any; departments: any[] }, t: Terminology = GENERAL_TERMINOLOGY): string {
   const loc = data.location;
   const existing = new Set(data.departments.map((d) => d.name));
-  const suggestions = t.vertical === "dealership" ? DEPARTMENTS.filter((d) => !existing.has(d)) : [];
+  const suggestions = packFor(t.vertical).departments.filter((d) => !existing.has(d));
   const rows = data.departments.length
     ? data.departments
         .map(
@@ -1763,7 +1765,7 @@ export function templateForm(
     <h3 style="margin-top:20px">Role behavior <span class="muted">(optional)</span></h3>
     <label>Role name</label>
     <input name="role" list="role-suggest" value="${esc(t.role)}" placeholder="e.g. Service Advisor" />
-    <datalist id="role-suggest">${ROLE_SUGGESTIONS.map((r) => `<option value="${esc(r)}"></option>`).join("")}</datalist>
+    <datalist id="role-suggest">${packFor(term.vertical).roleSuggestions.map((r) => `<option value="${esc(r)}"></option>`).join("")}</datalist>
 
     <label style="margin-top:12px">Lock fields from self-editing <span class="muted">(employees can't change these)</span></label>
     <div class="self-fields">${SELF_FIELDS.map(

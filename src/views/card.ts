@@ -3,6 +3,7 @@ import { asLabeled, asSocials, Address } from "../types";
 import { safeUrl } from "../parse";
 import { esc, page } from "./html";
 import { rooftopCtas, parseOemBrands, ctasFromJson, mergeCtas } from "../dealership";
+import { packFor } from "../verticals";
 import { asStringArray, isHidden, resolveShowQr, renderSignature } from "../roletemplate";
 import { resolveLeadFields, resolveConsentText, defaultLeadFieldsFor } from "../leadform";
 import { renderLeadForm, LeadAttribution } from "./leadform-view";
@@ -11,6 +12,8 @@ export type FullCard = Card & {
   location: Location & { brand: Brand };
   template: Template | null;
   dept?: Department | null;
+  // Loaded by the public card route; drives vertical CTA labels.
+  org?: { vertical?: string | null } | null;
 };
 
 export function fontStack(name?: string | null): string {
@@ -137,7 +140,10 @@ export function renderCardPage(
   const deptCtas = ctasFromJson((card.dept as any)?.ctas);
   const roleCtas = ctasFromJson((card.template as any)?.roleCtas);
   // Order: department -> role -> rooftop, de-duped.
-  const dealerCtas = mergeCtas(mergeCtas(deptCtas, roleCtas), rooftopCtas(rooftop));
+  const dealerCtas = mergeCtas(
+    mergeCtas(deptCtas, roleCtas),
+    rooftopCtas(rooftop, packFor((card.org as any)?.vertical).ctaLabels)
+  );
   const oems = parseOemBrands(rooftop.oemBrands);
   // Per-store toggle: the name + franchise badges above the buttons can be
   // hidden (the buttons themselves stay).
