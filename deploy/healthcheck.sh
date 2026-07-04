@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # OpenCard healthcheck: site reachability, containers, disk. Emails the
 # operator on state CHANGES only (fail->ok, ok->fail) via the app's own SMTP
-# (docker exec into web). Run from cron every 5 minutes.
+# (docker exec into a web container). Run from cron every 5 minutes.
 #
 # Config: /opt/opencard/deploy/healthcheck.env with ALERT_EMAIL="you@example.com"
 set -uo pipefail
@@ -20,8 +20,8 @@ for host in opencard.id tapshare.cards; do
   [ "$code" = "200" ] || PROBLEMS="$PROBLEMS site:$host=$code"
 done
 
-# 2) Containers up.
-for c in opencard-web-1 opencard-db-1 opencard-caddy-1; do
+# 2) Containers up (web_a + web_b since the zero-downtime split).
+for c in opencard-web_a-1 opencard-web_b-1 opencard-db-1 opencard-caddy-1; do
   state=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo missing)
   [ "$state" = "running" ] || PROBLEMS="$PROBLEMS container:$c=$state"
 done
@@ -49,9 +49,11 @@ else
   BODY="All checks passing again at $(date -u '+%F %T UTC')."
 fi
 
-# Send via the app's SMTP config inside the web container. If web is down,
-# this can't send — pair with an external uptime monitor for that case.
-docker exec opencard-web-1 node -e '
+# Send via the app's SMTP config inside a web container (either instance).
+# If both are down, this can't send — pair with an external uptime monitor.
+MAILER="opencard-web_a-1"
+docker inspect -f '{{.State.Status}}' "$MAILER" 2>/dev/null | grep -q running || MAILER="opencard-web_b-1"
+docker exec "$MAILER" node -e '
 const n=require("nodemailer");
 const t=n.createTransport({host:process.env.SMTP_HOST,port:parseInt(process.env.SMTP_PORT||"587"),secure:process.env.SMTP_PORT==="465",auth:process.env.SMTP_USER?{user:process.env.SMTP_USER,pass:process.env.SMTP_PASS}:undefined});
 t.sendMail({from:process.env.SMTP_FROM,to:process.argv[1],subject:process.argv[2],text:process.argv[3]})

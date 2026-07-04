@@ -1,11 +1,75 @@
 # Production stack for OpenCard.
-#   db        — PostgreSQL 16 (persistent volume)
-#   web       — the app (migrate -> bootstrap RLS role -> seed -> serve on :3000, internal)
-#   caddy     — TLS reverse proxy for opencard.id (+ *.opencard.id) and tapshare.cards
-#   portainer — container management UI, bound to localhost only (SSH-tunnel to reach it)
+#   db          — PostgreSQL 16 (persistent volume)
+#   web_a/web_b — two instances of the app (migrate -> bootstrap RLS role ->
+#                 seed -> serve on :3000, internal). Two so deploys can restart
+#                 them one at a time behind Caddy: zero-downtime deploys.
+#                 Concurrent `prisma migrate deploy` is safe (advisory lock).
+#   caddy       — TLS reverse proxy for opencard.id (+ *.opencard.id) and
+#                 tapshare.cards; health-checks both web upstreams and fails over.
+#   portainer   — container management UI, bound to localhost only (SSH-tunnel to reach it)
 #
 # Reads secrets from a .env file in this directory. See .env.prod.example.
 name: opencard
+
+# Shared definition for the two web instances. web_a owns the image build;
+# web_b reuses the same tag, so one build serves both.
+x-web: &web
+  image: opencard-web
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+  environment: &web-env
+    DATABASE_URL: "postgresql://opencard:${DB_PASSWORD}@db:5432/opencard?schema=public"
+    APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Set APP_DB_PASSWORD in deploy/.env}
+    POSTGRES_DB: opencard
+    NODE_ENV: production
+    APP_URL: ${APP_URL:?Set APP_URL (e.g. https://opencard.id)}
+    CARD_URL: ${CARD_URL:?Set CARD_URL (e.g. https://tapshare.cards)}
+    PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-}
+    ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in deploy/.env}
+    SCIM_TOKEN: ${SCIM_TOKEN:?Set SCIM_TOKEN in deploy/.env}
+    SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in deploy/.env}
+    UPLOAD_DIR: /app/uploads
+    SIGNUPS_ENABLED: ${SIGNUPS_ENABLED:-1}
+    SEED_DEMO: ${SEED_DEMO:-0}
+    AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+    AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+    AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+    STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+    STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+    STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+    STRIPE_PRICE_TEAM: ${STRIPE_PRICE_TEAM:-}
+    STRIPE_PRICE_DEALER_GROUP: ${STRIPE_PRICE_DEALER_GROUP:-}
+    STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
+    SMTP_HOST: ${SMTP_HOST:-}
+    SMTP_PORT: ${SMTP_PORT:-}
+    SMTP_USER: ${SMTP_USER:-}
+    SMTP_PASS: ${SMTP_PASS:-}
+    SMTP_FROM: ${SMTP_FROM:-}
+    # Proxy hops in front of the app for client-IP resolution (rate limits,
+    # logs, audit). This deploy is client -> Cloudflare -> Caddy -> app = 2.
+    TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-2}
+    # Staff console backup & restore page reads/writes the host backup dir.
+    BACKUP_DIR: /app/backups
+    PORT: "3000"
+  volumes:
+    - uploads_data:/app/uploads
+    - /opt/opencard/backups:/app/backups
+  command: >
+    sh -c "set -e;
+           npx prisma migrate deploy || { npx prisma migrate resolve --applied 0_init && npx prisma migrate deploy; };
+           node dist/db-bootstrap.js;
+           node dist/seed.js || true;
+           exec node dist/server.js"
+  # Deploys use `up --wait`: the new container must pass this before the old
+  # sibling is touched. start_period covers migrate+bootstrap at boot.
+  healthcheck:
+    test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+    interval: 5s
+    timeout: 5s
+    retries: 6
+    start_period: 45s
 
 services:
   db:
@@ -23,63 +87,20 @@ services:
       timeout: 5s
       retries: 10
 
-  web:
+  web_a:
+    <<: *web
     build:
       context: ..
       dockerfile: Dockerfile
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: "postgresql://opencard:${DB_PASSWORD}@db:5432/opencard?schema=public"
-      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Set APP_DB_PASSWORD in deploy/.env}
-      POSTGRES_DB: opencard
-      NODE_ENV: production
-      APP_URL: ${APP_URL:?Set APP_URL (e.g. https://opencard.id)}
-      CARD_URL: ${CARD_URL:?Set CARD_URL (e.g. https://tapshare.cards)}
-      PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-}
-      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in deploy/.env}
-      SCIM_TOKEN: ${SCIM_TOKEN:?Set SCIM_TOKEN in deploy/.env}
-      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in deploy/.env}
-      UPLOAD_DIR: /app/uploads
-      SIGNUPS_ENABLED: ${SIGNUPS_ENABLED:-1}
-      SEED_DEMO: ${SEED_DEMO:-0}
-      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
-      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
-      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
-      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
-      STRIPE_PRICE_TEAM: ${STRIPE_PRICE_TEAM:-}
-      STRIPE_PRICE_DEALER_GROUP: ${STRIPE_PRICE_DEALER_GROUP:-}
-      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASS: ${SMTP_PASS:-}
-      SMTP_FROM: ${SMTP_FROM:-}
-      # Proxy hops in front of the app for client-IP resolution (rate limits,
-      # logs, audit). This deploy is client -> Cloudflare -> Caddy -> app = 2.
-      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-2}
-      # Staff console backup & restore page reads/writes the host backup dir.
-      BACKUP_DIR: /app/backups
-      PORT: "3000"
-    volumes:
-      - uploads_data:/app/uploads
-      - /opt/opencard/backups:/app/backups
-    command: >
-      sh -c "set -e;
-             npx prisma migrate deploy || { npx prisma migrate resolve --applied 0_init && npx prisma migrate deploy; };
-             node dist/db-bootstrap.js;
-             node dist/seed.js || true;
-             exec node dist/server.js"
+
+  web_b:
+    <<: *web
 
   caddy:
     image: caddy:2
     restart: unless-stopped
     depends_on:
-      - web
+      - web_a
     ports:
       - "80:80"
       - "443:443"

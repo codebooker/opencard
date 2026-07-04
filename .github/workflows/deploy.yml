@@ -39,10 +39,28 @@ jobs:
             --exclude '/Caddyfile' --exclude '/certs' --exclude '*.log' --exclude '/backups' \
             ./ "root@${{ secrets.VM_HOST }}:/opt/opencard/"
 
-      - name: Build and restart containers
+      - name: Rolling deploy (zero downtime)
+        # 1. Build the new image while the old containers keep serving.
+        # 2. Recreate web_a and wait for its healthcheck; Caddy fails over to
+        #    web_b meanwhile. If the new image is broken, --wait fails, the
+        #    deploy aborts, and the old code keeps running on web_b.
+        # 3. Reload Caddy config gracefully (no listener restart).
+        # 4. Recreate web_b the same way; Caddy is on web_a (new code) already.
+        # 5. Final `up` reconciles the rest (db config, orphans from the old
+        #    single-`web` layout).
         run: |
-          ssh -i ~/.ssh/deploy_key "root@${{ secrets.VM_HOST }}" \
-            "cd /opt/opencard && cp deploy/Caddyfile Caddyfile && docker compose -f deploy/docker-compose.prod.yml up -d --build"
+          ssh -i ~/.ssh/deploy_key "root@${{ secrets.VM_HOST }}" bash -s <<'EOF'
+          set -euo pipefail
+          cd /opt/opencard
+          cp deploy/Caddyfile Caddyfile
+          DC="docker compose -f deploy/docker-compose.prod.yml"
+          $DC build web_a
+          $DC up -d db
+          $DC up -d --no-deps --wait web_a
+          $DC exec -T caddy caddy reload --config /etc/caddy/Caddyfile || $DC up -d caddy
+          $DC up -d --no-deps --wait web_b
+          $DC up -d --remove-orphans
+          EOF
 
       - name: Smoke test
         run: |
