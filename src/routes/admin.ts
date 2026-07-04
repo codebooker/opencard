@@ -1423,8 +1423,9 @@ adminRouter.post("/templates/:id/delete", async (req, res) => {
 // Dealership rooftop profile fields parsed from the location editor form.
 function rooftopProfile(b: any) {
   return {
-    // Checkbox is "show footer"; absent = hide. The location form always renders it.
+    // Checkboxes are "show X"; absent = hide. The location form always renders them.
     hideCardFooter: b.showFooter !== "1",
+    hideDealerHeader: b.showDealerHeader !== "1",
     oemBrands: parseOemBrands(b.oemBrands),
     phone: clean(b.phone),
     website: clean(b.website),
@@ -1735,6 +1736,7 @@ function baseDesign(loc: any) {
     locweb: loc.website || "",
     oems,
     footer: loc.hideCardFooter ? "0" : "1",
+    dealerheader: loc.hideDealerHeader ? "0" : "1",
     qrDefault: b.showQr ? "1" : "0",
   };
 }

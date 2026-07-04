@@ -266,6 +266,7 @@ model Location {
   primaryColor String?  // override brand color
   layout       String?  // override brand layout
   hideCardFooter Boolean @default(false) // hide the "Brand · Store" footer on this store's cards
+  hideDealerHeader Boolean @default(true) // store name + OEM badges above the dealer CTA buttons (hidden by default: redundant with the footer)
   address      Json?    // default address shown on this store's cards
   // Dealership rooftop profile (Phase 4).
   oemBrands    Json     @default("[]") // OEM franchises carried, e.g. ["Ford","Lincoln"]

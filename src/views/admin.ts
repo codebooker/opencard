@@ -1122,6 +1122,9 @@ export function locationForm(
     <label class="chk" style="margin-top:12px"><input type="checkbox" name="showFooter" value="1" ${
       l.hideCardFooter ? "" : "checked"
     } /> Show the "${esc(t.brandSingular)} · ${esc(t.locationSingular)}" footer on ${esc(lower(t.cardPlural))} and landing pages</label>
+    <label class="chk"><input type="checkbox" name="showDealerHeader" value="1" ${
+      l.hideDealerHeader ? "" : "checked"
+    } /> Show the ${esc(lower(t.locationSingular))} name and franchise badges above the action buttons on ${esc(lower(t.cardPlural))}</label>
     <h3>${esc(t.locationSingular)} address (shown on ${esc(lower(t.cardPlural))} by default)</h3>
     <label>Address line 1</label><input name="addr_line1" value="${esc(addr.line1)}" />
     <div class="grid2">

@@ -139,12 +139,17 @@ export function renderCardPage(
   // Order: department -> role -> rooftop, de-duped.
   const dealerCtas = mergeCtas(mergeCtas(deptCtas, roleCtas), rooftopCtas(rooftop));
   const oems = parseOemBrands(rooftop.oemBrands);
-  const oemBadges = oems.length
-    ? `<div class="oem-badges">${oems.map((o) => `<span class="oem">${esc(o)}</span>`).join("")}</div>`
-    : "";
+  // Per-store toggle: the name + franchise badges above the buttons can be
+  // hidden (the buttons themselves stay).
+  const showDealerHeader = !(card.location as any).hideDealerHeader;
+  const oemBadges =
+    showDealerHeader && oems.length
+      ? `<div class="oem-badges">${oems.map((o) => `<span class="oem">${esc(o)}</span>`).join("")}</div>`
+      : "";
+  const dealerName = showDealerHeader ? `<p class="dealer-name">${esc(card.location.name)}</p>` : "";
   const dealerSection = dealerCtas.length
     ? `<section class="dealer">
-    <p class="dealer-name">${esc(card.location.name)}</p>
+    ${dealerName}
     ${oemBadges}
     <div class="dealer-ctas">${dealerCtas
       .map(
@@ -156,7 +161,7 @@ export function renderCardPage(
       .join("")}</div>
   </section>`
     : oemBadges
-    ? `<section class="dealer"><p class="dealer-name">${esc(card.location.name)}</p>${oemBadges}</section>`
+    ? `<section class="dealer">${dealerName}${oemBadges}</section>`
     : "";
 
   const body = `

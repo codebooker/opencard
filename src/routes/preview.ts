@@ -105,6 +105,7 @@ previewRouter.get("/card", async (req, res) => {
     sample.location.website = s(q.locweb);
     sample.location.oemBrands = s(q.oems);
     sample.location.hideCardFooter = String(q.footer) === "0";
+    sample.location.hideDealerHeader = String(q.dealerheader) === "0";
     if (q.brandname) sample.location.brand.name = s(q.brandname, 60);
     sample.showQr = showQr;
   }

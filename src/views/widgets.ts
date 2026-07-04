@@ -492,7 +492,8 @@ export function cardLivePreviewScript(): string {
         +'&locphone='+encodeURIComponent(base.locphone||'')
         +'&locweb='+encodeURIComponent(base.locweb||'')
         +'&oems='+encodeURIComponent(base.oems||'')
-        +'&footer='+encodeURIComponent(base.footer||'1');
+        +'&footer='+encodeURIComponent(base.footer||'1')
+        +'&dealerheader='+encodeURIComponent(base.dealerheader||'1');
       var qrSel=form.querySelector('select[name=showQr]');
       var qr=qrSel&&qrSel.value?qrSel.value:(base.qrDefault||'1');
       p+='&qr='+encodeURIComponent(qr);
