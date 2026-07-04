@@ -46,6 +46,12 @@ Fine for a test box; not for paying tenants.
   first; production promotes from it.
 - Performance pass: review Prisma indexes against the analytics and leads
   queries; load-test the public card path (it's the traffic magnet).
+- Zero-downtime deploys (post-launch follow-up): today's pipeline stops the
+  old web container before the new one is ready (~15-30s blip per deploy,
+  faithfully reported by the uptime monitor). Fix: pre-build the image, then
+  rotate two web containers behind Caddy (or compose up --wait with a
+  healthcheck) so the swap is invisible. Do this before real clients would
+  notice a deploy.
 
 ## Phase 13: Finish What's Started
 
