@@ -170,6 +170,10 @@ export function cropperScript(): string {
         nw=img.naturalWidth; nh=img.naturalHeight; base=Math.max(S/nw, S/nh);
         ox=0; oy=0; zoom.value=1; ready=true; done=false; apply(); cropper.hidden=false;
       };
+      // Preview failed (unsupported format, blocked URL): disarm the cropper so
+      // the submit interception can't run against a broken image — the picked
+      // file still uploads as-is, it just skips the crop step.
+      img.onerror=function(){ ready=false; cropper.hidden=true; };
       img.src=url;
     }
     input.addEventListener('change', function(){
@@ -197,15 +201,19 @@ export function cropperScript(): string {
     stage.addEventListener('pointerup', function(){ drag=false; });
     form.addEventListener('submit', function(e){
       if(!ready || done) return;
-      e.preventDefault();
-      var T=600, cv=document.createElement('canvas'); cv.width=T; cv.height=T;
-      var ctx=cv.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,T,T);
-      var sc=T/S, ds=k*sc, dw=nw*ds, dh=nh*ds, cx=T/2+ox*sc, cy=T/2+oy*sc;
-      ctx.drawImage(img, cx-dw/2, cy-dh/2, dw, dh);
-      cv.toBlob(function(blob){
-        try{ var file=new File([blob],'photo.jpg',{type:'image/jpeg'}); var dt=new DataTransfer(); dt.items.add(file); input.files=dt.files; }catch(_){}
-        done=true; form.submit();
-      }, 'image/jpeg', 0.9);
+      // If the crop export fails for ANY reason, the save must still go
+      // through with the original file — never let the cropper eat a submit.
+      try{
+        e.preventDefault();
+        var T=600, cv=document.createElement('canvas'); cv.width=T; cv.height=T;
+        var ctx=cv.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,T,T);
+        var sc=T/S, ds=k*sc, dw=nw*ds, dh=nh*ds, cx=T/2+ox*sc, cy=T/2+oy*sc;
+        ctx.drawImage(img, cx-dw/2, cy-dh/2, dw, dh);
+        cv.toBlob(function(blob){
+          try{ if(blob){ var file=new File([blob],'photo.jpg',{type:'image/jpeg'}); var dt=new DataTransfer(); dt.items.add(file); input.files=dt.files; } }catch(_){}
+          done=true; form.submit();
+        }, 'image/jpeg', 0.9);
+      }catch(_){ done=true; form.submit(); }
     });
   })();`;
 }

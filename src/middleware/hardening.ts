@@ -18,11 +18,15 @@ function log(entry: Record<string, unknown>): void {
 // ---------- Security headers ----------
 // Inline scripts/handlers and same-origin preview iframes require 'unsafe-inline'
 // and frame-src/frame-ancestors 'self'. External card photos/logos may be https.
+// blob: in img-src is required by the photo cropper's local preview (it renders
+// the just-picked file via URL.createObjectURL before anything is uploaded);
+// blob: URLs can only reference objects created by this same page, so this
+// grants nothing to third parties.
 const CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: https:",
+  "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
   "connect-src 'self'",
   "frame-src 'self'",
