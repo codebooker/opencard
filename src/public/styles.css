@@ -27,6 +27,7 @@
 
   --radius: 10px;
   --radius-lg: 14px;
+  --editor-pad-x: 24px; /* horizontal padding of editor cards (shrinks on phones) */
   --shadow-1: 0 1px 2px rgba(17, 24, 39, .04), 0 1px 3px rgba(17, 24, 39, .06);
   --shadow-2: 0 4px 16px rgba(17, 24, 39, .07);
   --shadow-3: 0 12px 48px rgba(17, 24, 39, .12);
@@ -323,7 +324,7 @@ td { font-variant-numeric: tabular-nums; }
    Forms
    ============================================================ */
 form.editor {
-  background: var(--paper); padding: 22px 24px; border-radius: var(--radius-lg);
+  background: var(--paper); padding: 22px var(--editor-pad-x); border-radius: var(--radius-lg);
   max-width: 720px; border: 1px solid var(--line); box-shadow: var(--shadow-1);
 }
 form.editor label { display: block; font-size: 13px; color: var(--ink-2); margin: 14px 0 5px; font-weight: 600; }
@@ -343,7 +344,7 @@ form.editor input[readonly] { background: var(--wash-2); color: var(--ink-3); }
 /* Section headings inside editor forms: full-bleed dividers that break a long
    form into scannable blocks (brand/location/card/template editors). */
 form.editor h3 {
-  margin: 28px -24px 6px; padding: 18px 24px 0;
+  margin: 28px calc(-1 * var(--editor-pad-x)) 6px; padding: 18px var(--editor-pad-x) 0;
   border-top: 1px solid var(--line-soft);
   font-size: 14.5px; font-weight: 700; color: var(--ink);
   text-transform: none; letter-spacing: 0;
@@ -354,7 +355,7 @@ form.editor h3 + .muted, form.editor h3 + p.muted { margin: 0 0 12px; }
 /* Consistent action row at the end of a form. */
 .form-actions {
   display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-  margin: 24px -24px 0; padding: 16px 24px 0;
+  margin: 24px calc(-1 * var(--editor-pad-x)) 0; padding: 16px var(--editor-pad-x) 0;
   border-top: 1px solid var(--line-soft);
 }
 form.editor .form-actions button, form.editor .form-actions .btn { width: auto; }
@@ -560,13 +561,56 @@ form.editor .chk input { width: auto; accent-color: var(--accent); }
 input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 
 /* ============================================================
-   Small screens
+   Small screens (phones + small tablets)
    ============================================================ */
 @media (max-width: 720px) {
-  .admin { padding: 20px 14px 48px; }
-  .site-head-in { padding: 8px 14px; gap: 12px; }
+  :root { --editor-pad-x: 14px; }
+  .admin { padding: 16px 12px 48px; }
+  .admin h2 { font-size: 17px; }
+
+  /* Compact sticky header: smaller logo + tighter nav that scrolls. */
+  .site-head-in { padding: 6px 12px; gap: 10px; }
+  .site-logo img { height: 28px; }
+  .site-nav { gap: 0; }
+  .site-nav a { padding: 7px 9px; font-size: 13px; }
+  .site-actions .btn { padding: 6px 10px; font-size: 13px; }
+
+  /* Page headers stack: title block above the action buttons. */
+  .topbar { flex-direction: column; align-items: stretch; gap: 8px; }
+  .topbar > div { justify-content: flex-start; }
+  .topbar .btn { padding: 7px 11px; font-size: 13px; }
+
   .grid2 { grid-template-columns: 1fr; }
+
   /* Tables scroll sideways instead of crushing their columns. */
-  table { display: block; overflow-x: auto; }
-  .auth-card { padding: 26px 20px; }
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  th, td { padding: 8px 10px; font-size: 13px; }
+
+  form.editor { padding: 16px var(--editor-pad-x); border-radius: var(--radius); }
+  .panel { padding: 14px; }
+  .item-card { padding: 12px; }
+  .danger-zone { padding: 14px; }
+
+  .cards-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .stat { padding: 12px 14px; }
+  .stat .n { font-size: 24px; }
+
+  .self-fields { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .design-preview-wrap { flex: 1 1 100%; }
+
+  .auth { padding: 14px; align-items: flex-start; padding-top: 8vh; }
+  .auth-card { padding: 24px 18px; }
+
+  /* Bigger tap targets and no iOS zoom-on-focus (needs >=16px inputs). */
+  form.editor input, form.editor textarea, form.editor select,
+  .auth-form input, .auth-form select, .connect input, .connect textarea, .connect select {
+    font-size: 16px;
+  }
+  .btn { min-height: 38px; }
+}
+
+@media (max-width: 400px) {
+  /* Tiny phones: labeled-value editor rows stack their dropdown + input. */
+  .lr-row, .social-row { flex-wrap: wrap; }
+  .lr-row .lr-label, .social-row .social-type { flex: 1 1 100%; }
 }
