@@ -96,7 +96,9 @@ code { background: var(--wash-2); border: 1px solid var(--line-soft); border-rad
 .ident h1 { margin: 0; font-size: 26px; }
 .pronouns { color: var(--ink-3); margin: 2px 0; font-style: italic; }
 .title { margin: 8px 0 2px; font-weight: 600; color: var(--primary); }
-.company { margin: 0; color: #4b5563; }
+/* Derive from the template text color so dark themes stay legible (a fixed
+   gray disappeared on dark backgrounds like the Midnight preset). */
+.company { margin: 0; color: color-mix(in srgb, var(--text, #111827) 62%, transparent); }
 .bio { padding: 8px 24px; text-align: center; color: var(--ink-2); }
 .bio p { margin: 8px 0; }
 
@@ -150,7 +152,7 @@ code { background: var(--wash-2); border: 1px solid var(--line-soft); border-rad
 .layout-spotlight .hero { height: 320px; overflow: hidden; }
 .layout-spotlight .hero::after {
   content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(180deg, rgba(0,0,0,0) 42%, rgba(0,0,0,.58));
+  background: linear-gradient(180deg, rgba(0,0,0,0) 30%, rgba(0,0,0,.62));
 }
 .layout-spotlight .photo {
   position: absolute; inset: 0; transform: none;
@@ -163,7 +165,9 @@ code { background: var(--wash-2); border: 1px solid var(--line-soft); border-rad
 }
 .layout-spotlight .logo { z-index: 2; }
 .layout-spotlight .ident {
-  margin-top: -92px; position: relative; z-index: 2;
+  /* Pull the whole identity block (name, pronouns, title, company) onto the
+     photo — -92px left the last line dangling below the hero edge. */
+  margin-top: -136px; position: relative; z-index: 2;
   text-align: left; padding: 0 24px 16px;
   color: #fff; text-shadow: 0 1px 10px rgba(0,0,0,.5);
 }
