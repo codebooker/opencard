@@ -56,18 +56,7 @@ export function loginPage(error?: string, info?: string, branding?: LoginBrandin
         <a class="btn secondary auth-sso" href="/me/login">Sign in with SSO</a>`
             : ""
         }
-        ${
-          branding
-            ? ""
-            : `<p class="auth-foot">New here? <a href="/signup">Create an account</a></p>
-        <details class="auth-breakglass">
-          <summary>Break-glass token</summary>
-          <form method="POST" action="/admin/login/token" style="margin-top:8px">
-            <input name="token" type="password" placeholder="ADMIN_TOKEN" />
-            <button class="btn secondary" type="submit" style="margin-top:8px">Use token</button>
-          </form>
-        </details>`
-        }
+        ${branding ? "" : `<p class="auth-foot">New here? <a href="/signup">Create an account</a></p>`}
       </div>
     </div>`,
   });
@@ -144,6 +133,23 @@ export function invitePage(token: string, email: string, error?: string): string
 
 export function authNoticePage(title: string, message: string, cta: { href: string; label: string }): string {
   return authCard(title, message, `<a class="btn auth-submit auth-sso" href="${esc(cta.href)}">${esc(cta.label)}</a>`);
+}
+
+// Break-glass token sign-in. Deliberately on its own unlinked page
+// (/admin/login/breakglass) — an emergency door shouldn't be advertised on
+// the login screen.
+export function breakglassPage(error?: string): string {
+  return authCard(
+    "Break-glass access",
+    "Platform-owner emergency sign-in using the instance's ADMIN_TOKEN.",
+    `<form method="POST" action="/admin/login/token" class="auth-form">
+      <label>Admin token</label>
+      <input name="token" type="password" autocomplete="off" placeholder="ADMIN_TOKEN" required autofocus />
+      <button class="btn auth-submit" type="submit">Sign in with token</button>
+    </form>
+    <p class="auth-foot"><a href="/admin/login">Back to normal sign in</a></p>`,
+    { error }
+  );
 }
 
 export function mfaPage(error?: string): string {

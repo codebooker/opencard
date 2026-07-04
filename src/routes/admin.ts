@@ -9,6 +9,7 @@ import {
   reqAdmin,
   forbidden,
   loginPage,
+  breakglassPage,
   mfaPage,
   forgotPage,
   resetPage,
@@ -142,7 +143,9 @@ adminRouter.get("/login", async (req, res) =>
   )
 );
 
-// Super-admin break-glass token login.
+// Super-admin break-glass token login — on its own unlinked page.
+adminRouter.get("/login/breakglass", (_req, res) => res.send(breakglassPage()));
+
 adminRouter.post("/login/token", async (req, res) => {
   if ((req.body?.token || "") === config.adminToken) {
     res.cookie("oc_admin", config.adminToken, cookieOptions(12 * 60 * 60 * 1000));
@@ -150,7 +153,7 @@ adminRouter.post("/login/token", async (req, res) => {
     return res.redirect("/admin");
   }
   recordAudit({ orgId: await defaultOrgId(), action: "login.failed", summary: "break-glass token", ip: reqIp(req) });
-  res.status(401).send(loginPage("Invalid token.", undefined, await brandingFor(req)));
+  res.status(401).send(breakglassPage("Invalid token."));
 });
 
 // Email + password. MFA is optional: if the account has it enabled we ask for a
