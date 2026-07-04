@@ -1,0 +1,55 @@
+name: Deploy
+
+# Push-to-deploy for the production VM. Change the branch to `main` when the
+# repo's default branch changes at launch.
+on:
+  push:
+    branches: [dealership-vertical]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Sync code to VM
+        # Same excludes as deploy.command: host-managed infra (Caddyfile,
+        # certs), runtime secrets (.env files), and data (uploads, backups)
+        # must survive --delete.
+        run: |
+          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key" \
+            --exclude '.git' --exclude 'node_modules' --exclude 'dist' --exclude '.test-build' \
+            --exclude 'uploads' --exclude 'deploy/.env' --exclude 'deploy/certs' --exclude 'deploy/deploy.config' \
+            --exclude 'deploy/backup.env' --exclude 'deploy/healthcheck.env' \
+            --exclude '/Caddyfile' --exclude '/certs' --exclude '*.log' --exclude '/backups' \
+            ./ "root@${{ secrets.VM_HOST }}:/opt/opencard/"
+
+      - name: Build and restart containers
+        run: |
+          ssh -i ~/.ssh/deploy_key "root@${{ secrets.VM_HOST }}" \
+            "cd /opt/opencard && cp deploy/Caddyfile Caddyfile && docker compose -f deploy/docker-compose.prod.yml up -d --build"
+
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://opencard.id/healthz || echo 000)
+            [ "$code" = "200" ] && echo "healthz OK" && exit 0
+            echo "waiting for app (got $code)..."; sleep 10
+          done
+          echo "deploy smoke test FAILED" && exit 1
