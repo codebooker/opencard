@@ -61,6 +61,7 @@ export async function purgeOrgData(orgId: string): Promise<void> {
   await prisma.webhookEndpoint.deleteMany({ where: { orgId } });
   await prisma.apiKey.deleteMany({ where: { orgId } });
   await prisma.samlConfig.deleteMany({ where: { orgId } });
+  await prisma.directoryConfig.deleteMany({ where: { orgId } });
   await prisma.asset.deleteMany({ where: { orgId } });
   await prisma.event.deleteMany({ where: { orgId } }); // after assets (asset.eventId FK)
   await prisma.card.deleteMany({ where: { orgId } });

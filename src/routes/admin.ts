@@ -58,7 +58,19 @@ import { exportFilename } from "../dataexport";
 import { parseRetentionDays } from "../retention";
 import { getPlatformConfig, updatePlatformConfig } from "../platform-config";
 import { listBackups, runManualBackup, restoreClientToBackup, withRestoreLock, humanSize } from "../backups";
-import { graphConfigured, listDirectoryUsers, searchGroups, planImport, applyImport } from "../dirimport";
+import {
+  credsForOrg,
+  directoryConfigSummary,
+  saveDirectoryConfig,
+  deleteDirectoryConfig,
+  testGraphCreds,
+  listDirectoryUsers,
+  searchGroups,
+  filterByDepartment,
+  planImport,
+  applyImport,
+  onlySelected,
+} from "../dirimport";
 import { uploadDir } from "../upload";
 import { isVertical } from "../terminology";
 import { clean, parseLabeled, parseSocials, parseAddress } from "../parse";
@@ -416,49 +428,119 @@ adminRouter.get("/platform", async (req, res) => {
 });
 
 // ---------- directory import wizard (Phase 13) ----------
+// Self-service: org owners connect their OWN Azure tenant on this page.
+// Platform staff fall back to env credentials only for testing.
+
+async function importCtx(req: any) {
+  const p = reqAdmin(req);
+  const t = await currentTerminology(p.orgId);
+  const resolved = await credsForOrg(p.orgId, p.platform);
+  const summary = await directoryConfigSummary(p.orgId);
+  return { p, t, resolved, config: summary ? { ...summary, source: "org" as const } : resolved ? { tenantId: "", clientId: "", source: "env" as const } : null };
+}
+
 adminRouter.get("/import", async (req, res) => {
   const p = reqAdmin(req);
   if (!p.super) return forbidden(res);
-  res.send(V.importView({ configured: graphConfigured(), t: await currentTerminology(p.orgId) }));
+  const ctx = await importCtx(req);
+  res.send(V.importView({ configured: !!ctx.resolved, t: ctx.t, config: ctx.config, showSettings: req.query.settings === "1" }));
+});
+
+// Save/replace the org's Azure credentials, then prove they work.
+adminRouter.post("/import/config", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.super) return forbidden(res);
+  const t = await currentTerminology(p.orgId);
+  const tenantId = clean(req.body?.tenantId) || "";
+  const clientId = clean(req.body?.clientId) || "";
+  const clientSecret = String(req.body?.clientSecret || "").trim();
+  try {
+    if (!tenantId || !clientId) throw new Error("Directory (tenant) ID and Application (client) ID are required.");
+    await saveDirectoryConfig(p.orgId, { tenantId, clientId, clientSecret });
+    const resolved = await credsForOrg(p.orgId, false);
+    const test = resolved ? await testGraphCreds(resolved.creds) : { ok: false as const, message: "Saved, but the secret could not be read back." };
+    audit(req, p, "import.config", { summary: `Azure directory connection ${test.ok ? "verified" : "saved (test failed)"}` });
+    res.send(
+      V.importView({
+        configured: test.ok,
+        t,
+        config: { tenantId, clientId, source: "org" },
+        showSettings: !test.ok,
+        testResult: test.ok ? "Connected — credentials verified against your directory." : null,
+        error: test.ok ? undefined : `Saved, but the test call failed: ${test.message}`,
+      })
+    );
+  } catch (e: any) {
+    res.send(V.importView({ configured: false, t, config: null, showSettings: true, error: String(e?.message || e).slice(0, 400) }));
+  }
+});
+
+adminRouter.post("/import/config/delete", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.super) return forbidden(res);
+  await deleteDirectoryConfig(p.orgId);
+  audit(req, p, "import.config", { summary: "Azure directory connection removed" });
+  res.redirect("/admin/import");
 });
 
 adminRouter.post("/import/preview", async (req, res) => {
   const p = reqAdmin(req);
   if (!p.super) return forbidden(res);
-  const t = await currentTerminology(p.orgId);
-  if (!graphConfigured()) return res.send(V.importView({ configured: false, t }));
+  const ctx = await importCtx(req);
+  const { t } = ctx;
+  if (!ctx.resolved) return res.send(V.importView({ configured: false, t, config: ctx.config }));
+  const creds = ctx.resolved.creds;
   const groupId = clean(req.body?.groupId);
+  const deptQuery = clean(req.body?.deptQuery) || "";
   const source = String(req.body?.source || (groupId ? "group" : "all"));
   try {
     if (source === "groupsearch") {
       const q = clean(req.body?.groupQuery) || "";
-      const groups = q ? await searchGroups(q) : [];
-      return res.send(V.importView({ configured: true, t, groups, groupQuery: q }));
+      const groups = q ? await searchGroups(creds, q) : [];
+      return res.send(V.importView({ configured: true, t, config: ctx.config, groups, groupQuery: q }));
     }
-    const users = await listDirectoryUsers(groupId || undefined);
+    let users = await listDirectoryUsers(creds, groupId || undefined);
+    if (source === "department" && deptQuery) users = filterByDepartment(users, deptQuery);
     const rows = await planImport(p.orgId, users);
-    res.send(V.importView({ configured: true, t, plan: { rows, source: groupId ? "group" : "all", groupId: groupId || undefined } }));
+    res.send(
+      V.importView({
+        configured: true,
+        t,
+        config: ctx.config,
+        plan: { rows, source, groupId: groupId || undefined, deptQuery: source === "department" ? deptQuery : undefined },
+      })
+    );
   } catch (e: any) {
-    res.send(V.importView({ configured: true, t, error: String(e?.message || e).slice(0, 400) }));
+    res.send(V.importView({ configured: true, t, config: ctx.config, error: String(e?.message || e).slice(0, 400) }));
   }
 });
 
 adminRouter.post("/import/apply", async (req, res) => {
   const p = reqAdmin(req);
   if (!p.super) return forbidden(res);
-  const t = await currentTerminology(p.orgId);
-  if (!graphConfigured()) return res.send(V.importView({ configured: false, t }));
+  const ctx = await importCtx(req);
+  const { t } = ctx;
+  if (!ctx.resolved) return res.send(V.importView({ configured: false, t, config: ctx.config }));
+  const creds = ctx.resolved.creds;
   const groupId = clean(req.body?.groupId);
+  const deptQuery = clean(req.body?.deptQuery) || "";
+  const source = String(req.body?.source || (groupId ? "group" : "all"));
+  const selRaw = req.body?.sel;
+  const selected = (Array.isArray(selRaw) ? selRaw : selRaw ? [selRaw] : []).map((s: any) => String(s)).slice(0, 5000);
   try {
+    if (!selected.length) throw new Error("Nobody is selected — tick at least one person in the preview.");
     // Re-fetch and re-plan at apply time: the directory is the source of
     // truth, and existing emails stay skipped either way.
-    const users = await listDirectoryUsers(groupId || undefined);
-    const rows = await planImport(p.orgId, users);
+    let users = await listDirectoryUsers(creds, groupId || undefined);
+    if (source === "department" && deptQuery) users = filterByDepartment(users, deptQuery);
+    const rows = onlySelected(await planImport(p.orgId, users), selected);
     const result = await applyImport(p.orgId, rows);
-    audit(req, p, "import.graph", { summary: `${result.created} created, ${result.skipped} skipped${groupId ? ` (group ${groupId})` : ""}` });
-    res.send(V.importView({ configured: true, t, result }));
+    audit(req, p, "import.graph", {
+      summary: `${result.created} created, ${result.skipped} skipped (${selected.length} selected${groupId ? `, group ${groupId}` : ""}${deptQuery ? `, dept "${deptQuery}"` : ""})`,
+    });
+    res.send(V.importView({ configured: true, t, config: ctx.config, result }));
   } catch (e: any) {
-    res.send(V.importView({ configured: true, t, error: String(e?.message || e).slice(0, 400) }));
+    res.send(V.importView({ configured: true, t, config: ctx.config, error: String(e?.message || e).slice(0, 400) }));
   }
 });
 

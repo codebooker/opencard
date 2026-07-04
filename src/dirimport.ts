@@ -2,31 +2,76 @@ import { config } from "./config";
 import { prisma, runWithOrg } from "./db";
 import { uniqueSlug } from "./slug";
 import { emitEvent, cardPayload } from "./webhooks";
+import * as secretbox from "./secretbox";
 
 // Microsoft Graph directory import (Phase 13): bulk-backfill existing
 // employees into cards. SCIM handles ongoing provisioning; this wizard is the
-// day-one on-ramp — pick all users or one group, PREVIEW the mapping, then
-// create. Cards are created exactly like SCIM does (User + Card together),
-// and existing emails are always skipped, so re-running is safe.
+// day-one on-ramp — pick everyone, one group, or one department, PREVIEW the
+// mapping, tick the people you want, then create. Cards are created exactly
+// like SCIM does (User + Card together), and existing emails are always
+// skipped, so re-running is safe.
 
-export function graphConfigured(): boolean {
-  return !!(config.azure.tenantId && config.azure.clientId && config.azure.clientSecret);
+export type GraphCreds = { tenantId: string; clientId: string; clientSecret: string };
+
+function envGraphCreds(): GraphCreds | null {
+  const { tenantId, clientId, clientSecret } = config.azure;
+  return tenantId && clientId && clientSecret ? { tenantId, clientId, clientSecret } : null;
+}
+
+// Resolve the credentials to use for an org: the org's own self-service config
+// first; the platform-level env credentials ONLY for OpenCard staff (so one
+// tenant can never import from the platform's directory by omission).
+export async function credsForOrg(orgId: string, isPlatformStaff: boolean): Promise<{ creds: GraphCreds; source: "org" | "env" } | null> {
+  const row = await prisma.directoryConfig.findUnique({ where: { orgId } });
+  if (row) {
+    const secret = secretbox.open(row.clientSecret);
+    if (secret) return { creds: { tenantId: row.tenantId, clientId: row.clientId, clientSecret: secret }, source: "org" };
+  }
+  const env = envGraphCreds();
+  if (env && isPlatformStaff) return { creds: env, source: "env" };
+  return null;
+}
+
+// Public shape for the settings form (never includes the secret).
+export async function directoryConfigSummary(orgId: string): Promise<{ tenantId: string; clientId: string } | null> {
+  const row = await prisma.directoryConfig.findUnique({ where: { orgId }, select: { tenantId: true, clientId: true } });
+  return row;
+}
+
+// Upsert the org's credentials. Blank secret on an existing config means
+// "keep the current one" so tenants can fix a typo'd ID without re-pasting.
+export async function saveDirectoryConfig(orgId: string, input: { tenantId: string; clientId: string; clientSecret: string }): Promise<void> {
+  const existing = await prisma.directoryConfig.findUnique({ where: { orgId } });
+  const sealed = input.clientSecret ? secretbox.seal(input.clientSecret) : existing?.clientSecret;
+  if (!sealed) throw new Error("A client secret is required.");
+  await prisma.directoryConfig.upsert({
+    where: { orgId },
+    create: { orgId, tenantId: input.tenantId, clientId: input.clientId, clientSecret: sealed },
+    update: { tenantId: input.tenantId, clientId: input.clientId, clientSecret: sealed },
+  });
+  tokenCache.delete(cacheKey({ tenantId: input.tenantId, clientId: input.clientId, clientSecret: "" }));
+}
+
+export async function deleteDirectoryConfig(orgId: string): Promise<void> {
+  await prisma.directoryConfig.deleteMany({ where: { orgId } });
 }
 
 // ---- Graph auth (client credentials; requires APPLICATION permissions
 // User.Read.All — and GroupMember.Read.All for group imports — with admin
-// consent on the app registration already used for OIDC sign-in). ----
-let cachedToken: { token: string; exp: number } | null = null;
+// consent). Tokens are cached per tenant+app, never per process-global. ----
+const tokenCache = new Map<string, { token: string; exp: number }>();
+const cacheKey = (c: GraphCreds) => `${c.tenantId}:${c.clientId}`;
 
-async function graphToken(): Promise<string> {
-  if (cachedToken && cachedToken.exp > Date.now() + 60_000) return cachedToken.token;
+async function graphToken(creds: GraphCreds): Promise<string> {
+  const hit = tokenCache.get(cacheKey(creds));
+  if (hit && hit.exp > Date.now() + 60_000) return hit.token;
   const body = new URLSearchParams({
-    client_id: config.azure.clientId,
-    client_secret: config.azure.clientSecret,
+    client_id: creds.clientId,
+    client_secret: creds.clientSecret,
     grant_type: "client_credentials",
     scope: "https://graph.microsoft.com/.default",
   });
-  const resp = await fetch(`https://login.microsoftonline.com/${config.azure.tenantId}/oauth2/v2.0/token`, {
+  const resp = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(creds.tenantId)}/oauth2/v2.0/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
@@ -34,14 +79,14 @@ async function graphToken(): Promise<string> {
   });
   const json: any = await resp.json().catch(() => ({}));
   if (!resp.ok || !json.access_token) {
-    throw new Error(`Azure token request failed (${resp.status}): ${json.error_description?.slice(0, 200) || json.error || "unknown"}`);
+    throw new Error(`Azure sign-in failed (${resp.status}): ${json.error_description?.slice(0, 200) || json.error || "unknown"}`);
   }
-  cachedToken = { token: json.access_token, exp: Date.now() + (json.expires_in || 3600) * 1000 };
+  tokenCache.set(cacheKey(creds), { token: json.access_token, exp: Date.now() + (json.expires_in || 3600) * 1000 });
   return json.access_token;
 }
 
-async function graphGet(path: string): Promise<any> {
-  const token = await graphToken();
+async function graphGet(creds: GraphCreds, path: string): Promise<any> {
+  const token = await graphToken(creds);
   const resp = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
     headers: { Authorization: `Bearer ${token}`, ConsistencyLevel: "eventual" },
     signal: AbortSignal.timeout(20000),
@@ -62,11 +107,11 @@ const USER_SELECT =
   "$select=id,displayName,givenName,surname,mail,userPrincipalName,jobTitle,department,officeLocation,businessPhones,mobilePhone,accountEnabled";
 const PAGE_CAP = 2000; // sanity cap for a single import run
 
-async function pagedUsers(firstPath: string): Promise<any[]> {
+async function pagedUsers(creds: GraphCreds, firstPath: string): Promise<any[]> {
   const out: any[] = [];
   let url: string | null = firstPath;
   while (url && out.length < PAGE_CAP) {
-    const json: any = await graphGet(url);
+    const json: any = await graphGet(creds, url);
     out.push(...(json.value || []));
     const next: string | undefined = json["@odata.nextLink"];
     url = next ? next.replace("https://graph.microsoft.com/v1.0", "") : null;
@@ -74,18 +119,37 @@ async function pagedUsers(firstPath: string): Promise<any[]> {
   return out.slice(0, PAGE_CAP);
 }
 
-export async function listDirectoryUsers(groupId?: string): Promise<any[]> {
-  if (groupId) return pagedUsers(`/groups/${encodeURIComponent(groupId)}/members/microsoft.graph.user?${USER_SELECT}&$top=999`);
-  return pagedUsers(`/users?${USER_SELECT}&$top=999`);
+export async function listDirectoryUsers(creds: GraphCreds, groupId?: string): Promise<any[]> {
+  if (groupId) return pagedUsers(creds, `/groups/${encodeURIComponent(groupId)}/members/microsoft.graph.user?${USER_SELECT}&$top=999`);
+  return pagedUsers(creds, `/users?${USER_SELECT}&$top=999`);
 }
 
-export async function searchGroups(q: string): Promise<{ id: string; displayName: string }[]> {
+export async function searchGroups(creds: GraphCreds, q: string): Promise<{ id: string; displayName: string }[]> {
   // $search matches any WORD in the group name (prefix per token), unlike a
   // startswith filter — "IT" finds "Tawes IT Team". Requires the
   // ConsistencyLevel: eventual header, which graphGet always sends.
   const safe = q.replace(/["\\]/g, "").slice(0, 60);
-  const json = await graphGet(`/groups?$search=${encodeURIComponent(`"displayName:${safe}"`)}&$select=id,displayName&$top=25`);
+  const json = await graphGet(creds, `/groups?$search=${encodeURIComponent(`"displayName:${safe}"`)}&$select=id,displayName&$top=25`);
   return (json.value || []).map((g: any) => ({ id: g.id, displayName: g.displayName }));
+}
+
+// Departments exist as a user ATTRIBUTE in most tenants (not as groups), so
+// this filters client-side over the fetched directory — case-insensitive
+// substring, e.g. "service" matches "Service" and "Service & Parts".
+export function filterByDepartment(users: any[], q: string): any[] {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return users;
+  return users.filter((u) => String(u?.department || "").toLowerCase().includes(needle));
+}
+
+// Settings-page "Test connection": prove sign-in + User.Read.All in one call.
+export async function testGraphCreds(creds: GraphCreds): Promise<{ ok: true; sample: number } | { ok: false; message: string }> {
+  try {
+    const json = await graphGet(creds, `/users?$select=id&$top=5`);
+    return { ok: true, sample: (json.value || []).length };
+  } catch (e: any) {
+    return { ok: false, message: String(e?.message || e).slice(0, 300) };
+  }
 }
 
 // ---- mapping (pure; unit-tested) ----
@@ -167,6 +231,13 @@ export async function planImport(orgId: string, rawUsers: any[], fallbackLocatio
     });
   }
   return rows;
+}
+
+// Keep only the "create" rows the admin actually ticked in the preview.
+// Selection is by email (stable across the re-fetch at apply time).
+export function onlySelected(rows: PlanRow[], selected: string[]): PlanRow[] {
+  const set = new Set(selected.map((e) => e.toLowerCase().trim()));
+  return rows.filter((r) => r.status === "create" && set.has(r.email));
 }
 
 // Create User + Card pairs for every "create" row — identical shape to SCIM

@@ -76,6 +76,7 @@ model Org {
   webhookDeliveries WebhookDelivery[]
   adminUsers        AdminUser[]
   samlConfig        SamlConfig?
+  directoryConfig   DirectoryConfig?
   departments       Department[]
   assets            Asset[]
   leadEvents        LeadEvent[]
@@ -627,6 +628,22 @@ model SamlConfig {
   idpCert    String? // IdP signing certificate (PEM or bare base64)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+}
+
+// Per-org Azure AD / Entra credentials for the directory import wizard, entered
+// by the tenant themselves on the Import page. The client secret is encrypted
+// at rest (AES-256-GCM keyed off SESSION_SECRET — see secretbox.ts). Only
+// read-only Graph permissions are ever requested, and deliberately NOT part of
+// per-client restore: credentials stay current, like admin accounts.
+model DirectoryConfig {
+  id           String   @id @default(cuid())
+  org          Org      @relation(fields: [orgId], references: [id])
+  orgId        String   @unique
+  tenantId     String
+  clientId     String
+  clientSecret String // encrypted (secretbox seal), never rendered back to the UI
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 // Outbound webhook subscription.

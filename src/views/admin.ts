@@ -1779,12 +1779,17 @@ export function billingView(d: {
 }
 
 // Directory import wizard (Phase 13): backfill employees from Azure AD.
+// Self-service: the tenant connects their own Azure app registration here —
+// no server configuration involved.
 export function importView(d: {
   configured: boolean;
   t: Terminology;
+  config?: { tenantId: string; clientId: string; source: "org" | "env" } | null;
+  showSettings?: boolean;
+  testResult?: string | null;
   groups?: { id: string; displayName: string }[];
   groupQuery?: string;
-  plan?: { rows: any[]; source: string; groupId?: string } | null;
+  plan?: { rows: any[]; source: string; groupId?: string; deptQuery?: string } | null;
   result?: { created: number; skipped: number } | null;
   error?: string | null;
 }): string {
@@ -1795,19 +1800,53 @@ export function importView(d: {
       : s === "exists"
       ? `<span class="pill">already here</span>`
       : `<span class="pill off">disabled in AD</span>`;
-  const setup = `
+  const hasOrgConfig = d.config?.source === "org";
+  const settingsForm = `
   <section class="panel">
-    <h3>Connect Azure AD / Entra</h3>
-    <p class="muted">This wizard needs the Azure app registration (the same one used for employee SSO) to be allowed to READ your directory:</p>
-    <p class="muted" style="margin-top:8px">1. Azure Portal → App registrations → your app → <strong>API permissions</strong>.<br>
-    2. Add <strong>Microsoft Graph → Application permissions</strong>: <code>User.Read.All</code> (and <code>GroupMember.Read.All</code> to import by group).<br>
-    3. Click <strong>Grant admin consent</strong>.<br>
-    4. Ensure <code>AZURE_TENANT_ID</code>, <code>AZURE_CLIENT_ID</code>, <code>AZURE_CLIENT_SECRET</code> are set on this instance.</p>
+    <h3>${hasOrgConfig ? "Update your Azure connection" : "Connect your Azure directory"}</h3>
+    <p class="muted">One-time setup in your own Azure portal — takes about two minutes and needs an Azure admin:</p>
+    <p class="muted" style="margin-top:8px">
+    1. Sign in at <strong>portal.azure.com</strong> → <strong>Microsoft Entra ID</strong> → <strong>App registrations</strong> → <strong>New registration</strong>. Name it "OpenCard import" — no redirect URI needed.<br>
+    2. On the app's <strong>Overview</strong> page, copy the <strong>Directory (tenant) ID</strong> and <strong>Application (client) ID</strong> into the fields below.<br>
+    3. <strong>Certificates &amp; secrets</strong> → <strong>New client secret</strong> → copy the <em>Value</em> right away (Azure shows it only once).<br>
+    4. <strong>API permissions</strong> → <strong>Add a permission</strong> → <strong>Microsoft Graph</strong> → <strong>Application permissions</strong> → tick <code>User.Read.All</code> and <code>GroupMember.Read.All</code> → <strong>Add</strong> → then click <strong>Grant admin consent</strong>.</p>
+    <p class="muted">Both permissions are <strong>read-only</strong>: OpenCard can list people in your directory but can never change anything in it. The secret is stored encrypted and is never shown again here.</p>
+    <form class="editor" method="POST" action="/admin/import/config" style="max-width:none;margin-top:12px">
+      <div class="grid2">
+        <div>
+          <label>Directory (tenant) ID</label>
+          <input name="tenantId" value="${esc(hasOrgConfig ? d.config!.tenantId : "")}" placeholder="00000000-0000-0000-0000-000000000000" required />
+        </div>
+        <div>
+          <label>Application (client) ID</label>
+          <input name="clientId" value="${esc(hasOrgConfig ? d.config!.clientId : "")}" placeholder="00000000-0000-0000-0000-000000000000" required />
+        </div>
+      </div>
+      <label>Client secret ${hasOrgConfig ? `<span class="muted">(leave blank to keep the current one)</span>` : ""}</label>
+      <input name="clientSecret" type="password" autocomplete="off" placeholder="${hasOrgConfig ? "unchanged" : "paste the secret Value from Azure"}" ${hasOrgConfig ? "" : "required"} />
+      <div class="actions" style="margin-top:12px">
+        <button class="btn" type="submit">Save &amp; test connection</button>
+      </div>
+    </form>
+    ${
+      hasOrgConfig
+        ? `<form method="POST" action="/admin/import/config/delete" style="margin-top:10px" onsubmit="return confirm('Remove the Azure connection? Imported ${esc(lower(t.cardPlural))} are kept; you just won\\'t be able to import until it\\'s reconnected.')">
+      <button class="btn danger secondary" type="submit">Remove connection</button>
+    </form>`
+        : ""
+    }
   </section>`;
+  const connectedLine = d.configured
+    ? `<p class="muted" style="margin:0 0 14px">${
+        d.config?.source === "org"
+          ? `Connected to Azure tenant <code>${esc(d.config.tenantId)}</code> · <a href="/admin/import?settings=1">Update connection</a>`
+          : `Using this server's platform test credentials (OpenCard staff only) · <a href="/admin/import?settings=1">Connect this workspace's own directory</a>`
+      }</p>`
+    : "";
   const picker = `
   <section class="panel">
     <h3>Who should be imported?</h3>
-    <p class="muted">Nothing is created at this step — you'll get a preview first. People who already have a ${esc(lower(t.cardSingular))} or self-service account are always skipped, so re-running is safe.</p>
+    <p class="muted">Nothing is created at this step — you'll get a preview first, and pick exactly who comes in. People who already have a ${esc(lower(t.cardSingular))} or self-service account are always skipped, so re-running is safe.</p>
     <form class="editor" method="POST" action="/admin/import/preview" style="max-width:none">
       <div class="grid2">
         <div>
@@ -1822,6 +1861,11 @@ export function importView(d: {
           </div>
         </div>
       </div>
+      <label style="margin-top:12px">…or one department <span class="muted">(matches the Department field on the person's Azure profile)</span></label>
+      <div style="display:flex;gap:8px;max-width:420px">
+        <input name="deptQuery" placeholder="e.g. IT, Sales, Service" style="flex:1" />
+        <button class="btn secondary" type="submit" name="source" value="department">Preview</button>
+      </div>
       ${
         d.groups && d.groups.length
           ? `<label style="margin-top:12px">Matching groups</label>
@@ -1832,38 +1876,57 @@ export function importView(d: {
           )
           .join("")}</div>`
           : d.groups
-          ? `<p class="muted" style="margin-top:10px">No groups matched.</p>`
+          ? `<p class="muted" style="margin-top:10px">No groups matched. The search covers group names — if your team only exists as a department, use the department box instead.</p>`
           : ""
       }
     </form>
   </section>`;
+  const creatable = d.plan ? d.plan.rows.filter((r: any) => r.status === "create") : [];
   const planTable = d.plan
     ? `
   <section class="panel">
     <h3>Preview — ${d.plan.rows.length} directory user${d.plan.rows.length === 1 ? "" : "s"}</h3>
-    <p class="muted">${d.plan.rows.filter((r: any) => r.status === "create").length} would be created · ${d.plan.rows.filter((r: any) => r.status === "exists").length} already exist · ${d.plan.rows.filter((r: any) => r.status === "disabled").length} disabled in the directory. Each new person gets a ${esc(lower(t.cardSingular))} and self-service access via their email.</p>
-    <table class="rsp">
-      <tr><th>Person</th><th>Email</th><th>Title</th><th>Department</th><th>${esc(t.locationSingular)}</th><th>Status</th></tr>
-      ${d.plan.rows
-        .slice(0, 200)
-        .map(
-          (r: any) => `<tr>
-        <td>${esc(`${r.firstName} ${r.lastName}`.trim())}</td>
-        <td data-label="Email" class="muted" style="font-size:12px">${esc(r.email)}</td>
-        <td data-label="Title" class="muted">${esc(r.title || "—")}</td>
-        <td data-label="Dept" class="muted">${esc(r.department || "—")}</td>
-        <td data-label="${esc(t.locationSingular)}">${r.location ? esc(r.location.name) : `<span class="pill off">no ${esc(lower(t.locationSingular))}!</span>`}</td>
-        <td data-label="Status">${statusPill(r.status)}</td>
-      </tr>`
-        )
-        .join("")}
-    </table>
-    ${d.plan.rows.length > 200 ? `<p class="muted">Showing the first 200 — the import itself covers all ${d.plan.rows.length}.</p>` : ""}
-    <form method="POST" action="/admin/import/apply" style="margin-top:14px" onsubmit="return confirm('Create ${d.plan.rows.filter((r: any) => r.status === "create").length} ${esc(lower(t.cardPlural))} now?')">
+    <p class="muted">${creatable.length} can be created · ${d.plan.rows.filter((r: any) => r.status === "exists").length} already exist · ${d.plan.rows.filter((r: any) => r.status === "disabled").length} disabled in the directory. Tick who to import — each new person gets a ${esc(lower(t.cardSingular))} and self-service access via their email.</p>
+    <form method="POST" action="/admin/import/apply" onsubmit="return confirm('Create ' + document.querySelectorAll('.selbox:checked').length + ' ${esc(lower(t.cardPlural))} now?')">
       <input type="hidden" name="source" value="${esc(d.plan.source)}" />
       ${d.plan.groupId ? `<input type="hidden" name="groupId" value="${esc(d.plan.groupId)}" />` : ""}
-      <button class="btn" type="submit">Import ${d.plan.rows.filter((r: any) => r.status === "create").length} people</button>
+      ${d.plan.deptQuery ? `<input type="hidden" name="deptQuery" value="${esc(d.plan.deptQuery)}" />` : ""}
+      ${
+        creatable.length
+          ? `<p class="muted" style="margin:0 0 8px"><a href="#" onclick="document.querySelectorAll('.selbox').forEach(c=>c.checked=true);selCount();return false">Select all</a> · <a href="#" onclick="document.querySelectorAll('.selbox').forEach(c=>c.checked=false);selCount();return false">Select none</a></p>`
+          : ""
+      }
+      <table class="rsp">
+        <tr><th></th><th>Person</th><th>Email</th><th>Title</th><th>Department</th><th>${esc(t.locationSingular)}</th><th>Status</th></tr>
+        ${d.plan.rows
+          .slice(0, 200)
+          .map(
+            (r: any) => `<tr>
+          <td data-label="Import">${
+            r.status === "create"
+              ? `<input type="checkbox" class="selbox" name="sel" value="${esc(r.email)}" checked onchange="selCount()" />`
+              : ""
+          }</td>
+          <td>${esc(`${r.firstName} ${r.lastName}`.trim())}</td>
+          <td data-label="Email" class="muted" style="font-size:12px">${esc(r.email)}</td>
+          <td data-label="Title" class="muted">${esc(r.title || "—")}</td>
+          <td data-label="Dept" class="muted">${esc(r.department || "—")}</td>
+          <td data-label="${esc(t.locationSingular)}">${r.location ? esc(r.location.name) : `<span class="pill off">no ${esc(lower(t.locationSingular))}!</span>`}</td>
+          <td data-label="Status">${statusPill(r.status)}</td>
+        </tr>`
+          )
+          .join("")}
+      </table>
+      ${d.plan.rows.length > 200 ? `<p class="muted">Showing the first 200 of ${d.plan.rows.length} — narrow by group or department to see (and select) the rest.</p>` : ""}
+      ${
+        creatable.length
+          ? `<div class="actions" style="margin-top:14px"><button class="btn" type="submit" id="applyBtn">Import ${creatable.length} selected</button></div>`
+          : `<p class="muted" style="margin-top:14px">Nothing new to import from this selection.</p>`
+      }
     </form>
+    <script>
+      function selCount(){var n=document.querySelectorAll('.selbox:checked').length;var b=document.getElementById('applyBtn');if(b){b.textContent='Import '+n+' selected';b.disabled=n===0;}}
+    </script>
   </section>`
     : "";
   const body = `
@@ -1875,8 +1938,10 @@ export function importView(d: {
     </div>
   </div>
   ${d.result ? `<p class="auth-banner" style="max-width:none">Import complete: ${d.result.created} created, ${d.result.skipped} skipped.</p>` : ""}
+  ${d.testResult ? `<p class="auth-banner" style="max-width:none">${esc(d.testResult)}</p>` : ""}
   ${d.error ? `<p class="auth-error" style="max-width:none">${esc(d.error)}</p>` : ""}
-  ${d.configured ? picker + planTable : setup}`;
+  ${connectedLine}
+  ${d.configured && !d.showSettings ? picker + planTable : settingsForm}`;
   return shell("Import from Azure AD", body);
 }
 
