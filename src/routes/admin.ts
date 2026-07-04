@@ -130,8 +130,10 @@ adminRouter.get("/login", async (req, res) =>
   res.send(
     loginPage(
       undefined,
-      req.query.welcome
-        ? "Account created — check your email for a verification link, then sign in."
+      req.query.ready
+        ? "Account created and email verified — sign in to get started."
+        : req.query.welcome
+        ? "Account created. Sign in to continue."
         : undefined,
       await brandingFor(req)
     )

@@ -12,12 +12,13 @@ export function newRawToken(): string {
 }
 
 // ---------- single-use auth tokens ----------
-export type TokenKind = "reset" | "invite" | "verify";
+export type TokenKind = "reset" | "invite" | "verify" | "signup";
 
 export const TOKEN_TTL_MS: Record<TokenKind, number> = {
   reset: 60 * 60 * 1000, // 1 hour
   invite: 7 * 24 * 60 * 60 * 1000, // 7 days
   verify: 7 * 24 * 60 * 60 * 1000, // 7 days
+  signup: 24 * 60 * 60 * 1000, // 24 hours — magic link to start an account
 };
 
 export async function issueToken(kind: TokenKind, email: string, orgId?: string | null): Promise<string> {
