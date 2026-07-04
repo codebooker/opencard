@@ -146,13 +146,13 @@ export async function restoreClientToBackup(
 
     // Live columns per table, so dumps from older schema versions still load
     // (columns added since the dump fall back to their defaults).
-    const liveCols = new Map<string, Set<string>>();
+    const liveCols = new Map<string, Map<string, string>>();
     for (const t of ORG_CONTENT_TABLES) {
       const r = await live.query(
-        `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1`,
+        `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema='public' AND table_name=$1`,
         [t]
       );
-      liveCols.set(t, new Set(r.rows.map((x) => x.column_name)));
+      liveCols.set(t, new Map(r.rows.map((x) => [x.column_name, x.data_type])));
     }
 
     await live.query("BEGIN");
@@ -166,13 +166,21 @@ export async function restoreClientToBackup(
     for (const t of ORG_CONTENT_TABLES) {
       const src = await stage.query(`SELECT * FROM "${t}" WHERE "orgId" = $1`, [orgId]);
       if (!src.rowCount) continue;
-      const cols = Object.keys(src.rows[0]).filter((c) => liveCols.get(t)!.has(c));
+      const colTypes = liveCols.get(t)!;
+      const cols = Object.keys(src.rows[0]).filter((c) => colTypes.has(c));
       const colSql = cols.map((c) => `"${c}"`).join(",");
+      // node-postgres turns JS arrays into Postgres array literals — JSON
+      // columns must be re-stringified explicitly or arrays arrive as '{...}'.
+      const coerce = (c: string, v: unknown) => {
+        const dt = colTypes.get(c);
+        if ((dt === "json" || dt === "jsonb") && v !== null && v !== undefined) return JSON.stringify(v);
+        return v;
+      };
       for (let i = 0; i < src.rows.length; i += BATCH) {
         const chunk = src.rows.slice(i, i + BATCH);
         const params: unknown[] = [];
         const tuples = chunk
-          .map((row, ri) => `(${cols.map((c, ci) => { params.push(row[c]); return `$${ri * cols.length + ci + 1}`; }).join(",")})`)
+          .map((row, ri) => `(${cols.map((c, ci) => { params.push(coerce(c, row[c])); return `$${ri * cols.length + ci + 1}`; }).join(",")})`)
           .join(",");
         await live.query(`INSERT INTO "${t}" (${colSql}) VALUES ${tuples}`, params);
       }
