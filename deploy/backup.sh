@@ -64,3 +64,12 @@ else
 fi
 
 echo "$LOG_PREFIX done: $(ls -lh "$BACKUP_DIR" | grep "$STAMP" | awk '{print $9, "("$5")"}' | tr '\n' ' ')"
+
+# Heartbeat: report a completed backup to the uptime monitor (HEARTBEAT_URL in
+# deploy/backup.env). A missed ping means a missed or failed backup — the
+# monitor alerts on absence, so silent cron rot gets caught.
+if [ -n "${HEARTBEAT_URL:-}" ]; then
+  curl -fsS -m 10 "$HEARTBEAT_URL" >/dev/null \
+    && echo "$LOG_PREFIX heartbeat pinged" \
+    || echo "$LOG_PREFIX heartbeat ping FAILED"
+fi
