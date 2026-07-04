@@ -56,6 +56,8 @@ import { buildOrgExport, purgeOrgData } from "../data-bundle";
 import { exportFilename } from "../dataexport";
 import { parseRetentionDays } from "../retention";
 import { getPlatformConfig, updatePlatformConfig } from "../platform-config";
+import { listBackups, runManualBackup, restoreClientToBackup, withRestoreLock, humanSize } from "../backups";
+import { uploadDir } from "../upload";
 import { isVertical } from "../terminology";
 import { clean, parseLabeled, parseSocials, parseAddress } from "../parse";
 import { pruneOrgLeads } from "../retention-prune";
@@ -407,6 +409,55 @@ adminRouter.get("/platform", async (req, res) => {
   const p = reqAdmin(req);
   if (!p.platform || !p.staffAdmin) return forbidden(res);
   res.send(V.platformSettingsView(await getPlatformConfig(), req.query.saved === "1"));
+});
+
+// ---------- backups & per-client restore (platform owner/admin) ----------
+adminRouter.get("/backups", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.platform || !p.staffAdmin) return forbidden(res);
+  const orgs = await prisma.org.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } });
+  res.send(
+    V.backupsView({
+      backups: listBackups().map((b) => ({ ...b, sizeHuman: humanSize(b.size) })),
+      orgs,
+      flash: req.query.ran
+        ? "Backup complete."
+        : req.query.restored
+        ? `Client restored (${String(req.query.restored)} rows).`
+        : null,
+      error: req.query.error ? String(req.query.error).slice(0, 300) : null,
+    })
+  );
+});
+
+adminRouter.post("/backups/run", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.platform || !p.staffAdmin) return forbidden(res);
+  try {
+    const out = await runManualBackup(uploadDir);
+    audit(req, p, "backup.manual", { summary: out.db });
+    res.redirect("/admin/backups?ran=1");
+  } catch (e: any) {
+    res.redirect("/admin/backups?error=" + encodeURIComponent(String(e?.message || e).slice(0, 200)));
+  }
+});
+
+adminRouter.post("/backups/restore-client", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.platform || !p.staffAdmin) return forbidden(res);
+  const org = await prisma.org.findUnique({ where: { id: String(req.body?.orgId || "") }, select: { id: true, name: true } });
+  if (!org) return res.redirect("/admin/backups?error=" + encodeURIComponent("Client not found."));
+  if (String(req.body?.confirmName || "") !== org.name)
+    return res.redirect("/admin/backups?error=" + encodeURIComponent("The client name you typed does not match."));
+  const dump = String(req.body?.dump || "");
+  try {
+    const result = await withRestoreLock(() => restoreClientToBackup(org.id, dump));
+    audit(req, p, "backup.restore_client", { targetType: "Org", targetId: org.id, summary: `${org.name} <- ${dump} (${result.rows} rows)` });
+    res.redirect("/admin/backups?restored=" + result.rows);
+  } catch (e: any) {
+    audit(req, p, "backup.restore_failed", { targetType: "Org", targetId: org.id, summary: String(e?.message || e).slice(0, 150) });
+    res.redirect("/admin/backups?error=" + encodeURIComponent(String(e?.message || e).slice(0, 200)));
+  }
 });
 
 adminRouter.post("/platform", async (req, res) => {

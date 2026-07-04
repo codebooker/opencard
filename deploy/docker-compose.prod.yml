@@ -62,9 +62,12 @@ services:
       # Proxy hops in front of the app for client-IP resolution (rate limits,
       # logs, audit). This deploy is client -> Cloudflare -> Caddy -> app = 2.
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-2}
+      # Staff console backup & restore page reads/writes the host backup dir.
+      BACKUP_DIR: /app/backups
       PORT: "3000"
     volumes:
       - uploads_data:/app/uploads
+      - /opt/opencard/backups:/app/backups
     command: >
       sh -c "set -e;
              npx prisma migrate deploy || { npx prisma migrate resolve --applied 0_init && npx prisma migrate deploy; };

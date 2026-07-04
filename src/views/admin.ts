@@ -153,6 +153,71 @@ export function platformSettingsView(cfg: { signupPlan: string; signupTrialDays:
   return shell("Platform settings", body);
 }
 
+// Backup & restore (OpenCard staff): list/trigger backups, per-client restore.
+export function backupsView(d: {
+  backups: { name: string; kind: string; manual: boolean; sizeHuman: string; mtime: Date }[];
+  orgs: { id: string; name: string }[];
+  flash?: string | null;
+  error?: string | null;
+}): string {
+  const rows = d.backups.length
+    ? d.backups
+        .map(
+          (b) => `<tr>
+      <td><code style="font-size:12px">${esc(b.name)}</code></td>
+      <td data-label="Kind">${b.kind === "db" ? "Database" : "Uploads"}${b.manual ? ` <span class="pill">manual</span>` : ""}</td>
+      <td data-label="Size" class="muted">${esc(b.sizeHuman)}</td>
+      <td data-label="Taken" class="muted">${esc(new Date(b.mtime).toISOString().slice(0, 16).replace("T", " "))} UTC</td>
+    </tr>`
+        )
+        .join("")
+    : `<tr><td colspan="4" class="muted">No backups found yet — the nightly job runs at 03:17 UTC.</td></tr>`;
+  const dbBackups = d.backups.filter((b) => b.kind === "db");
+  const body = `
+  <p class="crumb"><a href="/admin/clients">← Clients</a></p>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>Backups</h2>
+      <p class="muted" style="margin:0">Nightly at 03:17 UTC with offsite copies; manual backups stay on the server until retention sweeps them.</p>
+    </div>
+    <div><form method="POST" action="/admin/backups/run"><button class="btn" type="submit">Back up now</button></form></div>
+  </div>
+  ${d.flash ? `<p class="auth-banner" style="max-width:none">${esc(d.flash)}</p>` : ""}
+  ${d.error ? `<p class="auth-error" style="max-width:none">${esc(d.error)}</p>` : ""}
+  <table class="rsp">
+    <tr><th>File</th><th>Kind</th><th>Size</th><th>Taken</th></tr>
+    ${rows}
+  </table>
+
+  <section class="panel" style="margin-top:20px">
+    <h3>Restore a client to a backup</h3>
+    <p class="muted">Rewinds ONE client's content — brands, ${"rooftops/locations"}, cards, employees, leads, assets, campaigns, integrations — to the selected backup. Other clients are untouched. Not restored: the client's plan/billing, admin accounts, audit log, and uploaded images (photos deleted since the backup will show as missing). Anything the client changed after the backup is lost.</p>
+    <form class="editor" method="POST" action="/admin/backups/restore-client" onsubmit="return confirm('Rewind this client to the selected backup? Changes made after it will be lost. This cannot be undone.')">
+      <label>Client</label>
+      <select name="orgId" required>${d.orgs.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join("")}</select>
+      <label>Database backup</label>
+      <select name="dump" required>${dbBackups
+        .map((b) => `<option value="${esc(b.name)}">${esc(new Date(b.mtime).toISOString().slice(0, 16).replace("T", " "))} UTC — ${esc(b.name)}</option>`)
+        .join("")}</select>
+      <label>Type the client's name to confirm</label>
+      <input name="confirmName" autocomplete="off" required />
+      <div class="form-actions"><button class="btn danger" type="submit">Restore this client</button></div>
+    </form>
+  </section>
+
+  <section class="panel" style="border-style:dashed">
+    <h3>Full-instance restore (runbook)</h3>
+    <p class="muted">Restoring the ENTIRE database is deliberately not a button — it takes the platform down and replaces every tenant at once. From the VM:</p>
+    <pre style="background:var(--wash-2);border:1px solid var(--line-soft);border-radius:8px;padding:12px;font-size:12px;overflow-x:auto">cd /opt/opencard
+docker compose -f deploy/docker-compose.prod.yml stop web
+docker exec -i opencard-db-1 psql -U opencard -c "DROP DATABASE opencard WITH (FORCE)" postgres
+docker exec -i opencard-db-1 psql -U opencard -c "CREATE DATABASE opencard" postgres
+docker exec -i opencard-db-1 pg_restore -U opencard -d opencard --no-owner &lt; backups/db-YYYY-MM-DD_HHMM.dump
+docker compose -f deploy/docker-compose.prod.yml up -d</pre>
+  </section>`;
+  return shell("Backups", body);
+}
+
 // The OpenCard staff console: every client workspace in the system. Platform
 // staff see this instead of a client dashboard (no plan/billing of their own).
 export function clientsConsole(orgs: any[], p: AdminPrincipal): string {
@@ -183,7 +248,7 @@ export function clientsConsole(orgs: any[], p: AdminPrincipal): string {
     </div>
     <div>${
       p.staffAdmin
-        ? `<a class="btn secondary" href="/admin/staff">Staff</a> <a class="btn secondary" href="/admin/platform">Settings</a> `
+        ? `<a class="btn secondary" href="/admin/staff">Staff</a> <a class="btn secondary" href="/admin/backups">Backups</a> <a class="btn secondary" href="/admin/platform">Settings</a> `
         : ""
     }<a class="btn secondary" href="/admin/security">Security</a> <a class="btn" href="/admin/clients/new">+ New client</a></div>
   </div>
