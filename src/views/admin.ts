@@ -29,6 +29,7 @@ import { HIDEABLE_FIELDS, SIGNATURE_TOKENS, ROLE_SUGGESTIONS, asStringArray } fr
 import { ASSET_TYPES, ASSET_DEST_TYPES, assetTypeLabel } from "../assets";
 import { LEAD_FIELDS, DEFAULT_LEAD_FIELDS, leadFieldChoicesFor, defaultLeadFieldsFor } from "../leadform";
 import { CSV_TARGETS } from "../csvimport";
+import { svgAreaChart, svgBars } from "../charts";
 import { campaignRoutingToLines } from "../routing";
 import { LEAD_STATUSES, STATUS_LABELS, nextStatuses } from "../leadstatus";
 import { SIGNATURE_THEMES, SIGNATURE_ELEMENTS, asLockList, SignatureTheme } from "../signature";
@@ -436,12 +437,20 @@ export function clientForm(org?: any): string {
   return shell(org ? "Edit client" : "New client", body);
 }
 
+// First-run checklist state, computed from real data in the dashboard route.
+export type OnboardingState = {
+  steps: { brand: boolean; location: boolean; card: boolean; shared: boolean; lead: boolean };
+  firstBrandId: string | null;
+  firstCard: { slug: string; locationId: string } | null;
+};
+
 export function dashboard(
   brands: BrandWithLocations[],
   p: AdminPrincipal,
   t: Terminology = GENERAL_TERMINOLOGY,
   actingClientName?: string,
-  verifyState: "needed" | "sent" | null = null
+  verifyState: "needed" | "sent" | null = null,
+  onboarding: OnboardingState | null = null
 ): string {
   const canManage = (brandId: string) =>
     p.global || (p.role === "brand_admin" && p.brandIds.includes(brandId));
@@ -471,9 +480,38 @@ export function dashboard(
       <form method="POST" action="/admin/verify/resend" style="display:inline;margin-left:8px"><button class="btn secondary" type="submit" style="padding:4px 10px;font-size:13px">Resend verification email</button></form>
     </div>`
       : "";
+  const ob = onboarding;
+  const obStep = (done: boolean, label: string, href: string | null, hint: string) => `
+    <li style="display:flex;align-items:baseline;gap:10px;padding:6px 0">
+      <span style="font-size:15px">${done ? "✅" : "⬜️"}</span>
+      <span>${done ? `<s class="muted">${label}</s>` : href ? `<a href="${esc(href)}"><strong>${label}</strong></a>` : `<strong>${label}</strong>`}
+      ${done ? "" : `<span class="muted"> — ${hint}</span>`}</span>
+    </li>`;
+  const obPanel = ob
+    ? (() => {
+        const s = ob.steps;
+        const doneCount = Object.values(s).filter(Boolean).length;
+        const cardListHref = ob.firstCard ? `/admin/cards?locationId=${esc(ob.firstCard.locationId)}` : "/admin";
+        return `
+  <section class="panel" style="margin-bottom:14px;border:1px solid var(--accent, #1F5BEA)">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+      <h3 style="margin:0">Getting started — ${doneCount} of 5 done</h3>
+      <form method="POST" action="/admin/onboarding/dismiss"><button class="btn secondary" type="submit" style="padding:4px 10px;font-size:12px">Dismiss</button></form>
+    </div>
+    <ul style="list-style:none;margin:10px 0 0;padding:0">
+      ${obStep(s.brand, `Create your first ${esc(lower(t.brandSingular))}`, "/admin/brands/new", "the umbrella your locations live under")}
+      ${obStep(s.location, `Add a ${esc(lower(t.locationSingular))}`, s.brand ? `/admin/locations/new${ob.firstBrandId ? `?brandId=${esc(ob.firstBrandId)}` : ""}` : null, s.brand ? "where your people work" : `needs a ${esc(lower(t.brandSingular))} first`)}
+      ${obStep(s.card, `Make your first ${esc(lower(t.cardSingular))}`, s.location ? cardListHref : null, s.location ? "or import your whole team from Azure or a spreadsheet" : `needs a ${esc(lower(t.locationSingular))} first`)}
+      ${obStep(s.shared, `Share it`, ob.firstCard ? `/c/${esc(ob.firstCard.slug)}` : null, `open the public page, or print the QR — counts once it gets a view`)}
+      ${obStep(s.lead, `Capture your first lead`, s.card ? "/admin/leads" : null, `the contact form on every ${esc(lower(t.cardSingular))} feeds your leads inbox`)}
+    </ul>
+  </section>`;
+      })()
+    : "";
   const body = `
   ${banner}
   ${verifyBanner}
+  ${obPanel}
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>${esc(t.brandPlural)} &amp; ${esc(lower(t.locationPlural))}</h2>
@@ -2684,6 +2722,7 @@ export function analyticsView(stats: {
   conversion?: number;
   assetScans?: number;
   leaderboard?: { id: string; name: string; views: number; leads: number; conv: number }[];
+  viewSeries?: { day: string; count: number }[];
   funnel?: { status: string; label: string; count: number }[];
   sources?: { key: string; count: number }[];
   campaigns?: { key: string; count: number }[];
@@ -2722,11 +2761,25 @@ export function analyticsView(stats: {
           : `<tr><td colspan="2" class="muted">None in this range.</td></tr>`
       }</table>`
       : "";
+  const viewChart = stats.viewSeries && svgAreaChart(stats.viewSeries);
+  const viewChartSection = viewChart
+    ? `<h3 style="margin-top:24px">Views over time</h3>
+  <div class="panel" style="padding:14px">${viewChart}</div>`
+    : "";
+  const funnelBars = stats.funnel ? svgBars(stats.funnel.map((s) => ({ label: s.label, count: s.count }))) : "";
   const funnelSection = stats.funnel
     ? `<h3 style="margin-top:24px">Lead funnel</h3>
-  <table><tr>${stats.funnel.map((s) => `<th>${esc(s.label)}</th>`).join("")}</tr>
-  <tr>${stats.funnel.map((s) => `<td>${s.count}</td>`).join("")}</tr></table>`
+  ${
+    stats.funnel.some((s) => s.count > 0)
+      ? `<div class="panel" style="padding:14px">${funnelBars}</div>`
+      : `<p class="muted">No leads in this range yet.</p>`
+  }`
     : "";
+  const sourceBars =
+    stats.sources && stats.sources.length
+      ? `<h3 style="margin-top:24px">Lead source mix</h3>
+  <div class="panel" style="padding:14px">${svgBars(stats.sources.map((s) => ({ label: s.key, count: s.count })))}</div>`
+      : "";
   const leadCount = stats.leadCount ?? (t.connect || 0);
   const conversion = stats.conversion ?? 0;
   const assetScans = stats.assetScans ?? 0;
@@ -2767,9 +2820,10 @@ export function analyticsView(stats: {
     <div class="stat"><div class="n">${assetScans}</div><div class="muted">QR asset scans <span style="font-size:10px">(all-time)</span></div></div>
   </div>
 
+  ${viewChartSection}
   ${leaderboardSection}
   ${funnelSection}
-  ${kvTable("Source performance", stats.sources, "Source")}
+  ${sourceBars}
   ${kvTable("Campaign performance", stats.campaigns, "Campaign")}
   ${kvTable("Top employees by leads", stats.employees, "Employee")}
   ${kvTable("Department performance", stats.deptPerf, "Department")}

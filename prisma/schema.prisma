@@ -27,6 +27,8 @@ model Org {
   // owner confirms their address. Staff-created clients are verified at
   // creation; existing orgs are backfilled by the migration.
   ownerVerifiedAt DateTime?
+  // First-run onboarding checklist on the dashboard; set when dismissed.
+  onboardingDismissedAt DateTime?
   // Tenant addressing. `subdomain` is the label under the platform domain
   // (e.g. "acme" -> acme.opencard.id); `customDomain` is a fully-qualified host
   // the customer points at us (e.g. cards.acmecorp.com). Both are optional and

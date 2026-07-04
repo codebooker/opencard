@@ -74,6 +74,7 @@ import {
   planCandidates,
 } from "../dirimport";
 import { parseCsv, guessMapping, mapCsvRow, CsvTarget } from "../csvimport";
+import { bucketDays } from "../charts";
 import multer from "multer";
 import { runWithOrg } from "../db";
 import { uploadDir } from "../upload";
@@ -907,9 +908,43 @@ adminRouter.get("/", async (req, res) => {
     actingClientName = org?.name;
   }
   // Unverified self-signup org: banner until the owner confirms their email.
-  const own = await prisma.org.findUnique({ where: { id: p.orgId }, select: { ownerVerifiedAt: true } });
+  const own = await prisma.org.findUnique({
+    where: { id: p.orgId },
+    select: { ownerVerifiedAt: true, onboardingDismissedAt: true },
+  });
   const verifyState = own?.ownerVerifiedAt ? null : req.query.verify === "sent" ? ("sent" as const) : ("needed" as const);
-  res.send(V.dashboard(brands as any, p, t, actingClientName, verifyState));
+
+  // First-run checklist: real progress from real data, gone once complete
+  // (or dismissed). Only for admins who can actually do the steps.
+  let onboarding: V.OnboardingState | null = null;
+  if (p.global && !own?.onboardingDismissedAt) {
+    const orgId = p.orgId;
+    const [brandCount, loc, card, viewed, leadCount] = await Promise.all([
+      prisma.brand.count({ where: { orgId } }),
+      prisma.location.findFirst({ where: { orgId }, select: { id: true } }),
+      prisma.card.findFirst({ where: { orgId }, orderBy: { createdAt: "asc" }, select: { slug: true, locationId: true } }),
+      prisma.analyticsEvent.findFirst({ where: { orgId, type: "view" }, select: { id: true } }),
+      prisma.lead.count({ where: { orgId } }),
+    ]);
+    const steps = {
+      brand: brandCount > 0,
+      location: !!loc,
+      card: !!card,
+      shared: !!viewed,
+      lead: leadCount > 0,
+    };
+    if (!Object.values(steps).every(Boolean)) {
+      onboarding = { steps, firstBrandId: brands[0]?.id || null, firstCard: card || null };
+    }
+  }
+  res.send(V.dashboard(brands as any, p, t, actingClientName, verifyState, onboarding));
+});
+
+adminRouter.post("/onboarding/dismiss", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.global) return forbidden(res);
+  await prisma.org.update({ where: { id: p.orgId }, data: { onboardingDismissedAt: new Date() } });
+  res.redirect("/admin");
 });
 
 // ---------- security (per-account two-factor) ----------
@@ -1985,6 +2020,16 @@ adminRouter.get("/analytics", async (req, res) => {
   const employees = topGroups(employeeCounts, 10);
   const deptPerf = topGroups(deptCounts, 20);
 
+  // Daily view series for the chart (raw timestamps bucketed in JS; capped so
+  // an all-time range on a busy org doesn't pull unbounded rows).
+  const viewDates = await prisma.analyticsEvent.findMany({
+    where: { type: "view", ...whereEvents },
+    select: { createdAt: true },
+    orderBy: { createdAt: "desc" },
+    take: 50000,
+  });
+  const viewSeries = bucketDays(viewDates.map((v) => v.createdAt), range.since);
+
   // Top cards by views (in range).
   const topViews = await prisma.analyticsEvent.groupBy({
     by: ["cardId"],
@@ -2022,6 +2067,7 @@ adminRouter.get("/analytics", async (req, res) => {
       assetScans: scanAgg._sum.scanCount || 0,
       leaderboard,
       topCards,
+      viewSeries,
       funnel,
       sources,
       campaigns,
