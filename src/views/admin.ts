@@ -450,6 +450,7 @@ export function dashboard(
     <a class="btn secondary" href="/admin/domains">Domains</a>
     ${p.super ? `<a class="btn secondary" href="/admin/admins">Admins</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/integrations">Integrations</a>` : ""}
+    ${p.super ? `<a class="btn secondary" href="/admin/import">Import</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/marketing">Marketing</a>` : ""}
     ${p.super ? `<a class="btn secondary" href="/admin/audit">Audit</a>` : ""}
     ${p.global ? `<a class="btn secondary" href="/admin/events">Events</a>` : ""}
@@ -1775,6 +1776,108 @@ export function billingView(d: {
       : ""
   }`;
   return shell("Plan & usage", body);
+}
+
+// Directory import wizard (Phase 13): backfill employees from Azure AD.
+export function importView(d: {
+  configured: boolean;
+  t: Terminology;
+  groups?: { id: string; displayName: string }[];
+  groupQuery?: string;
+  plan?: { rows: any[]; source: string; groupId?: string } | null;
+  result?: { created: number; skipped: number } | null;
+  error?: string | null;
+}): string {
+  const t = d.t;
+  const statusPill = (s: string) =>
+    s === "create"
+      ? `<span class="pill on">will create</span>`
+      : s === "exists"
+      ? `<span class="pill">already here</span>`
+      : `<span class="pill off">disabled in AD</span>`;
+  const setup = `
+  <section class="panel">
+    <h3>Connect Azure AD / Entra</h3>
+    <p class="muted">This wizard needs the Azure app registration (the same one used for employee SSO) to be allowed to READ your directory:</p>
+    <p class="muted" style="margin-top:8px">1. Azure Portal → App registrations → your app → <strong>API permissions</strong>.<br>
+    2. Add <strong>Microsoft Graph → Application permissions</strong>: <code>User.Read.All</code> (and <code>GroupMember.Read.All</code> to import by group).<br>
+    3. Click <strong>Grant admin consent</strong>.<br>
+    4. Ensure <code>AZURE_TENANT_ID</code>, <code>AZURE_CLIENT_ID</code>, <code>AZURE_CLIENT_SECRET</code> are set on this instance.</p>
+  </section>`;
+  const picker = `
+  <section class="panel">
+    <h3>Who should be imported?</h3>
+    <p class="muted">Nothing is created at this step — you'll get a preview first. People who already have a ${esc(lower(t.cardSingular))} or self-service account are always skipped, so re-running is safe.</p>
+    <form class="editor" method="POST" action="/admin/import/preview" style="max-width:none">
+      <div class="grid2">
+        <div>
+          <label>Everyone</label>
+          <button class="btn" type="submit" name="source" value="all">Preview all directory users</button>
+        </div>
+        <div>
+          <label>…or one group <span class="muted">(search by name)</span></label>
+          <div style="display:flex;gap:8px">
+            <input name="groupQuery" value="${esc(d.groupQuery || "")}" placeholder="e.g. Sales Team" style="flex:1" />
+            <button class="btn secondary" type="submit" name="source" value="groupsearch">Search</button>
+          </div>
+        </div>
+      </div>
+      ${
+        d.groups && d.groups.length
+          ? `<label style="margin-top:12px">Matching groups</label>
+        <div class="self-fields">${d.groups
+          .map(
+            (g) =>
+              `<button class="btn secondary" type="submit" name="groupId" value="${esc(g.id)}" formaction="/admin/import/preview">${esc(g.displayName)}</button>`
+          )
+          .join("")}</div>`
+          : d.groups
+          ? `<p class="muted" style="margin-top:10px">No groups matched.</p>`
+          : ""
+      }
+    </form>
+  </section>`;
+  const planTable = d.plan
+    ? `
+  <section class="panel">
+    <h3>Preview — ${d.plan.rows.length} directory user${d.plan.rows.length === 1 ? "" : "s"}</h3>
+    <p class="muted">${d.plan.rows.filter((r: any) => r.status === "create").length} would be created · ${d.plan.rows.filter((r: any) => r.status === "exists").length} already exist · ${d.plan.rows.filter((r: any) => r.status === "disabled").length} disabled in the directory. Each new person gets a ${esc(lower(t.cardSingular))} and self-service access via their email.</p>
+    <table class="rsp">
+      <tr><th>Person</th><th>Email</th><th>Title</th><th>Department</th><th>${esc(t.locationSingular)}</th><th>Status</th></tr>
+      ${d.plan.rows
+        .slice(0, 200)
+        .map(
+          (r: any) => `<tr>
+        <td>${esc(`${r.firstName} ${r.lastName}`.trim())}</td>
+        <td data-label="Email" class="muted" style="font-size:12px">${esc(r.email)}</td>
+        <td data-label="Title" class="muted">${esc(r.title || "—")}</td>
+        <td data-label="Dept" class="muted">${esc(r.department || "—")}</td>
+        <td data-label="${esc(t.locationSingular)}">${r.location ? esc(r.location.name) : `<span class="pill off">no ${esc(lower(t.locationSingular))}!</span>`}</td>
+        <td data-label="Status">${statusPill(r.status)}</td>
+      </tr>`
+        )
+        .join("")}
+    </table>
+    ${d.plan.rows.length > 200 ? `<p class="muted">Showing the first 200 — the import itself covers all ${d.plan.rows.length}.</p>` : ""}
+    <form method="POST" action="/admin/import/apply" style="margin-top:14px" onsubmit="return confirm('Create ${d.plan.rows.filter((r: any) => r.status === "create").length} ${esc(lower(t.cardPlural))} now?')">
+      <input type="hidden" name="source" value="${esc(d.plan.source)}" />
+      ${d.plan.groupId ? `<input type="hidden" name="groupId" value="${esc(d.plan.groupId)}" />` : ""}
+      <button class="btn" type="submit">Import ${d.plan.rows.filter((r: any) => r.status === "create").length} people</button>
+    </form>
+  </section>`
+    : "";
+  const body = `
+  <p class="crumb"><a href="/admin">← Dashboard</a></p>
+  <div class="topbar">
+    <div style="flex-direction:column;align-items:flex-start;gap:2px">
+      <h2>Import from Azure AD</h2>
+      <p class="muted" style="margin:0">Backfill your existing team into ${esc(lower(t.cardPlural))} — SCIM keeps future hires in sync automatically.</p>
+    </div>
+  </div>
+  ${d.result ? `<p class="auth-banner" style="max-width:none">Import complete: ${d.result.created} created, ${d.result.skipped} skipped.</p>` : ""}
+  ${d.error ? `<p class="auth-error" style="max-width:none">${esc(d.error)}</p>` : ""}
+  ${d.configured ? picker + planTable : setup}`;
+  return shell("Import from Azure AD", body);
 }
 
 export function adminsView(admins: any[]): string {

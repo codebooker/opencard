@@ -58,6 +58,7 @@ import { exportFilename } from "../dataexport";
 import { parseRetentionDays } from "../retention";
 import { getPlatformConfig, updatePlatformConfig } from "../platform-config";
 import { listBackups, runManualBackup, restoreClientToBackup, withRestoreLock, humanSize } from "../backups";
+import { graphConfigured, listDirectoryUsers, searchGroups, planImport, applyImport } from "../dirimport";
 import { uploadDir } from "../upload";
 import { isVertical } from "../terminology";
 import { clean, parseLabeled, parseSocials, parseAddress } from "../parse";
@@ -412,6 +413,53 @@ adminRouter.get("/platform", async (req, res) => {
   const p = reqAdmin(req);
   if (!p.platform || !p.staffAdmin) return forbidden(res);
   res.send(V.platformSettingsView(await getPlatformConfig(), req.query.saved === "1"));
+});
+
+// ---------- directory import wizard (Phase 13) ----------
+adminRouter.get("/import", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.super) return forbidden(res);
+  res.send(V.importView({ configured: graphConfigured(), t: await currentTerminology(p.orgId) }));
+});
+
+adminRouter.post("/import/preview", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.super) return forbidden(res);
+  const t = await currentTerminology(p.orgId);
+  if (!graphConfigured()) return res.send(V.importView({ configured: false, t }));
+  const groupId = clean(req.body?.groupId);
+  const source = String(req.body?.source || (groupId ? "group" : "all"));
+  try {
+    if (source === "groupsearch") {
+      const q = clean(req.body?.groupQuery) || "";
+      const groups = q ? await searchGroups(q) : [];
+      return res.send(V.importView({ configured: true, t, groups, groupQuery: q }));
+    }
+    const users = await listDirectoryUsers(groupId || undefined);
+    const rows = await planImport(p.orgId, users);
+    res.send(V.importView({ configured: true, t, plan: { rows, source: groupId ? "group" : "all", groupId: groupId || undefined } }));
+  } catch (e: any) {
+    res.send(V.importView({ configured: true, t, error: String(e?.message || e).slice(0, 400) }));
+  }
+});
+
+adminRouter.post("/import/apply", async (req, res) => {
+  const p = reqAdmin(req);
+  if (!p.super) return forbidden(res);
+  const t = await currentTerminology(p.orgId);
+  if (!graphConfigured()) return res.send(V.importView({ configured: false, t }));
+  const groupId = clean(req.body?.groupId);
+  try {
+    // Re-fetch and re-plan at apply time: the directory is the source of
+    // truth, and existing emails stay skipped either way.
+    const users = await listDirectoryUsers(groupId || undefined);
+    const rows = await planImport(p.orgId, users);
+    const result = await applyImport(p.orgId, rows);
+    audit(req, p, "import.graph", { summary: `${result.created} created, ${result.skipped} skipped${groupId ? ` (group ${groupId})` : ""}` });
+    res.send(V.importView({ configured: true, t, result }));
+  } catch (e: any) {
+    res.send(V.importView({ configured: true, t, error: String(e?.message || e).slice(0, 400) }));
+  }
 });
 
 // ---------- backups & per-client restore (platform owner/admin) ----------
