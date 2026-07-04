@@ -38,7 +38,10 @@ previewRouter.get("/card", async (req, res) => {
   const bg = isHex(String(q.bg)) ? String(q.bg) : "#ffffff";
   const font = String(q.font || "system");
   const logo = isImg(String(q.logo)) ? String(q.logo) : null;
-  const photo = isImg(String(q.photo)) ? String(q.photo) : null;
+  // Design-editor sample mode gets a built-in illustrated portrait so every
+  // layout shows how a photo sits (circle, square, full-bleed). Live mode
+  // (the card editor) only shows the person's real/just-picked photo.
+  const photo = isImg(String(q.photo)) ? String(q.photo) : String(q.live) === "1" ? null : "/sample-person.svg";
   const showQr = String(q.qr) !== "0";
   // live=1: the card editor's live preview. Every content field comes from
   // the form (empty stays empty). Without it, the design editors get the
