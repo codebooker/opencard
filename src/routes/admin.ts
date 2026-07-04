@@ -1714,10 +1714,12 @@ function brandFields(brand: { selfEditFields: unknown } | null): string[] | unde
   return brand && Array.isArray(brand.selfEditFields) ? (brand.selfEditFields as string[]) : undefined;
 }
 
-// Effective design a card inherits with no template: location overrides, then
-// brand. Feeds the card editor's live preview as its starting point.
+// Effective design a card inherits with no template — plus the rooftop
+// context (CTAs, OEM badges, footer, QR default) so the card editor's live
+// preview renders the WHOLE public page, not just the identity block.
 function baseDesign(loc: any) {
   const b = loc.brand;
+  const oems = Array.isArray(loc.oemBrands) ? loc.oemBrands.join(",") : String(loc.oemBrands || "");
   return {
     layout: loc.layout || b.layout || "classic",
     primary: loc.primaryColor || b.primaryColor || "#1f6f43",
@@ -1725,6 +1727,15 @@ function baseDesign(loc: any) {
     bg: b.bgColor || "#ffffff",
     font: b.font || "system",
     logo: loc.logoUrl || b.logoUrl || "",
+    locName: loc.name || "",
+    brandName: b.name || "",
+    sales: loc.salesUrl || "",
+    service: loc.serviceUrl || "",
+    locphone: loc.phone || "",
+    locweb: loc.website || "",
+    oems,
+    footer: loc.hideCardFooter ? "0" : "1",
+    qrDefault: b.showQr ? "1" : "0",
   };
 }
 

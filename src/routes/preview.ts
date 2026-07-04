@@ -93,6 +93,22 @@ previewRouter.get("/card", async (req, res) => {
     template: null,
   };
 
+  // Live mode carries the card's REAL rooftop context so the preview shows
+  // the whole page: dealership CTAs, OEM badges, footer. rooftopCtas()
+  // validates URLs, so junk params simply render no buttons.
+  if (live) {
+    const s = (v: unknown, max = 200) => String(v || "").slice(0, max);
+    sample.location.name = s(q.locname, 60) || "HQ";
+    sample.location.salesUrl = s(q.sales);
+    sample.location.serviceUrl = s(q.service);
+    sample.location.phone = s(q.locphone, 40);
+    sample.location.website = s(q.locweb);
+    sample.location.oemBrands = s(q.oems);
+    sample.location.hideCardFooter = String(q.footer) === "0";
+    if (q.brandname) sample.location.brand.name = s(q.brandname, 60);
+    sample.showQr = showQr;
+  }
+
   const qr = await qrDataUrl(`${config.cardUrl}/c/preview`, primary);
   res.setHeader("Cache-Control", "no-store");
   res.send(renderCardPage(sample, qr, config.cardUrl));
