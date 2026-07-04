@@ -165,11 +165,11 @@ export function clientsConsole(orgs: any[], p: AdminPrincipal): string {
       <td><strong>${esc(o.name)}</strong>${
             o.subdomain ? `<br><span class="muted" style="font-size:11px">${esc(o.subdomain)}</span>` : ""
           }</td>
-      <td>${esc(o.plan)}</td>
-      <td>${o.suspended ? `<span class="pill off">suspended</span>` : modePill(o.billingMode)}</td>
-      <td class="muted">${esc(o.subscriptionStatus)}</td>
-      <td class="muted" style="font-size:12px">${o._count.brands} brands · ${o._count.cards} cards · ${o._count.leads} leads</td>
-      <td style="white-space:nowrap"><a class="btn secondary" href="/admin/clients/${esc(o.id)}/settings">Edit</a>
+      <td data-label="Plan">${esc(o.plan)}</td>
+      <td data-label="Mode">${o.suspended ? `<span class="pill off">suspended</span>` : modePill(o.billingMode)}</td>
+      <td data-label="Status" class="muted">${esc(o.subscriptionStatus)}</td>
+      <td data-label="Usage" class="muted" style="font-size:12px">${o._count.brands} brands · ${o._count.cards} cards · ${o._count.leads} leads</td>
+      <td class="rsp-actions" style="white-space:nowrap"><a class="btn secondary" href="/admin/clients/${esc(o.id)}/settings">Edit</a>
       <form method="POST" action="/admin/clients/${esc(o.id)}/enter" style="display:inline"><button class="btn secondary" type="submit">Manage</button></form></td>
     </tr>`
         )
@@ -188,7 +188,7 @@ export function clientsConsole(orgs: any[], p: AdminPrincipal): string {
     }<a class="btn secondary" href="/admin/security">Security</a> <a class="btn" href="/admin/clients/new">+ New client</a></div>
   </div>
   <p class="muted">Every workspace in the system. “Manage” administers a client's brands, cards, leads and SSO; “Edit” sets its plan and seat allowance.</p>
-  <table>
+  <table class="rsp">
     <tr><th>Client</th><th>Plan</th><th>Mode</th><th>Status</th><th>Usage</th><th></th></tr>
     ${rows}
   </table>`;
@@ -203,10 +203,10 @@ export function staffListView(staff: any[], p: AdminPrincipal): string {
           const canEdit = canManageStaffTarget(p.role, s.role);
           return `<tr>
       <td><strong>${esc(s.name || s.email)}</strong><br><span class="muted" style="font-size:11px">${esc(s.email)}</span></td>
-      <td>${esc(ROLE_LABELS[s.role as Role] || s.role)}</td>
-      <td>${s.mfaEnabled ? `<span class="pill on">MFA on</span>` : `<span class="pill off">no MFA</span>`}</td>
-      <td>${s.active ? `<span class="pill on">active</span>` : `<span class="pill off">disabled</span>`}</td>
-      <td>${canEdit ? `<a class="btn secondary" href="/admin/staff/${esc(s.id)}/edit">Edit</a>` : `<span class="muted">—</span>`}</td>
+      <td data-label="Role">${esc(ROLE_LABELS[s.role as Role] || s.role)}</td>
+      <td data-label="2FA">${s.mfaEnabled ? `<span class="pill on">MFA on</span>` : `<span class="pill off">no MFA</span>`}</td>
+      <td data-label="Status">${s.active ? `<span class="pill on">active</span>` : `<span class="pill off">disabled</span>`}</td>
+      <td class="rsp-actions">${canEdit ? `<a class="btn secondary" href="/admin/staff/${esc(s.id)}/edit">Edit</a>` : `<span class="muted">—</span>`}</td>
     </tr>`;
         })
         .join("")
@@ -215,7 +215,7 @@ export function staffListView(staff: any[], p: AdminPrincipal): string {
   <p class="crumb"><a href="/admin/clients">← Clients</a></p>
   <div class="topbar"><h2>OpenCard staff</h2><a class="btn" href="/admin/staff/new">+ New staff</a></div>
   <p class="muted"><strong>Owner</strong>: full control, incl. other owners. <strong>Admin</strong>: everything except managing owners. <strong>Staff</strong>: manage clients only (no staff/password admin).</p>
-  <table>
+  <table class="rsp">
     <tr><th>Person</th><th>Role</th><th>2FA</th><th>Status</th><th></th></tr>
     ${rows}
   </table>`;
@@ -1205,7 +1205,7 @@ export function cardList(
     <h2>${esc(t.cardPlural)} — ${esc(locationName)}</h2>
     <a class="btn" href="/admin/cards/new?locationId=${esc(locationId)}">+ New ${esc(lower(t.cardSingular))}</a>
   </div>
-  <table>
+  <table class="rsp">
     <tr><th>Name</th><th>Title</th><th>Public link</th><th>Status</th><th></th></tr>
     ${
       cards.length
@@ -1213,10 +1213,10 @@ export function cardList(
             .map(
               (c) => `<tr>
       <td>${esc([c.prefix, c.firstName, c.lastName].filter(Boolean).join(" "))}</td>
-      <td class="muted">${esc(c.title || "")}</td>
-      <td><a href="/c/${esc(c.slug)}" target="_blank">/c/${esc(c.slug)}</a></td>
-      <td><span class="pill ${c.active ? "on" : "off"}">${c.active ? "active" : "off"}</span></td>
-      <td>
+      <td data-label="Title" class="muted">${esc(c.title || "")}</td>
+      <td data-label="Link"><a href="/c/${esc(c.slug)}" target="_blank">/c/${esc(c.slug)}</a></td>
+      <td data-label="Status"><span class="pill ${c.active ? "on" : "off"}">${c.active ? "active" : "off"}</span></td>
+      <td class="rsp-actions">
         <a href="/admin/cards/${esc(c.id)}/edit">Edit</a> ·
         <a href="/admin/cards/${esc(c.id)}/analytics">Stats</a> ·
         <a href="/c/${esc(c.slug)}/qr.png" target="_blank">QR</a>
@@ -1729,12 +1729,12 @@ export function adminsView(admins: any[]): string {
               : `<span class="pill off">MFA pending</span>`
             : `<span class="muted">SSO</span>`;
           return `<tr>
-        <td>${esc(a.email)}</td><td>${esc(a.name || "")}</td>
-        <td>${esc(ROLE_LABELS[a.role as keyof typeof ROLE_LABELS] || a.role)}</td>
-        <td class="muted">${esc(scopeTxt)}</td>
-        <td>${mfa}</td>
-        <td>${a.active ? `<span class="pill on">active</span>` : `<span class="pill off">disabled</span>`}</td>
-        <td><a href="/admin/admins/${esc(a.id)}/edit">Edit</a></td></tr>`;
+        <td>${esc(a.email)}</td><td data-label="Name">${esc(a.name || "")}</td>
+        <td data-label="Role">${esc(ROLE_LABELS[a.role as keyof typeof ROLE_LABELS] || a.role)}</td>
+        <td data-label="Scope" class="muted">${esc(scopeTxt)}</td>
+        <td data-label="2FA">${mfa}</td>
+        <td data-label="Status">${a.active ? `<span class="pill on">active</span>` : `<span class="pill off">disabled</span>`}</td>
+        <td class="rsp-actions"><a href="/admin/admins/${esc(a.id)}/edit">Edit</a></td></tr>`;
         })
         .join("")
     : `<tr><td colspan="7" class="muted">No admin accounts yet. The ADMIN_TOKEN is the bootstrap super admin.</td></tr>`;
@@ -1742,7 +1742,7 @@ export function adminsView(admins: any[]): string {
   <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar"><h2>Admin accounts</h2><a class="btn" href="/admin/admins/new">+ New admin</a></div>
   <p class="muted">Super (everything), General (all brands' content), Brand (assigned brands), Store (assigned stores' cards). SSO admins get MFA from your IdP; password admins enroll an authenticator app on first sign-in.</p>
-  <table><tr><th>Email</th><th>Name</th><th>Role</th><th>Scope</th><th>2FA</th><th>Status</th><th></th></tr>${rows}</table>`;
+  <table class="rsp"><tr><th>Email</th><th>Name</th><th>Role</th><th>Scope</th><th>2FA</th><th>Status</th><th></th></tr>${rows}</table>`;
   return shell("Admins", body);
 }
 
@@ -2358,30 +2358,30 @@ export function leadsView(leads: any[], statusFilter = ""): string {
   }">Export CSV</a></div>
   <p style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="muted">Filter:</span>
     ${filterLink("", "All")}${LEAD_STATUSES.map((s) => filterLink(s, STATUS_LABELS[s])).join("")}</p>
-  <table>
+  <table class="rsp">
     <tr><th>When</th><th>Name</th><th>Contact</th><th>Interest</th><th>Source</th><th>Status</th><th>From</th></tr>
     ${
       leads.length
         ? leads
             .map(
               (l) => `<tr>
-        <td class="muted" style="white-space:nowrap">${esc(
+        <td data-label="When" class="muted" style="white-space:nowrap">${esc(
           new Date(l.createdAt).toISOString().slice(0, 16).replace("T", " ")
         )}</td>
         <td><a href="/admin/leads/${esc(l.id)}">${esc(l.name)}</a>${
                 l.duplicateOfId ? ` <span class="pill off" style="font-size:10px">dup</span>` : ""
               }${l.company ? `<br><span class="muted" style="font-size:11px">${esc(l.company)}</span>` : ""}</td>
-        <td style="font-size:12px">${esc(l.email || "")}${l.email && l.phone ? "<br>" : ""}${esc(l.phone || "")}${
+        <td data-label="Contact" style="font-size:12px">${esc(l.email || "")}${l.email && l.phone ? "<br>" : ""}${esc(l.phone || "")}${
                 l.preferredContact ? `<br><span class="muted">prefers ${esc(l.preferredContact)}</span>` : ""
               }</td>
-        <td style="font-size:12px">${esc(l.vehicleInterest || l.serviceNeed || "")}${
+        <td data-label="Interest" style="font-size:12px">${esc(l.vehicleInterest || l.serviceNeed || "")}${
                 (l.vehicleInterest || l.serviceNeed) && flags(l) ? "<br>" : ""
               }${flags(l)}</td>
-        <td style="font-size:12px">${source(l)}</td>
-        <td><span class="pill ${l.status === "new" ? "on" : "off"}">${esc(STATUS_LABELS[l.status] || l.status || "new")}</span>${
+        <td data-label="Source" style="font-size:12px">${source(l)}</td>
+        <td data-label="Status"><span class="pill ${l.status === "new" ? "on" : "off"}">${esc(STATUS_LABELS[l.status] || l.status || "new")}</span>${
                 l.assignedTo ? `<br><span class="muted" style="font-size:11px">${esc(l.assignedTo)}</span>` : ""
               }</td>
-        <td>${
+        <td data-label="From">${
           l.card
             ? `<a href="/c/${esc(l.card.slug)}" target="_blank">${esc(l.card.firstName)} ${esc(l.card.lastName)}</a>${
                 l.card.department ? `<br><span class="muted" style="font-size:11px">${esc(l.card.department)}</span>` : ""

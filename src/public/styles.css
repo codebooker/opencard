@@ -586,6 +586,34 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
   table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   th, td { padding: 8px 10px; font-size: 13px; }
 
+  /* List tables marked .rsp become stacked cards instead: each row is a
+     card, each cell shows its column name (from data-label) on the left. */
+  table.rsp { display: block; border: none; box-shadow: none; background: transparent; overflow: visible; }
+  table.rsp tr:has(> th) { display: none; }
+  table.rsp tbody { display: block; }
+  table.rsp tr {
+    display: block; background: var(--paper); border: 1px solid var(--line);
+    border-radius: var(--radius); margin-bottom: 10px; padding: 4px 14px;
+    box-shadow: var(--shadow-1);
+  }
+  table.rsp tr:hover td { background: transparent; }
+  table.rsp td {
+    display: flex; justify-content: space-between; align-items: center; gap: 14px;
+    border-bottom: 1px solid var(--line-soft); padding: 9px 0; font-size: 13.5px;
+    text-align: right; white-space: normal !important;
+  }
+  table.rsp td:last-child { border-bottom: none; }
+  table.rsp td::before {
+    content: attr(data-label); flex: 0 0 auto;
+    color: var(--ink-3); font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .05em; text-align: left;
+  }
+  table.rsp td[data-label=""], table.rsp td:not([data-label]) { justify-content: flex-start; text-align: left; }
+  table.rsp td[data-label=""]::before, table.rsp td:not([data-label])::before { content: none; }
+  table.rsp td.rsp-actions { justify-content: flex-end; gap: 8px; }
+  table.rsp td.rsp-actions::before { content: none; }
+  table.rsp td.rsp-actions .btn { padding: 7px 12px; }
+
   form.editor { padding: 16px var(--editor-pad-x); border-radius: var(--radius); }
   .panel { padding: 14px; }
   .item-card { padding: 12px; }
