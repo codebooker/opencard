@@ -1,5 +1,6 @@
 import { esc } from "./html";
 import { asLabeled, asSocials, LabeledValue, SocialLink } from "../types";
+import { CARD_LAYOUTS } from "../layouts";
 
 // ---- Social link types ----
 export const SOCIAL_TYPES: [string, string][] = [
@@ -308,6 +309,9 @@ const LAYOUT_THUMBS: Record<string, string> = {
   banner: `<svg viewBox="0 0 40 60"><rect width="40" height="13" rx="2" fill="currentColor"/><circle cx="20" cy="13" r="5" fill="#fff" stroke="currentColor" stroke-width="2"/><rect x="9" y="24" width="22" height="3" rx="1.5" fill="#cbd5e1"/><rect x="11" y="31" width="18" height="2" rx="1" fill="#e5e7eb"/><rect x="6" y="49" width="28" height="6" rx="3" fill="currentColor"/></svg>`,
   minimal: `<svg viewBox="0 0 40 60"><circle cx="20" cy="12" r="6" fill="#fff" stroke="currentColor" stroke-width="2"/><rect x="9" y="24" width="22" height="3" rx="1.5" fill="#cbd5e1"/><rect x="11" y="31" width="18" height="2" rx="1" fill="#e5e7eb"/><rect x="6" y="49" width="28" height="6" rx="3" fill="currentColor"/></svg>`,
   wave: `<svg viewBox="0 0 40 60"><path d="M0,0 H40 V24 Q28,32 20,25 T0,27 Z" fill="currentColor"/><rect x="9" y="34" width="22" height="3" rx="1.5" fill="#cbd5e1"/><rect x="11" y="41" width="18" height="2" rx="1" fill="#e5e7eb"/><rect x="6" y="50" width="28" height="6" rx="3" fill="currentColor"/></svg>`,
+  split: `<svg viewBox="0 0 40 60"><rect width="3" height="60" fill="currentColor"/><rect x="3" width="37" height="12" fill="currentColor"/><rect x="7" y="7" width="11" height="11" rx="3" fill="#fff" stroke="currentColor" stroke-width="2"/><rect x="7" y="24" width="20" height="3" rx="1.5" fill="#cbd5e1"/><rect x="7" y="31" width="15" height="2" rx="1" fill="#e5e7eb"/><rect x="6" y="49" width="28" height="6" rx="3" fill="currentColor"/></svg>`,
+  spotlight: `<svg viewBox="0 0 40 60"><rect width="40" height="34" rx="2" fill="currentColor"/><rect y="22" width="40" height="12" fill="currentColor" opacity="0.55"/><rect x="5" y="24" width="20" height="3" rx="1.5" fill="#fff"/><rect x="5" y="29" width="14" height="2" rx="1" fill="#fff" opacity="0.8"/><rect x="9" y="41" width="22" height="2" rx="1" fill="#e5e7eb"/><rect x="6" y="49" width="28" height="6" rx="3" fill="currentColor"/></svg>`,
+  frame: `<svg viewBox="0 0 40 60"><rect x="1.5" y="1.5" width="37" height="57" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="20" cy="14" r="6" fill="#fff" stroke="currentColor" stroke-width="2"/><rect x="10" y="26" width="20" height="3" rx="1.5" fill="#cbd5e1"/><rect x="14" y="33" width="12" height="2" rx="1" fill="#e5e7eb"/><rect x="16" y="39" width="8" height="2" rx="1" fill="currentColor"/><rect x="8" y="47" width="24" height="6" rx="3" fill="currentColor"/></svg>`,
 };
 
 export function designControls(v: {
@@ -329,7 +333,7 @@ export function designControls(v: {
     `&text=${encodeURIComponent(text)}&bg=${encodeURIComponent(bg)}&font=${encodeURIComponent(font)}` +
     (logo ? `&logo=${encodeURIComponent(logo)}` : "");
 
-  const thumbs = ["classic", "banner", "minimal", "wave"]
+  const thumbs = [...CARD_LAYOUTS]
     .map(
       (l) => `<label class="layout-thumb ${l === layout ? "sel" : ""}">
         <input type="radio" name="layout" value="${l}" ${l === layout ? "checked" : ""} />

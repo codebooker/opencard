@@ -75,6 +75,7 @@ import {
 } from "../dirimport";
 import { parseCsv, guessMapping, mapCsvRow, CsvTarget } from "../csvimport";
 import { bucketDays } from "../charts";
+import { presetByKey } from "../layouts";
 import multer from "multer";
 import { runWithOrg } from "../db";
 import { uploadDir } from "../upload";
@@ -1311,17 +1312,55 @@ adminRouter.post("/brands/:id/delete", async (req, res) => {
 
 // ---------- templates ----------
 adminRouter.get("/templates", async (req, res) => {
+  const p = reqAdmin(req);
   const brandId = String(req.query.brandId || "");
-  if (!await RBAC.canManageBrandScoped(reqAdmin(req),brandId)) return forbidden(res);
+  if (!await RBAC.canManageBrandScoped(p, brandId)) return forbidden(res);
   const brand = await prisma.brand.findUnique({ where: { id: brandId } });
   if (!brand) return res.status(404).send("Brand not found");
   const templates = await prisma.template.findMany({ where: { brandId }, orderBy: { createdAt: "asc" } });
-  res.send(V.templatesGallery(brand.name, brandId, templates));
+  // Cross-brand copy targets: other brands in the same org the admin may manage.
+  const otherBrands = p.global
+    ? await prisma.brand.findMany({
+        where: { orgId: brand.orgId, id: { not: brandId } },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      })
+    : [];
+  res.send(V.templatesGallery(brand.name, brandId, templates, otherBrands));
 });
 adminRouter.get("/templates/new", async (req, res) => {
   const brandId = String(req.query.brandId || "");
   if (!await RBAC.canManageBrandScoped(reqAdmin(req),brandId)) return forbidden(res);
-  res.send(V.templateForm(brandId, undefined, await currentTerminology(reqAdmin(req).orgId)));
+  const preset = presetByKey(String(req.query.preset || ""));
+  res.send(V.templateForm(brandId, undefined, await currentTerminology(reqAdmin(req).orgId), preset));
+});
+
+// Clone a template within its brand ("<name> copy", never default).
+adminRouter.post("/templates/:id/duplicate", async (req, res) => {
+  const p = reqAdmin(req);
+  const tpl = await prisma.template.findUnique({ where: { id: req.params.id } });
+  if (!tpl) return res.status(404).send("Not found");
+  if (!await RBAC.canManageBrandScoped(p, tpl.brandId)) return forbidden(res);
+  const { id: _id, createdAt: _c, ...data } = tpl as any;
+  await prisma.template.create({ data: { ...data, name: `${tpl.name} copy`, isDefault: false } });
+  audit(req, p, "template.duplicate", { targetType: "Template", targetId: tpl.id, summary: tpl.name });
+  res.redirect(`/admin/templates?brandId=${tpl.brandId}`);
+});
+
+// Copy a template to another brand in the SAME org (design + role behaviors).
+adminRouter.post("/templates/:id/copy", async (req, res) => {
+  const p = reqAdmin(req);
+  const tpl = await prisma.template.findUnique({ where: { id: req.params.id } });
+  if (!tpl) return res.status(404).send("Not found");
+  if (!await RBAC.canManageBrandScoped(p, tpl.brandId)) return forbidden(res);
+  const destId = clean(req.body?.brandId) || "";
+  const dest = await prisma.brand.findFirst({ where: { id: destId, orgId: tpl.orgId } });
+  if (!dest) return res.status(400).send("Destination brand not found in this workspace.");
+  if (!await RBAC.canManageBrandScoped(p, dest.id)) return forbidden(res);
+  const { id: _id, createdAt: _c, ...data } = tpl as any;
+  await prisma.template.create({ data: { ...data, brandId: dest.id, isDefault: false } });
+  audit(req, p, "template.copy", { targetType: "Template", targetId: tpl.id, summary: `${tpl.name} -> ${dest.name}` });
+  res.redirect(`/admin/templates?brandId=${dest.id}`);
 });
 adminRouter.get("/templates/:id/edit", async (req, res) => {
   const tpl = await prisma.template.findUnique({ where: { id: req.params.id } });

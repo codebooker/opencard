@@ -30,6 +30,7 @@ import { ASSET_TYPES, ASSET_DEST_TYPES, assetTypeLabel } from "../assets";
 import { LEAD_FIELDS, DEFAULT_LEAD_FIELDS, leadFieldChoicesFor, defaultLeadFieldsFor } from "../leadform";
 import { CSV_TARGETS } from "../csvimport";
 import { svgAreaChart, svgBars } from "../charts";
+import { TEMPLATE_PRESETS } from "../layouts";
 import { campaignRoutingToLines } from "../routing";
 import { LEAD_STATUSES, STATUS_LABELS, nextStatuses } from "../leadstatus";
 import { SIGNATURE_THEMES, SIGNATURE_ELEMENTS, asLockList, SignatureTheme } from "../signature";
@@ -1652,7 +1653,20 @@ function previewSrc(t: any): string {
   )}&bg=${pq(t.bgColor)}&font=${pq(t.font)}`;
 }
 
-export function templatesGallery(brandName: string, brandId: string, templates: any[]): string {
+export function templatesGallery(
+  brandName: string,
+  brandId: string,
+  templates: any[],
+  otherBrands: { id: string; name: string }[] = []
+): string {
+  const copyControl = (t: any) =>
+    otherBrands.length
+      ? ` &nbsp;·&nbsp; <form method="POST" action="/admin/templates/${esc(t.id)}/copy" style="display:inline">
+        <select name="brandId" style="padding:3px 6px;font-size:12px">${otherBrands
+          .map((b) => `<option value="${esc(b.id)}">${esc(b.name)}</option>`)
+          .join("")}</select>
+        <button class="btn secondary" type="submit" style="padding:3px 9px">Copy to</button></form>`
+      : "";
   const cards = templates.length
     ? templates
         .map(
@@ -1661,11 +1675,27 @@ export function templatesGallery(brandName: string, brandId: string, templates: 
         <div class="tpl-name">${esc(t.name)}${t.isDefault ? ` · <span class="muted">default</span>` : ""}</div>
         <p><a href="/admin/templates/${esc(t.id)}/edit">Edit</a>
         &nbsp;·&nbsp;
+        <form method="POST" action="/admin/templates/${esc(t.id)}/duplicate" style="display:inline"><button class="btn secondary" type="submit" style="padding:3px 9px">Duplicate</button></form>
+        ${copyControl(t)}
+        &nbsp;·&nbsp;
         <form method="POST" action="/admin/templates/${esc(t.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this template? Cards using it fall back to the brand design.')"><button class="btn danger" type="submit" style="padding:3px 9px">Delete</button></form></p>
       </div>`
         )
         .join("")
-    : `<p class="muted">No templates yet. Create one so your team can pick a ready-made design when making a card.</p>`;
+    : `<p class="muted">No templates yet — start from the gallery below, or build one from scratch.</p>`;
+
+  // Starter gallery: live previews of the shipped presets; one click prefills
+  // the new-template form with that design.
+  const starters = TEMPLATE_PRESETS.map(
+    (pr) => `<div class="tpl-card">
+      <div class="tpl-frame"><iframe src="/preview/card?layout=${esc(pr.layout)}&primary=${encodeURIComponent(
+        pr.primaryColor
+      )}&text=${encodeURIComponent(pr.textColor)}&bg=${encodeURIComponent(pr.bgColor)}&font=${esc(pr.font)}" loading="lazy" title="${esc(pr.name)}"></iframe></div>
+      <div class="tpl-name">${esc(pr.name)}</div>
+      <p class="muted" style="font-size:12px;margin:4px 0 8px">${esc(pr.description)}</p>
+      <p><a class="btn secondary" style="padding:4px 12px" href="/admin/templates/new?brandId=${esc(brandId)}&preset=${esc(pr.key)}">Use this design</a></p>
+    </div>`
+  ).join("");
 
   const body = `
   <p class="crumb"><a href="/admin">← Dashboard</a></p>
@@ -1674,12 +1704,21 @@ export function templatesGallery(brandName: string, brandId: string, templates: 
     <a class="btn" href="/admin/templates/new?brandId=${esc(brandId)}">+ New template</a>
   </div>
   <p class="muted">A template fixes a layout, color theme and font once. Cards then just pick a template — no design fiddling per person.</p>
-  <div class="tpl-grid">${cards}</div>`;
+  <div class="tpl-grid">${cards}</div>
+  <h3 style="margin-top:32px">Starter gallery</h3>
+  <p class="muted">Ready-made designs — pick one as a starting point and tweak anything afterwards.</p>
+  <div class="tpl-grid">${starters}</div>`;
   return shell("Templates", body);
 }
 
-export function templateForm(brandId: string, template?: any, term: Terminology = GENERAL_TERMINOLOGY): string {
-  const t = template || {};
+export function templateForm(
+  brandId: string,
+  template?: any,
+  term: Terminology = GENERAL_TERMINOLOGY,
+  preset?: { name: string; layout: string; primaryColor: string; textColor: string; bgColor: string; font: string } | null
+): string {
+  // A preset prefills the CREATE form (name + design); it is not an edit.
+  const t = template || (preset ? { ...preset } : {});
   const locked = new Set(asStringArray(t.lockedFields));
   const hidden = new Set(asStringArray(t.hiddenFields));
   const action = template ? `/admin/templates/${template.id}` : "/admin/templates";

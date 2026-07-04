@@ -128,6 +128,72 @@ code { background: var(--wash-2); border: 1px solid var(--line-soft); border-rad
   background: color-mix(in srgb, var(--primary) 14%, #ffffff);
 }
 
+/* ---------- Split layout: compact gradient band, offset square avatar ---------- */
+.layout-split { border-left: 6px solid var(--primary); }
+.layout-split .hero {
+  height: 96px;
+  background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 60%, #000));
+}
+.layout-split .logo { left: auto; right: 16px; transform: none; }
+.layout-split .photo {
+  left: 24px; transform: none; bottom: -56px;
+  width: 112px; height: 112px; border-radius: 22px;
+}
+.layout-split .ident { text-align: left; padding: 70px 24px 8px; }
+.layout-split .ident h1 { font-size: 28px; }
+.layout-split .title { margin: 6px 0 2px; }
+.layout-split .bio { text-align: left; }
+.layout-split .contacts { padding: 8px 24px; }
+.layout-split .row { border-bottom: none; }
+
+/* ---------- Spotlight layout: full-bleed photo hero, name overlaid ---------- */
+.layout-spotlight .hero { height: 320px; overflow: hidden; }
+.layout-spotlight .hero::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(0,0,0,0) 42%, rgba(0,0,0,.58));
+}
+.layout-spotlight .photo {
+  position: absolute; inset: 0; transform: none;
+  width: 100%; height: 100%; border-radius: 0; border: none; box-shadow: none;
+  object-fit: cover;
+}
+.layout-spotlight .photo-fallback {
+  font-size: 72px; color: rgba(255,255,255,.85);
+  background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 50%, #000));
+}
+.layout-spotlight .logo { z-index: 2; }
+.layout-spotlight .ident {
+  margin-top: -92px; position: relative; z-index: 2;
+  text-align: left; padding: 0 24px 16px;
+  color: #fff; text-shadow: 0 1px 10px rgba(0,0,0,.5);
+}
+.layout-spotlight .ident h1 { font-size: 30px; }
+.layout-spotlight .title, .layout-spotlight .company, .layout-spotlight .pronouns { color: #fff; opacity: .88; }
+.layout-spotlight .bio { text-align: left; padding-top: 14px; }
+
+/* ---------- Frame layout: hairline accent frame, medallion photo ---------- */
+.layout-frame {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 45%, transparent),
+              0 0 60px rgba(17, 24, 39, .10);
+}
+.layout-frame .hero { height: auto; background: transparent; padding-top: 30px; }
+.layout-frame .logo { position: static; transform: none; display: block; margin: 0 auto; }
+.layout-frame .photo {
+  position: static; transform: none; display: block; margin: 24px auto 0;
+  border: 3px solid var(--primary); padding: 5px; background: var(--bg);
+}
+.layout-frame .photo-fallback { display: flex; }
+.layout-frame .ident { padding-top: 18px; }
+.layout-frame .ident h1 { font-size: 24px; letter-spacing: .02em; }
+.layout-frame .title {
+  text-transform: uppercase; letter-spacing: .16em;
+  font-size: 12px; font-weight: 600; margin-top: 10px;
+}
+.layout-frame .ident::after {
+  content: ""; display: block; width: 46px; height: 3px;
+  background: var(--primary); margin: 16px auto 0; border-radius: 2px;
+}
+
 .contacts { padding: 8px 16px; }
 .row {
   display: flex; align-items: center; gap: 14px;

@@ -3,12 +3,13 @@ import { config } from "../config";
 import { qrDataUrl } from "../qr";
 import { renderCardPage } from "../views/card";
 import { buildSignatureModel, renderSignatureHtml, normalizeTheme } from "../signature";
+import { CARD_LAYOUTS } from "../layouts";
 
 export const previewRouter = Router();
 
 const isHex = (s: string) => /^#[0-9a-fA-F]{3,8}$/.test(s);
 const isImg = (s: string) => /^https:\/\//.test(s) || /^\/uploads\//.test(s);
-const LAYOUTS = ["classic", "banner", "minimal", "wave"];
+const LAYOUTS: readonly string[] = CARD_LAYOUTS;
 
 // Renders a sample card styled by the query design params. Used as a live
 // preview iframe in the brand/template/card design editors. No DB access.

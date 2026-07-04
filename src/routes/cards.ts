@@ -13,6 +13,7 @@ import { notifyLead } from "../notify";
 import { syncLeadToCrm } from "../crmsync-dispatch";
 import { orgAnalyticsHead } from "../marketing-tags";
 import { appleWalletEnabled, googleWalletEnabled } from "../config";
+import { isCardLayout } from "../layouts";
 import { buildGoogleGenericObject, googleSaveClaims, googleSaveUrl } from "../wallet";
 import { signGoogleJwt } from "../wallet-sign";
 import { findDuplicate } from "../leadstatus";
@@ -67,7 +68,7 @@ cardsRouter.get("/:slug", async (req, res) => {
   // Non-destructive preview overrides (do NOT change saved data):
   //   /c/:slug?layout=wave&photo=<url>&logo=<url>
   const previewLayout = String(req.query.layout || "");
-  if (["classic", "banner", "minimal", "wave"].includes(previewLayout)) {
+  if (isCardLayout(previewLayout)) {
     (card as any).layout = previewLayout;
   }
   const previewPhoto = String(req.query.photo || "");
