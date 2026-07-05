@@ -1,6 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clampTrialDays, PLATFORM_DEFAULTS } from "./platform-config";
+import { clampTrialDays, signupCodeOk, PLATFORM_DEFAULTS } from "./platform-config";
+
+test("signupCodeOk: empty configured code means the gate is off", () => {
+  assert.equal(signupCodeOk("", "anything"), true);
+  assert.equal(signupCodeOk("  ", undefined), true);
+});
+
+test("signupCodeOk: case-insensitive, whitespace-forgiving match", () => {
+  assert.equal(signupCodeOk("Early-Bird 2026", "early-bird 2026"), true);
+  assert.equal(signupCodeOk("Early-Bird 2026", "  EARLY-BIRD 2026  "), true);
+  assert.equal(signupCodeOk("Early-Bird 2026", "wrong"), false);
+  assert.equal(signupCodeOk("Early-Bird 2026", ""), false);
+  assert.equal(signupCodeOk("Early-Bird 2026", null), false);
+});
 
 test("clampTrialDays keeps 1..365 and rounds", () => {
   assert.equal(clampTrialDays(30), 30);

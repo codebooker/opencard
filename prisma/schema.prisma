@@ -14,6 +14,8 @@ model PlatformConfig {
   id              String @id @default("platform")
   signupPlan      String @default("individual") // plan tier for self-service signups
   signupTrialDays Int    @default(30) // trial length for self-service signups
+  // Private-beta gate: when set, public signup requires this code/phrase.
+  signupAccessCode String @default("")
 }
 
 model Org {

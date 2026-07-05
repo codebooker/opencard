@@ -770,8 +770,13 @@ adminRouter.post("/platform", async (req, res) => {
   const saved = await updatePlatformConfig({
     signupPlan: String(req.body?.signupPlan || ""),
     signupTrialDays: parseInt(String(req.body?.signupTrialDays || ""), 10),
+    signupAccessCode: String(req.body?.signupAccessCode ?? ""),
   });
-  audit(req, p, "platform.settings", { targetType: "PlatformConfig", summary: JSON.stringify(saved) });
+  // Don't write the code itself into the audit log.
+  audit(req, p, "platform.settings", {
+    targetType: "PlatformConfig",
+    summary: JSON.stringify({ ...saved, signupAccessCode: saved.signupAccessCode ? "(set)" : "(off)" }),
+  });
   res.redirect("/admin/platform?saved=1");
 });
 

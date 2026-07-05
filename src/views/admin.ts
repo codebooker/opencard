@@ -134,7 +134,7 @@ type BrandWithLocations = {
 };
 
 // Platform settings (OpenCard staff): defaults applied to self-service signups.
-export function platformSettingsView(cfg: { signupPlan: string; signupTrialDays: number }, saved = false): string {
+export function platformSettingsView(cfg: { signupPlan: string; signupTrialDays: number; signupAccessCode?: string }, saved = false): string {
   const planOpts = PLAN_ORDER.map(
     (k) => `<option value="${k}" ${cfg.signupPlan === k ? "selected" : ""}>${esc(PLANS[k].label)} — ${esc(PLANS[k].price)}</option>`
   ).join("");
@@ -154,6 +154,9 @@ export function platformSettingsView(cfg: { signupPlan: string; signupTrialDays:
     <label>Trial length (days)</label>
     <input name="signupTrialDays" type="number" min="1" max="365" value="${cfg.signupTrialDays}" required />
     <p class="muted" style="margin:6px 0 0">1–365 days. Signups start in Standard billing as "trialing"; the workspace locks when the trial ends unless they subscribe (or you change their billing type).</p>
+    <label>Signup access code <span class="muted">(private beta gate)</span></label>
+    <input name="signupAccessCode" value="${esc(cfg.signupAccessCode || "")}" placeholder="Leave blank for open signup" autocomplete="off" />
+    <p class="muted" style="margin:6px 0 0">When set, public signup requires this code or phrase (case-insensitive) before a magic link is sent. Clear it to open signups to everyone.</p>
     <div class="form-actions"><button class="btn" type="submit">Save settings</button>
     <a class="btn secondary" href="/admin/clients">Cancel</a></div>
   </form>`;

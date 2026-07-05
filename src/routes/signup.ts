@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma, runWithOrg } from "../db";
 import { config } from "../config";
 import { hashPassword } from "../security";
-import { getPlatformConfig } from "../platform-config";
+import { getPlatformConfig, signupCodeOk } from "../platform-config";
 import { issueToken, peekToken, consumeToken } from "../account";
 import { sendMail } from "../notify";
 import { mailEnabled } from "../config";
@@ -30,8 +30,13 @@ function brandHead(title: string, sub: string): string {
   </div>`;
 }
 
-// Step 1: just the email.
-function emailFirstPage(opts: { sent?: boolean; error?: string } = {}): string {
+// Step 1: just the email (plus the private-beta access code when one is set).
+function emailFirstPage(opts: { sent?: boolean; error?: string; codeRequired?: boolean; code?: string } = {}): string {
+  const codeField = opts.codeRequired
+    ? `<label>Access code</label>
+          <input name="accessCode" value="${esc(opts.code || "")}" placeholder="Invitation code or phrase" required autocomplete="off" />
+          <p class="muted" style="font-size:12.5px;margin:4px 0 0">OpenCard is in private beta — signup requires an invitation code.</p>`
+    : "";
   return page({
     title: "Create your OpenCard account",
     body: `<div class="auth">
@@ -45,6 +50,7 @@ function emailFirstPage(opts: { sent?: boolean; error?: string } = {}): string {
             : `<form method="POST" action="/signup/start" class="auth-form">
           <label>Work email</label>
           <input name="email" type="email" autocomplete="username" placeholder="you@company.com" required autofocus />
+          ${codeField}
           <button class="btn auth-submit" type="submit">Email me a sign-up link</button>
         </form>
         <p class="auth-foot">Already have an account? <a href="/admin/login">Sign in</a></p>`
@@ -56,9 +62,16 @@ function emailFirstPage(opts: { sent?: boolean; error?: string } = {}): string {
 
 // Step 2 (and the SMTP-less fallback): the full account form. When `token`
 // is set the email is locked to the verified address.
-function signupPage(opts: { values?: any; error?: string; token?: string; fixedEmail?: string } = {}): string {
+function signupPage(opts: { values?: any; error?: string; token?: string; fixedEmail?: string; codeRequired?: boolean } = {}): string {
   const v = opts.values || {};
   const email = opts.fixedEmail ?? v.email ?? "";
+  // Private-beta code on the SMTP-less one-form flow only; the magic-link flow
+  // already validated it at step 1.
+  const codeField =
+    opts.codeRequired && !opts.token
+      ? `<label>Access code</label>
+          <input name="accessCode" value="${esc(v.accessCode || "")}" placeholder="Invitation code or phrase" required autocomplete="off" />`
+      : "";
   return page({
     title: "Create your OpenCard account",
     body: `<div class="auth">
@@ -82,6 +95,7 @@ function signupPage(opts: { values?: any; error?: string; token?: string; fixedE
           <input name="adminName" value="${esc(v.adminName || "")}" placeholder="Jane Doe" required />
           <label>Work email</label>
           <input name="email" type="email" value="${esc(email)}" autocomplete="username" ${opts.fixedEmail ? "readonly" : "required"} />
+          ${codeField}
           <label>Password</label>
           <input name="password" type="password" autocomplete="new-password" minlength="8" required />
           <label>First brand name <span class="muted">(optional)</span></label>
@@ -117,9 +131,11 @@ function disabledPage(): string {
   });
 }
 
-signupRouter.get("/", (_req, res) => {
+signupRouter.get("/", async (_req, res) => {
   if (!config.signupsEnabled) return res.status(404).send(disabledPage());
-  res.send(mailEnabled ? emailFirstPage() : signupPage());
+  const cfg = await getPlatformConfig();
+  const codeRequired = !!cfg.signupAccessCode;
+  res.send(mailEnabled ? emailFirstPage({ codeRequired }) : signupPage({ codeRequired }));
 });
 
 // Step 1: send the magic link. The response never reveals whether the email
@@ -127,8 +143,16 @@ signupRouter.get("/", (_req, res) => {
 // account" email instead of a sign-up link.
 signupRouter.post("/start", async (req, res) => {
   if (!config.signupsEnabled || !mailEnabled) return res.status(404).send(disabledPage());
+  const cfg = await getPlatformConfig();
+  const codeRequired = !!cfg.signupAccessCode;
+  if (!signupCodeOk(cfg.signupAccessCode, req.body?.accessCode)) {
+    return res
+      .status(403)
+      .send(emailFirstPage({ codeRequired, error: "That access code isn't right. OpenCard is in private beta — check your invitation." }));
+  }
   const email = clean(req.body?.email).toLowerCase();
-  if (!validEmail(email)) return res.status(400).send(emailFirstPage({ error: "Enter a valid email address." }));
+  if (!validEmail(email))
+    return res.status(400).send(emailFirstPage({ codeRequired, code: clean(req.body?.accessCode), error: "Enter a valid email address." }));
   const existing = await prisma.adminUser.findUnique({ where: { email } });
   if (existing) {
     await sendMail(
@@ -201,20 +225,32 @@ signupRouter.post("/", async (req, res) => {
   if (!config.signupsEnabled) return res.status(404).send(disabledPage());
   if (mailEnabled) return res.redirect("/signup"); // magic-link flow owns signup when mail works
   const b = req.body || {};
+  const cfg0 = await getPlatformConfig();
+  if (!signupCodeOk(cfg0.signupAccessCode, b.accessCode)) {
+    return res.status(403).send(
+      signupPage({
+        values: { ...b, accessCode: "" },
+        codeRequired: true,
+        error: "That access code isn't right. OpenCard is in private beta — check your invitation.",
+      })
+    );
+  }
   const orgName = clean(b.orgName);
   const adminName = clean(b.adminName);
   const email = clean(b.email).toLowerCase();
   const password = String(b.password || "");
   const businessType = isVertical(b.businessType) ? b.businessType : "general";
-  const values = { orgName, adminName, email, brandName: clean(b.brandName), locationName: clean(b.locationName), businessType, tos: b.tos === "1" };
-  if (!orgName || !adminName || !email) return res.status(400).send(signupPage({ values, error: "All required fields must be filled in." }));
-  if (!values.tos) return res.status(400).send(signupPage({ values, error: "You must agree to the Terms of Service and Privacy Policy to create an account." }));
-  if (!validEmail(email)) return res.status(400).send(signupPage({ values, error: "Enter a valid email address." }));
-  if (password.length < 8) return res.status(400).send(signupPage({ values, error: "Password must be at least 8 characters." }));
+  const codeRequired = !!cfg0.signupAccessCode;
+  const values = { orgName, adminName, email, brandName: clean(b.brandName), locationName: clean(b.locationName), businessType, tos: b.tos === "1", accessCode: clean(b.accessCode) };
+  if (!orgName || !adminName || !email) return res.status(400).send(signupPage({ values, codeRequired, error: "All required fields must be filled in." }));
+  if (!values.tos) return res.status(400).send(signupPage({ values, codeRequired, error: "You must agree to the Terms of Service and Privacy Policy to create an account." }));
+  if (!validEmail(email)) return res.status(400).send(signupPage({ values, codeRequired, error: "Enter a valid email address." }));
+  if (password.length < 8) return res.status(400).send(signupPage({ values, codeRequired, error: "Password must be at least 8 characters." }));
   if (await prisma.adminUser.findUnique({ where: { email } })) {
-    return res.status(409).send(signupPage({ values, error: "An account with that email already exists. Try signing in." }));
+    return res.status(409).send(signupPage({ values, codeRequired, error: "An account with that email already exists. Try signing in." }));
   }
-  await createTenant({ ...values, email, password, verified: true }); // can't gate on mail that can't send
+  const { accessCode: _ac, ...tenantValues } = values;
+  await createTenant({ ...tenantValues, email, password, verified: true }); // can't gate on mail that can't send
   res.redirect("/admin/login?welcome=1");
 });
 
