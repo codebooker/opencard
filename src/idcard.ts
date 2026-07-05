@@ -325,7 +325,7 @@ function drawTriangleBack(doc: PDFKit.PDFDocument, W: number, H: number, seedKey
   const rows = Math.ceil(H / HH) + 2;
   const pick = () => palette[Math.floor(rnd() * palette.length)];
   doc.save();
-  doc.fillOpacity(0.4); // the whole mosaic sits at 40% over the brand color
+  doc.fillOpacity(0.18); // subtle texture — the brand color must stay dominant
   for (let c = 0; c < cols; c++) {
     const x0 = c * CW;
     for (let r = -1; r < rows; r++) {
