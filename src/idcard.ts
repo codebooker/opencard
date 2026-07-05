@@ -25,6 +25,10 @@ export type IdCardInput = {
   slug: string;
   primaryColor: string;
   orgName: string; // brand or company line under the title
+  // The digital card's resolved layout — the badge mirrors the design family
+  // where a print translation exists (currently: wave). Others use the
+  // accent-band layout.
+  layout?: string | null;
 };
 
 // pdfkit embeds JPEG and PNG only. Uploads live on disk; external URLs are
@@ -115,6 +119,52 @@ export async function buildIdCardPdf(input: IdCardInput, orientation: "landscape
     doc.fillColor("#777777").font("Helvetica").fontSize(6.5);
     doc.text(input.orgName, textX, input.title ? 126 : 114, { width: textW, lineBreak: false, ellipsis: true });
     if (logo) doc.image(logo, W - 62, H - 20, { fit: [50, 12], align: "right" });
+  } else if (input.layout === "wave") {
+    // Portrait wave badge: the digital wave card, translated to print —
+    // full-bleed photo up top, the signature curve, logo under it, identity
+    // left-aligned, black QR at the bottom.
+    const PHOTO_H = 96;
+    // Cover the accent band too; the wave hero owns the whole top.
+    if (photo) {
+      doc.save();
+      doc.rect(0, 0, W, PHOTO_H).clip();
+      doc.image(photo, 0, 0, { cover: [W, PHOTO_H], align: "center", valign: "center" });
+      doc.restore();
+    } else {
+      doc.rect(0, 0, W, PHOTO_H).fill(primary);
+      const initials = `${(input.firstName[0] || "").toUpperCase()}${(input.lastName[0] || "").toUpperCase()}` || "?";
+      doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(34);
+      doc.text(initials, 0, PHOTO_H / 2 - 17, { width: W, align: "center" });
+    }
+    // White body rises over the photo bottom along the wave curve…
+    const yL = PHOTO_H - 10; // curve start (left edge)
+    const yR = PHOTO_H - 16; // curve end (right edge)
+    doc
+      .moveTo(0, yL)
+      .bezierCurveTo(W * 0.3, yL + 14, W * 0.7, yR - 12, W, yR)
+      .lineTo(W, H)
+      .lineTo(0, H)
+      .closePath()
+      .fill("#ffffff");
+    // …with the primary-colored wave line on top of the seam.
+    doc
+      .moveTo(0, yL)
+      .bezierCurveTo(W * 0.3, yL + 14, W * 0.7, yR - 12, W, yR)
+      .lineWidth(2)
+      .stroke(primary);
+    if (logo) doc.image(logo, W - 56, PHOTO_H + 2, { fit: [44, 12], align: "right" });
+    doc.fillColor("#111111").font("Helvetica-Bold").fontSize(11.5);
+    doc.text(name, 12, PHOTO_H + 20, { width: W - 24, lineBreak: false, ellipsis: true });
+    if (input.title) {
+      doc.fillColor(primary).font("Helvetica").fontSize(7.5);
+      doc.text(input.title, 12, PHOTO_H + 35, { width: W - 24, lineBreak: false, ellipsis: true });
+    }
+    doc.fillColor("#777777").font("Helvetica").fontSize(6);
+    doc.text(input.orgName, 12, PHOTO_H + (input.title ? 46 : 35), { width: W - 24, lineBreak: false, ellipsis: true });
+    const QR = 66;
+    doc.image(qr, (W - QR) / 2, H - QR - 20, { width: QR, height: QR });
+    doc.fillColor("#666666").font("Helvetica").fontSize(5);
+    doc.text("SCAN TO CONNECT", 0, H - 14, { width: W, align: "center", characterSpacing: 0.6 });
   } else {
     // Portrait badge: photo top-center, identity, QR bottom.
     circlePhoto(W / 2, 46, 30);

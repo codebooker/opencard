@@ -30,3 +30,10 @@ test("bad primary color falls back instead of corrupting the PDF", async () => {
   const pdf = await buildIdCardPdf({ ...person, primaryColor: "javascript:alert(1)" }, "landscape");
   assert.ok(pdf.toString("latin1").startsWith("%PDF-"));
 });
+
+test("wave layout renders its own portrait design (valid PDF, CR80 portrait)", async () => {
+  const pdf = await buildIdCardPdf({ ...person, layout: "wave" }, "portrait");
+  const s = pdf.toString("latin1");
+  assert.ok(s.startsWith("%PDF-"));
+  assert.match(s, /MediaBox \[0 0 153 243\]/);
+});

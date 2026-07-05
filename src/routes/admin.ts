@@ -2004,6 +2004,7 @@ adminRouter.get("/cards/:id/idcard.pdf", async (req, res) => {
       slug: card.slug,
       primaryColor: primary,
       orgName: card.company || card.location.brand.name,
+      layout: card.layout || card.template?.layout || card.location.layout || card.location.brand.layout,
     },
     orientation
   );
