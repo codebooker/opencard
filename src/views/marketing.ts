@@ -175,6 +175,26 @@ p.sub{font-size:17px;color:var(--body);max-width:38em;margin-bottom:52px}
 .cta p{font-size:17px;color:var(--body);margin-bottom:34px}
 .cta .row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
 
+/* contact modal */
+dialog.contact{border:0;border-radius:20px;padding:0;margin:auto;max-width:480px;width:calc(100% - 40px);
+  box-shadow:0 24px 80px -16px rgba(14,21,38,.35)}
+dialog.contact::backdrop{background:rgba(14,21,38,.45);backdrop-filter:blur(3px)}
+.cm-in{padding:32px}
+.cm-in h3{font-size:21px;margin-bottom:6px}
+.cm-in .sub2{font-size:14.5px;color:var(--muted);margin-bottom:20px}
+.cm-in label{display:block;font-size:13.5px;font-weight:600;color:var(--ink);margin:14px 0 6px}
+.cm-in input,.cm-in textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+  font:inherit;font-size:14.5px;color:var(--ink)}
+.cm-in input:focus,.cm-in textarea:focus{outline:2px solid rgba(31,91,234,.35);border-color:var(--blue)}
+.cm-in textarea{min-height:110px;resize:vertical}
+.cm-row{display:flex;gap:12px;margin-top:22px;align-items:center}
+.cm-close{margin-left:auto;background:none;border:0;font-size:14.5px;color:var(--muted);cursor:pointer}
+.cm-close:hover{color:var(--ink)}
+.cm-ok{text-align:center;padding:18px 0 6px}
+.cm-ok .big{font-size:40px;margin-bottom:10px}
+.cm-err{color:#b91c1c;font-size:13.5px;margin-top:12px;display:none}
+.hp{position:absolute;left:-9999px;opacity:0;height:0;overflow:hidden}
+
 /* footer */
 footer{border-top:1px solid var(--line);padding:36px 0;background:var(--wash)}
 .foot{display:flex;align-items:center;gap:24px;font-size:13.5px;color:var(--muted);flex-wrap:wrap}
@@ -399,7 +419,7 @@ export function marketingPage(): string {
         <div class="pp">Custom</div>
         <div class="pd">For enterprise scale &amp; compliance</div>
         <ul><li>Unlimited scale</li><li>Audit logs &amp; retention controls</li><li>Custom contracts &amp; SLAs</li><li>Priority support</li></ul>
-        <a class="btn btn-ghost" href="/signup">Talk to us</a>
+        <button class="btn btn-ghost" type="button" data-contact>Talk to us</button>
       </div>
     </div>
   </div>
@@ -443,6 +463,7 @@ export function marketingPage(): string {
     <span class="sp">
       <a href="#features">Features</a>
       <a href="#pricing">Pricing</a>
+      <a href="#" data-contact>Contact</a>
       <a href="https://status.opencard.id">Status</a>
       <a href="/terms">Terms</a>
       <a href="/privacy">Privacy</a>
@@ -452,6 +473,62 @@ export function marketingPage(): string {
   </div>
 </footer>
 
+<dialog class="contact" id="contactModal">
+  <div class="cm-in" id="cmForm">
+    <h3>Talk to us</h3>
+    <p class="sub2">Enterprise plans, questions, or anything else — we'll get back to you at the email you leave here.</p>
+    <form id="contactForm">
+      <label for="cf-name">Your name</label>
+      <input id="cf-name" name="name" required maxlength="120" />
+      <label for="cf-email">Work email</label>
+      <input id="cf-email" name="email" type="email" required maxlength="200" />
+      <label for="cf-company">Company <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+      <input id="cf-company" name="company" maxlength="160" />
+      <label for="cf-msg">Message</label>
+      <textarea id="cf-msg" name="message" required maxlength="4000" placeholder="Tell us a bit about your team and what you need."></textarea>
+      <div class="hp" aria-hidden="true"><label>Website</label><input name="website" tabindex="-1" autocomplete="off" /></div>
+      <p class="cm-err" id="cmErr">Something went wrong — please email us at contact@opencard.id instead.</p>
+      <div class="cm-row">
+        <button class="btn btn-primary" type="submit" id="cmSend">Send message</button>
+        <button class="cm-close" type="button" data-contact-close>Cancel</button>
+      </div>
+    </form>
+  </div>
+  <div class="cm-in cm-ok" id="cmDone" style="display:none">
+    <div class="big">✓</div>
+    <h3>Message sent</h3>
+    <p class="sub2">Thanks — we'll get back to you shortly.</p>
+    <button class="btn btn-ghost" type="button" data-contact-close>Close</button>
+  </div>
+</dialog>
+<script>(function(){
+  var dlg = document.getElementById('contactModal');
+  var form = document.getElementById('contactForm');
+  var err = document.getElementById('cmErr');
+  var send = document.getElementById('cmSend');
+  document.querySelectorAll('[data-contact]').forEach(function(el){
+    el.addEventListener('click', function(e){ e.preventDefault();
+      document.getElementById('cmForm').style.display='';
+      document.getElementById('cmDone').style.display='none';
+      err.style.display='none'; dlg.showModal(); });
+  });
+  document.querySelectorAll('[data-contact-close]').forEach(function(el){
+    el.addEventListener('click', function(){ dlg.close(); });
+  });
+  form.addEventListener('submit', function(e){
+    e.preventDefault(); err.style.display='none'; send.disabled=true; send.textContent='Sending…';
+    var data = {};
+    new FormData(form).forEach(function(v,k){ data[k]=v; });
+    fetch('/contact', { method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body: JSON.stringify(data) })
+      .then(function(r){ return r.json().catch(function(){ return {ok:false}; }); })
+      .then(function(r){
+        send.disabled=false; send.textContent='Send message';
+        if (r && r.ok) { document.getElementById('cmForm').style.display='none'; document.getElementById('cmDone').style.display=''; form.reset(); }
+        else { err.textContent = (r && r.error) ? r.error : 'Something went wrong — please email us at contact@opencard.id instead.'; err.style.display='block'; }
+      })
+      .catch(function(){ send.disabled=false; send.textContent='Send message'; err.style.display='block'; });
+  });
+})();</script>
 ${userwayScript()}
 </body>
 </html>`;

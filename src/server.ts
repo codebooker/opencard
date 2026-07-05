@@ -15,6 +15,7 @@ import { apiRouter } from "./routes/api";
 import { previewRouter } from "./routes/preview";
 import { marketingPage } from "./views/marketing";
 import { termsPage, privacyPage } from "./views/legal";
+import { sendMail } from "./notify";
 import { handleStripeWebhook } from "./stripe";
 import { qrPng } from "./qr";
 import { isDomainApproved, domainKindForHost, requestHost } from "./tenant-resolver";
@@ -125,6 +126,36 @@ app.get("/", async (req, res) => {
 // Public legal pages (linked from the marketing footer and signup).
 app.get("/terms", (_req, res) => res.type("html").send(termsPage()));
 app.get("/privacy", (_req, res) => res.type("html").send(privacyPage()));
+
+// Marketing contact form -> contact@opencard.id. Rate-limited; the hidden
+// "website" field is a honeypot (bots fill it, humans never see it).
+app.post(
+  "/contact",
+  rateLimit({ name: "contact", windowMs: 60 * 60_000, max: 5, methods: ["POST"] }),
+  async (req, res) => {
+    const b = req.body || {};
+    const name = String(b.name || "").trim().slice(0, 120);
+    const email = String(b.email || "").trim().slice(0, 200);
+    const company = String(b.company || "").trim().slice(0, 160);
+    const message = String(b.message || "").trim().slice(0, 4000);
+    const trap = String(b.website || "").trim();
+    const wantsJson = (req.headers.accept || "").includes("application/json");
+    const fail = (msg: string) =>
+      wantsJson ? res.status(400).json({ ok: false, error: msg }) : res.status(400).send(msg);
+    if (trap) return wantsJson ? res.json({ ok: true }) : res.redirect("/"); // silently drop bots
+    if (!name || !message) return fail("Name and message are required.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail("Enter a valid email address.");
+    await sendMail(
+      ["contact@opencard.id"],
+      `Website contact: ${name}${company ? ` (${company})` : ""}`,
+      `From: ${name} <${email}>${company ? `\nCompany: ${company}` : ""}\n\n${message}\n\n—\nSent from the opencard.id contact form. Reply to: ${email}`
+    );
+    if (wantsJson) return res.json({ ok: true });
+    res
+      .type("html")
+      .send(marketingPage()); // non-JS fallback lands back on the page
+  }
+);
 
 app.use("/scim/v2", scimLimiter, scimRouter);
 app.use("/api/v1", apiLimiter, apiRouter);
