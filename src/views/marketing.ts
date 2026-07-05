@@ -3,6 +3,14 @@
 // stylesheet. The only external script is the UserWay accessibility widget.
 
 import { userwayScript } from "./html";
+import { qrSvg } from "../qr-style";
+
+// Live demo QR (rendered once at module load): scans open a real sample card.
+const DEMO_QR_SVG = qrSvg(
+  "https://opencard.id/c/boss-man",
+  { style: "dots", fill: "#1F5BEA", fill2: "#25D1B3", bg: "#ffffff", logoUrl: null },
+  { size: 210 }
+);
 
 const CSS = `
 :root{
@@ -112,6 +120,20 @@ p.sub{font-size:17px;color:var(--body);max-width:38em;margin-bottom:52px}
 .step h3{font-size:17px;margin-bottom:8px}
 .step p{font-size:14.5px}
 
+/* qr section */
+.qrsec{display:grid;grid-template-columns:1.1fr .9fr;gap:56px;align-items:center}
+.qrsec ul{list-style:none;display:grid;gap:12px;font-size:15px;margin-top:6px}
+.qrsec li{padding-left:26px;position:relative}
+.qrsec li::before{content:"";position:absolute;left:0;top:4px;width:16px;height:16px;border-radius:50%;background:linear-gradient(135deg,rgba(31,91,234,.15),rgba(37,209,179,.2))}
+.qrsec li::after{content:"";position:absolute;left:4.5px;top:8.5px;width:7px;height:4px;border-left:2px solid var(--blue);border-bottom:2px solid var(--blue);transform:rotate(-45deg)}
+.qrsec li b{color:var(--ink)}
+.qr-demo{justify-self:center;text-align:center}
+.qr-demo .tile{background:#fff;border:1px solid var(--line);border-radius:20px;padding:22px;box-shadow:var(--shadow-lg);display:inline-block}
+.qr-demo .tile svg{display:block;border-radius:8px}
+.qr-demo .cap{margin-top:14px;font-size:14px;color:var(--muted)}
+.qr-demo .cap b{color:var(--ink)}
+@media(max-width:960px){.qrsec{grid-template-columns:1fr;gap:40px}}
+
 /* integrations */
 .intg{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
 .intg .it{display:flex;align-items:center;gap:14px;border:1px solid var(--line);border-radius:14px;padding:18px 20px;background:#fff;transition:all .15s ease}
@@ -204,6 +226,7 @@ export function marketingPage(): string {
     <div class="nav-links">
       <a href="#features">Features</a>
       <a href="#how">How it works</a>
+      <a href="#qr-codes">QR codes</a>
       <a href="#integrations">Integrations</a>
       <a href="#pricing">Pricing</a>
     </div>
@@ -300,6 +323,26 @@ export function marketingPage(): string {
       <div class="step"><div class="num">3</div>
         <h3>Share, capture, measure</h3>
         <p>Teams share via QR, NFC, and email signatures. Every scan and lead lands in your analytics — and flows on to your CRM.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="qr-codes">
+  <div class="wrap qrsec">
+    <div>
+      <div class="kicker">Trackable QR codes</div>
+      <h2 class="title">Point a QR code anywhere. Keep the data.</h2>
+      <p class="sub" style="margin-bottom:20px">Create branded QR codes that send people to any destination — your website, a promo page, an event signup. The code points at your OpenCard link first, so every scan becomes intelligence before the visitor lands exactly where you intended.</p>
+      <ul>
+        <li><b>Any destination.</b> Redirect instantly to any URL — and change it later without reprinting a thing.</li>
+        <li><b>Every scan tracked.</b> Time, device, and city-level location roll into your analytics automatically.</li>
+        <li><b>Leads on tap.</b> Or show a branded lead-capture page first, and scans become named contacts synced to your CRM.</li>
+        <li><b>On brand, always.</b> Colors, gradients, dot styles, and your logo in the middle — still scannable, tested at print size.</li>
+      </ul>
+    </div>
+    <div class="qr-demo">
+      <a class="tile" href="https://opencard.id/c/boss-man" target="_blank" rel="noopener" aria-label="Open the live demo card">${DEMO_QR_SVG}</a>
+      <p class="cap"><b>Try it — scan with your phone.</b><br/>It opens a live OpenCard digital card.</p>
     </div>
   </div>
 </section>
