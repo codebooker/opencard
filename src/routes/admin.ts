@@ -2037,6 +2037,8 @@ adminRouter.get("/cards/:id/idcard.pdf", async (req, res) => {
   );
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${card.slug}-idcard-${orientation}${withBack ? "-2sided" : ""}.pdf"`);
+  // Diagnostics: what the server resolved (helps support debug style issues).
+  res.setHeader("X-Idcard-Style", `${backStyle};brand=${String((card.location.brand as any).idCardBack)};layout=${String(card.layout || card.template?.layout || card.location.layout || card.location.brand.layout || "")}`);
   res.send(pdf);
 });
 
