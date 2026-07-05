@@ -136,22 +136,16 @@ export async function buildIdCardPdf(input: IdCardInput, orientation: "landscape
       doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(34);
       doc.text(initials, 0, PHOTO_H / 2 - 17, { width: W, align: "center" });
     }
-    // White body rises over the photo bottom along the wave curve…
-    const yL = PHOTO_H - 10; // curve start (left edge)
-    const yR = PHOTO_H - 16; // curve end (right edge)
-    doc
-      .moveTo(0, yL)
-      .bezierCurveTo(W * 0.3, yL + 14, W * 0.7, yR - 12, W, yR)
-      .lineTo(W, H)
-      .lineTo(0, H)
-      .closePath()
-      .fill("#ffffff");
-    // …with the primary-colored wave line on top of the seam.
-    doc
-      .moveTo(0, yL)
-      .bezierCurveTo(W * 0.3, yL + 14, W * 0.7, yR - 12, W, yR)
-      .lineWidth(2)
-      .stroke(primary);
+    // White body rises over the photo bottom along the hump: crest on the
+    // left, sweeping down to a pocket on the right where the logo sits.
+    const hump = () =>
+      doc
+        .moveTo(0, PHOTO_H - 14)
+        .bezierCurveTo(W * 0.14, PHOTO_H - 30, W * 0.3, PHOTO_H - 32, W * 0.48, PHOTO_H - 20)
+        .bezierCurveTo(W * 0.66, PHOTO_H - 8, W * 0.84, PHOTO_H - 4, W, PHOTO_H - 10);
+    hump().lineTo(W, H).lineTo(0, H).closePath().fill("#ffffff");
+    // …with the primary-colored ribbon on the seam.
+    hump().lineWidth(4).stroke(primary);
     if (logo) doc.image(logo, W - 52, PHOTO_H + 3, { fit: [40, 11], align: "right" });
     doc.fillColor("#111111").font("Helvetica-Bold").fontSize(11.5);
     doc.text(name, 12, PHOTO_H + 19, { width: W - 24, lineBreak: false, ellipsis: true });

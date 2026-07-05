@@ -182,9 +182,9 @@ export function renderCardPage(
         ? `<img class="hero-photo" src="${esc(card.photoUrl)}" alt="${esc(fullName)}" />`
         : `<div class="hero-photo hero-photo-empty"></div>`
     }
-    <svg class="wave" viewBox="0 0 500 60" preserveAspectRatio="none" aria-hidden="true">
-      <path class="wave-fill" d="M0,34 C150,64 350,4 500,16 L500,60 L0,60 Z"></path>
-      <path class="wave-line" d="M0,34 C150,64 350,4 500,16" fill="none"></path>
+    <svg class="wave" viewBox="0 0 500 90" preserveAspectRatio="none" aria-hidden="true">
+      <path class="wave-fill" d="M0,42 C70,10 150,6 240,30 C330,54 420,62 500,50 L500,90 L0,90 Z"></path>
+      <path class="wave-line" d="M0,42 C70,10 150,6 240,30 C330,54 420,62 500,50" fill="none"></path>
     </svg>
   </header>`
       : `<header class="hero">
