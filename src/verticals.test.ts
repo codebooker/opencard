@@ -26,7 +26,11 @@ test("every pack is internally consistent", () => {
 });
 
 test("registry drives the Business type dropdown and vertical checks", () => {
-  assert.deepEqual(VERTICALS.map(([k]) => k), VERTICAL_PACKS.map((p) => p.key));
+  // Same set of keys; dropdown order is General first, then alphabetical.
+  assert.deepEqual(new Set(VERTICALS.map(([k]) => k)), new Set(VERTICAL_PACKS.map((p) => p.key)));
+  assert.equal(VERTICALS[0][0], "general");
+  const labels = VERTICALS.slice(1).map(([, l]) => l);
+  assert.deepEqual(labels, [...labels].sort((a, b) => a.localeCompare(b)));
   assert.ok(isVertical("dealership"));
   assert.ok(!isVertical("florist"));
   assert.equal(verticalLabel("dealership"), "Car dealership");
@@ -43,9 +47,18 @@ test("one pack's fields never leak into another pack's choices", () => {
   assert.deepEqual(defaultLeadFieldsFor("general"), ["email", "phone", "note", "consent"]);
 });
 
-test("Stage 3 packs: all six verticals registered and behave", () => {
+test("Stage 3 packs: all fourteen business types registered and behave", () => {
   const keys = VERTICAL_PACKS.map((p) => p.key);
-  assert.deepEqual(keys, ["general", "dealership", "realestate", "homeservices", "retail", "insurance"]);
+  assert.deepEqual(keys.slice(0, 6), ["general", "dealership", "realestate", "homeservices", "retail", "insurance"]);
+  for (const k of ["lawfirm", "medical", "salon", "fitness", "hospitality", "mortgage", "staffing", "autoservices"]) {
+    assert.ok(keys.includes(k), `missing pack ${k}`);
+  }
+  assert.equal(keys.length, new Set(keys).size, "duplicate pack keys");
+  // shared field: auto services also claims serviceNeed
+  assert.ok(leadFieldChoicesFor("autoservices").some(([k]) => k === "serviceNeed"));
+  assert.ok(!leadFieldChoicesFor("lawfirm").some(([k]) => k === "serviceNeed"));
+  assert.equal(terminologyForVertical("medical").leadPlural, "Appointment requests");
+  assert.equal(packFor("hospitality").ctaLabels.service, "Book a table");
   // shared field ownership: home services and dealership both claim serviceNeed…
   assert.ok(leadFieldChoicesFor("homeservices").some(([k]) => k === "serviceNeed"));
   assert.ok(leadFieldChoicesFor("dealership").some(([k]) => k === "serviceNeed"));

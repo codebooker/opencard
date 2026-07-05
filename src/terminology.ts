@@ -6,7 +6,11 @@ import { VERTICAL_PACKS, packFor } from "./verticals";
 // and everything below. Labels never say "vertical" in the UI.
 
 export type Vertical = string;
-export const VERTICALS: [string, string][] = VERTICAL_PACKS.map((p) => [p.key, p.label]);
+// "Business type" dropdown: General business first, the rest alphabetical.
+export const VERTICALS: [string, string][] = [
+  ...VERTICAL_PACKS.filter((p) => p.key === "general"),
+  ...VERTICAL_PACKS.filter((p) => p.key !== "general").sort((a, b) => a.label.localeCompare(b.label)),
+].map((p) => [p.key, p.label]);
 
 export function isVertical(v: unknown): v is Vertical {
   return VERTICAL_PACKS.some((p) => p.key === v);
