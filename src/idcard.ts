@@ -67,7 +67,11 @@ async function loadImage(url: string | null | undefined): Promise<Buffer | null>
 
 const isHex = (s: string) => /^#[0-9a-fA-F]{3,8}$/.test(s);
 
-export async function buildIdCardPdf(input: IdCardInput, orientation: "landscape" | "portrait" = "landscape"): Promise<Buffer> {
+export async function buildIdCardPdf(
+  input: IdCardInput,
+  orientation: "landscape" | "portrait" = "landscape",
+  withBack = false
+): Promise<Buffer> {
   const W = orientation === "landscape" ? CR80_W : CR80_H;
   const H = orientation === "landscape" ? CR80_H : CR80_W;
   const primary = isHex(input.primaryColor) ? input.primaryColor : "#1f6f43";
@@ -194,6 +198,101 @@ export async function buildIdCardPdf(input: IdCardInput, orientation: "landscape
     if (logo) doc.image(logo, (W - 60) / 2, H - 11, { fit: [60, 8], align: "center" });
   }
 
+  if (withBack) drawBackPage(doc, W, H, primary, name, input.orgName);
+
   doc.end();
   return done;
+}
+
+// ---- Card back (page 2, for duplex badge printers) ----
+// Jack's design: mirrored isometric-cube lattice, split vertically — one half
+// in the brand primary, the other in a darkened shade — with the name and
+// company running vertically in white. Pattern geometry lifted from his SVG
+// (Inkscape "Cubes" cell, 142x123 units).
+
+// Darken a hex color by multiplying channels (f < 1 = darker).
+export function shadeHex(hex: string, f: number): string {
+  const h = hex.replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h.slice(0, 6);
+  const n = parseInt(full, 16);
+  const ch = (v: number) => Math.max(0, Math.min(255, Math.round(v * f)));
+  const r = ch((n >> 16) & 255);
+  const g = ch((n >> 8) & 255);
+  const b = ch(n & 255);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
+}
+
+// The five paths of one pattern cell, with their fill opacities.
+const CUBE_CELL: { d: string; op: number }[] = [
+  { d: "M 0.002,0.002 V 0.004 L 35.51,20.504 71.01,0.008 106.51,20.504 142,0.014 V 0.002 Z", op: 0.6 },
+  {
+    d: "m 35.504,61.5 0.004,0.002 v 41 L 0,123.002 V 81.998 Z M 142.012,0 l 0.004,0.002 v 41 l -35.508,20.5 V 20.498 Z m -71,0 0.004,0.002 v 41 L 35.508,61.502 V 20.498 Z m 35.492,61.5 0.004,0.002 v 41 L 71,123.002 V 81.998 Z",
+    op: 0.3,
+  },
+  {
+    d: "m 106.496,61.5 -0.004,0.002 v 41 L 142,123.002 V 81.998 Z M 71.004,0 71,0.002 v 41 l 35.508,20.5 V 20.498 Z m -71,0 L 0,0.002 v 41 L 35.508,61.502 V 20.498 Z m 35.492,61.5 -0.004,0.002 v 41 L 71,123.002 V 81.998 Z",
+    op: 1,
+  },
+  {
+    d: "m 70.998,41.002 -35.5,20.496 L 0,41.004 v 40.998 l 0.002,0.002 35.5,-20.496 35.5,20.496 L 106.502,61.508 142,82.002 V 41.004 l -0.002,-0.002 -35.5,20.496 z",
+    op: 0.6,
+  },
+  { d: "M 35.506,102.502 0.002,123 v 0.002 H 142 v -0.008 l -35.494,-20.492 -35.5,20.496 z", op: 0.6 },
+];
+
+function drawCubeHalf(doc: PDFKit.PDFDocument, x: number, w: number, H: number, color: string, mirror: boolean) {
+  const CELL_W = 142;
+  const CELL_H = 123;
+  const scale = 34 / CELL_W; // ~34pt tiles on the badge
+  doc.save();
+  doc.rect(x, 0, w, H).clip();
+  const cols = Math.ceil(w / (CELL_W * scale)) + 1;
+  const rows = Math.ceil(H / (CELL_H * scale)) + 1;
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      doc.save();
+      if (mirror) {
+        // Mirror around the half's own vertical axis, tiling from its right edge.
+        doc.translate(x + w - cx * CELL_W * scale, cy * CELL_H * scale);
+        doc.scale(-scale, scale);
+      } else {
+        doc.translate(x + cx * CELL_W * scale, cy * CELL_H * scale);
+        doc.scale(scale, scale);
+      }
+      for (const p of CUBE_CELL) {
+        doc.path(p.d).fillOpacity(p.op).fill(color);
+      }
+      doc.restore();
+    }
+  }
+  doc.restore();
+  doc.fillOpacity(1);
+}
+
+function drawBackPage(doc: PDFKit.PDFDocument, W: number, H: number, primary: string, name: string, orgName: string) {
+  doc.addPage({ size: [W, H], margin: 0 });
+  doc.rect(0, 0, W, H).fill("#ffffff");
+  const dark = shadeHex(primary, 0.62);
+  // Left half: darker shade. Right half: the brand primary, mirrored.
+  drawCubeHalf(doc, 0, W / 2, H, dark, false);
+  drawCubeHalf(doc, W / 2, W / 2, H, primary, true);
+  // Vertical text: company up the left edge, name up the right edge.
+  const vtext = (t: string, xCenter: number) => {
+    doc.save();
+    doc.rotate(-90, { origin: [xCenter, H / 2] });
+    doc.fillColor("#f9f9f9").fillOpacity(1).font("Helvetica-Bold").fontSize(12);
+    // After rotating -90 about (xc, H/2): drawn (sx, sy) lands at
+    // (xc + sy - H/2, H/2 - sx + xc). Start at sx = xc - H/2 + 14,
+    // sy = H/2 - 6 so the run is bottom-to-top, centered on xc.
+    doc.text(t.toUpperCase(), xCenter - H / 2 + 14, H / 2 - 6, {
+      width: H - 28,
+      align: "center",
+      characterSpacing: 1.4,
+      lineBreak: false,
+      ellipsis: true,
+    });
+    doc.restore();
+  };
+  vtext(orgName, W * 0.25);
+  vtext(name, W * 0.75);
 }

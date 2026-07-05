@@ -1993,6 +1993,7 @@ adminRouter.get("/cards/:id/idcard.pdf", async (req, res) => {
   if (!card) return res.status(404).send("Not found");
   if (!(await RBAC.canAccessLocation(reqAdmin(req), card.locationId))) return forbidden(res);
   const orientation = req.query.orientation === "portrait" ? "portrait" : "landscape";
+  const withBack = req.query.back === "1";
   const primary = card.primaryColor || card.template?.primaryColor || card.location.primaryColor || card.location.brand.primaryColor;
   const pdf = await buildIdCardPdf(
     {
@@ -2006,10 +2007,11 @@ adminRouter.get("/cards/:id/idcard.pdf", async (req, res) => {
       orgName: card.company || card.location.brand.name,
       layout: card.layout || card.template?.layout || card.location.layout || card.location.brand.layout,
     },
-    orientation
+    orientation,
+    withBack
   );
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `attachment; filename="${card.slug}-idcard-${orientation}.pdf"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${card.slug}-idcard-${orientation}${withBack ? "-2sided" : ""}.pdf"`);
   res.send(pdf);
 });
 

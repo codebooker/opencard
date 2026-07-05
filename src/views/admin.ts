@@ -1333,7 +1333,7 @@ export function cardList(
         <a href="/admin/cards/${esc(c.id)}/edit">Edit</a> ·
         <a href="/admin/cards/${esc(c.id)}/analytics">Stats</a> ·
         <a href="/c/${esc(c.slug)}/qr.png" target="_blank">QR</a> ·
-        <a href="/admin/cards/${esc(c.id)}/idcard.pdf?orientation=portrait" title="Print-ready CR80 badge PDF (credit-card size)">ID card</a>
+        <a href="/admin/cards/${esc(c.id)}/idcard.pdf?orientation=portrait&back=1" title="Two-sided CR80 badge PDF: front + patterned back (page 2 for duplex printers)">ID card</a>
       </td></tr>`
             )
             .join("")
