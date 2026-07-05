@@ -39,7 +39,7 @@ export async function computeOrgAnalytics(orgId: string, rangeKey: unknown) {
   const per = new Map<string, { views: number; leads: number }>();
   locations.forEach((l) => per.set(l.id, { views: 0, leads: 0 }));
   viewsByCard.forEach((v) => {
-    const loc = cardLoc.get(v.cardId);
+    const loc = v.cardId ? cardLoc.get(v.cardId) : null;
     if (loc && per.has(loc)) per.get(loc)!.views += v._count._all;
   });
   const statusCounts: Record<string, number> = {};

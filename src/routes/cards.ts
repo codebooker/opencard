@@ -3,7 +3,9 @@ import { prisma, runWithOrg } from "../db";
 import { orgIdForHost, requestHost } from "../tenant-resolver";
 import { config } from "../config";
 import { buildVCard } from "../vcard";
-import { qrPng, qrDataUrl } from "../qr";
+import { qrPng } from "../qr";
+import { qrSvg, resolveQrDesign } from "../qr-style";
+import { geoFields } from "../geo";
 import { renderCardPage } from "../views/card";
 import { page, esc } from "../views/html";
 import { emitEvent, leadPayload } from "../webhooks";
@@ -61,7 +63,14 @@ cardsRouter.get("/:slug", async (req, res) => {
 
   await runWithOrg(card.orgId, (db) =>
     db.analyticsEvent.create({
-      data: { cardId: card.id, orgId: card.orgId, type: "view", ip: clientIp(req), userAgent: req.headers["user-agent"] || "" },
+      data: {
+        cardId: card.id,
+        orgId: card.orgId,
+        type: "view",
+        ip: clientIp(req),
+        userAgent: req.headers["user-agent"] || "",
+        ...geoFields(clientIp(req)),
+      },
     })
   );
 
@@ -77,7 +86,9 @@ cardsRouter.get("/:slug", async (req, res) => {
   if (/^https:\/\//.test(previewLogo)) (card as any).logoUrl = previewLogo;
 
   const primary = cardPrimary(card);
-  const qr = await qrDataUrl(`${config.cardUrl}/c/${card.slug}`, primary);
+  const design = resolveQrDesign(card.qrDesign, card.location.brand.qrDesign, primary);
+  const svg = qrSvg(`${config.cardUrl}/c/${card.slug}`, design, { size: 240, margin: 1 });
+  const qr = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
   res.send(
     renderCardPage(card, qr, config.cardUrl, parseUtm(req.query as any), await orgAnalyticsHead(card.orgId), {
       apple: appleWalletEnabled,
@@ -96,7 +107,9 @@ cardsRouter.get("/:slug/wallet/google", async (req, res) => {
   const claims = googleSaveClaims(obj, { serviceEmail: config.wallet.googleServiceEmail, origins: [config.cardUrl] });
   const jwt = signGoogleJwt(claims, config.wallet.googleServiceKey);
   runWithOrg(card.orgId, (db) =>
-    db.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "wallet", meta: "google", ip: clientIp(req) } })
+    db.analyticsEvent.create({
+      data: { cardId: card.id, orgId: card.orgId, type: "wallet", meta: "google", ip: clientIp(req), ...geoFields(clientIp(req)) },
+    })
   ).catch(() => {});
   return res.redirect(302, googleSaveUrl(jwt));
 });
@@ -117,7 +130,9 @@ cardsRouter.get("/:slug/vcard", async (req, res) => {
   const card = await loadCard(req.params.slug, await hostOrg(req));
   if (!card) return res.status(404).send("Not found");
   await runWithOrg(card.orgId, (db) =>
-    db.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "vcard", ip: clientIp(req) } })
+    db.analyticsEvent.create({
+      data: { cardId: card.id, orgId: card.orgId, type: "vcard", ip: clientIp(req), ...geoFields(clientIp(req)) },
+    })
   );
   const vcf = buildVCard(card);
   res.setHeader("Content-Type", "text/vcard; charset=utf-8");
@@ -125,7 +140,7 @@ cardsRouter.get("/:slug/vcard", async (req, res) => {
   res.send(vcf);
 });
 
-// QR PNG (for printing on badges, signatures, etc.)
+// QR PNG (for printing on badges, signatures, etc.) — plain, single color.
 cardsRouter.get("/:slug/qr.png", async (req, res) => {
   const card = await loadCard(req.params.slug, await hostOrg(req));
   if (!card) return res.status(404).send("Not found");
@@ -133,6 +148,18 @@ cardsRouter.get("/:slug/qr.png", async (req, res) => {
   const buf = await qrPng(`${config.cardUrl}/c/${card.slug}`, primary);
   res.setHeader("Content-Type", "image/png");
   res.send(buf);
+});
+
+// Styled QR SVG — the designed version (colors/gradient/dots/logo), crisp at
+// any print size. ?size=… bounds the rendered pixel size.
+cardsRouter.get("/:slug/qr.svg", async (req, res) => {
+  const card = await loadCard(req.params.slug, await hostOrg(req));
+  if (!card) return res.status(404).send("Not found");
+  const design = resolveQrDesign(card.qrDesign, card.location.brand.qrDesign, cardPrimary(card));
+  const size = parseInt(String(req.query.size || ""), 10) || 600;
+  res.setHeader("Content-Type", "image/svg+xml");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.send(qrSvg(`${config.cardUrl}/c/${card.slug}`, design, { size }));
 });
 
 // Click / interaction beacon. Host/org-scoped like every other card lookup so
@@ -158,7 +185,15 @@ cardsRouter.post("/:slug/event", async (req, res) => {
   }
   await runWithOrg(card.orgId, (db) =>
     db.analyticsEvent.create({
-      data: { cardId: card.id, orgId: card.orgId, type, meta, ip: clientIp(req), userAgent: req.headers["user-agent"] || "" },
+      data: {
+        cardId: card.id,
+        orgId: card.orgId,
+        type,
+        meta,
+        ip: clientIp(req),
+        userAgent: req.headers["user-agent"] || "",
+        ...geoFields(clientIp(req)),
+      },
     })
   );
   res.status(204).end();
@@ -178,8 +213,12 @@ cardsRouter.post("/:slug/connect", async (req, res) => {
       select: { id: true, email: true, phone: true },
     });
     const duplicateOfId = findDuplicate({ email: data.email, phone: data.phone }, recent);
-    const created = await db.lead.create({ data: { cardId: card.id, orgId: card.orgId, duplicateOfId, ...data } });
-    await db.analyticsEvent.create({ data: { cardId: card.id, orgId: card.orgId, type: "connect", ip: clientIp(req) } });
+    const created = await db.lead.create({
+      data: { cardId: card.id, orgId: card.orgId, duplicateOfId, ...data, ...geoFields(clientIp(req)) },
+    });
+    await db.analyticsEvent.create({
+      data: { cardId: card.id, orgId: card.orgId, type: "connect", ip: clientIp(req), ...geoFields(clientIp(req)) },
+    });
     return created;
   });
   emitEvent("lead.captured", leadPayload(lead, { card }));

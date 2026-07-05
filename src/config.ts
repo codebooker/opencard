@@ -56,6 +56,12 @@ export const config = {
   // off in production unless SIGNUPS_ENABLED=1, so a deployed instance doesn't
   // accept random org creation before you're ready to open the doors.
   signupsEnabled: process.env.SIGNUPS_ENABLED === "1" || !isProduction,
+  // UserWay accessibility widget on public pages. Defaults to the OpenCard
+  // account; set USERWAY_ACCOUNT to override, or "off" to disable entirely.
+  userwayAccount: (() => {
+    const v = process.env.USERWAY_ACCOUNT ?? "i904zuPeJZ";
+    return v && v !== "off" ? v : "";
+  })(),
   // Stripe billing. All optional — when STRIPE_SECRET_KEY is unset, checkout and
   // the webhook are inert and plans are managed manually by the platform owner.
   stripe: {

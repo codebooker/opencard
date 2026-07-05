@@ -3,6 +3,7 @@ import { Address } from "../types";
 import { AdminPrincipal, ROLE_LABELS } from "../rbac";
 import { showsBilling, canManageStaffTarget, Role } from "../roles";
 import { PLAN_ORDER, PLANS, PlanKey } from "../plans";
+import { parseQrDesign } from "../qr-style";
 import { API_SCOPES, SCOPE_LABELS } from "../api-scopes";
 import { GENERAL_TERMINOLOGY, Terminology, lower, VERTICALS } from "../terminology";
 import {
@@ -13,6 +14,7 @@ import {
   cardLivePreviewScript,
   designControls,
   designScripts,
+  qrDesignControls,
   SELF_FIELDS,
   DEFAULT_SELF_FIELDS,
   PHONE_LABELS,
@@ -106,6 +108,7 @@ function shell(title: string, body: string): string {
         <a class="site-logo" href="/admin" aria-label="OpenCard"><img src="/opencard-logo.svg" alt="OpenCard" /></a>
         <nav class="site-nav" aria-label="Main">
           <a href="/admin">Dashboard</a>
+          <a href="/admin/qr">QR Codes</a>
           <a href="/admin/analytics">Analytics</a>
           <a href="/admin/leads">Leads</a>
         </nav>
@@ -636,6 +639,10 @@ export function brandForm(
       b.showQr === false ? "" : "checked"
     } /> Show the QR code on the card page</label>
     <p class="muted">The QR image stays available at <code>/c/&lt;slug&gt;/qr.png</code> for printing on physical NFC/PVC cards, even when hidden on the page.</p>
+
+    <h3 style="margin-top:16px">QR code design</h3>
+    <p class="muted">Every card, asset and campaign QR under this brand uses this design (crisp SVG, any print size). Downloads live at <code>/c/&lt;slug&gt;/qr.svg</code>, <code>/a/&lt;slug&gt;/qr.svg</code> and <code>/k/&lt;code&gt;/qr.svg</code>.</p>
+    ${qrDesignControls(parseQrDesign(b.qrDesign), b.logoUrl)}
 
     <h3>Self-service editing</h3>
     <p class="muted">Which fields employees may edit on their own card (at <code>/me</code> via SSO). Per-card overrides are available on each card.</p>
@@ -1321,6 +1328,86 @@ export function assetsView(data: { location: any; assets: any[]; cards: any[]; c
   return shell("Assets", body);
 }
 
+// Org-wide QR Codes hub: every trackable QR in one place, with a create form.
+// Backed by the same Asset model as the per-location Assets view.
+export function qrCodesView(data: {
+  assets: any[]; // include: location { name, brand { name } }
+  locations: { id: string; name: string; brandName: string }[];
+  cardBaseUrl: string;
+  created?: string | null; // slug of a just-created code (success banner)
+  locationLabel?: string;
+}): string {
+  const base = (data.cardBaseUrl || "").replace(/\/+$/, "");
+  const locLabel = data.locationLabel || "Location";
+  const createdAsset = data.created ? data.assets.find((a) => a.slug === data.created) : null;
+
+  const rows = data.assets.length
+    ? data.assets
+        .map((a) => {
+          const url = `${base}/a/${a.slug}`;
+          const dest =
+            a.destinationType === "url"
+              ? `→ ${esc(a.destinationUrl || "")}`
+              : a.destinationType === "card"
+                ? "→ a person's card"
+                : "Landing page with lead form";
+          return `<tr>
+      <td>${esc(a.name)}</td>
+      <td data-label="Destination" class="muted">${dest}</td>
+      <td data-label="${esc(locLabel)}" class="muted">${esc(a.location?.name || "")}</td>
+      <td data-label="Scans">${a.scanCount}</td>
+      <td data-label="Status"><span class="pill ${a.active ? "on" : "off"}">${a.active ? "active" : "off"}</span></td>
+      <td class="rsp-actions">
+        <a href="${esc(url)}" target="_blank">Link</a> ·
+        <a href="${esc(url)}/qr.svg" target="_blank" title="Styled QR (brand design), crisp at any size">QR</a> ·
+        <a href="${esc(url)}/qr.png" target="_blank" title="Plain PNG">PNG</a> ·
+        <a href="/admin/locations/${esc(a.locationId)}/assets">Edit</a>
+      </td></tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="6" class="muted">No QR codes yet — create your first one below.</td></tr>`;
+
+  const locOpts = data.locations
+    .map((l) => `<option value="${esc(l.id)}">${esc(l.brandName)} — ${esc(l.name)}</option>`)
+    .join("");
+
+  const body = `
+  <div class="topbar"><h2>QR Codes</h2></div>
+  <p class="muted">Trackable QR codes that send people wherever you want. Every scan is counted and located (city-level) in <a href="/admin/analytics">Analytics</a> — then the visitor is redirected instantly, or shown a lead-capture page if you choose "Landing page".</p>
+  ${
+    createdAsset
+      ? `<p class="auth-banner" style="max-width:none">QR code created — link: <a href="${esc(base)}/a/${esc(createdAsset.slug)}" target="_blank">${esc(base)}/a/${esc(createdAsset.slug)}</a> · <a href="${esc(base)}/a/${esc(createdAsset.slug)}/qr.svg" target="_blank"><strong>Download the QR</strong></a></p>`
+      : ""
+  }
+  <h3 style="margin-top:18px">Create a QR code</h3>
+  <form class="editor" method="POST" action="/admin/qr" style="max-width:640px">
+    <div class="grid2">
+      <div><label>Name</label><input name="name" placeholder="e.g. Showroom window — summer promo" required /></div>
+      <div><label>${esc(locLabel)}</label><select name="locationId">${locOpts}</select></div>
+    </div>
+    <label style="margin-top:8px">When someone scans it…</label>
+    <select name="destinationType" id="qrDest">
+      <option value="url" selected>Send them to a URL (instant redirect, scan is tracked)</option>
+      <option value="landing">Show a lead-capture landing page (collects name/contact as a Lead)</option>
+    </select>
+    <div id="qrUrlWrap"><label class="muted" style="margin-top:6px">Destination URL</label>
+    <input name="destinationUrl" placeholder="https://google.com" /></div>
+    <p style="margin-top:10px"><button class="btn" type="submit">Create QR code</button></p>
+    <script>(function(){
+      var d=document.getElementById('qrDest'),w=document.getElementById('qrUrlWrap');
+      function u(){w.style.display=d.value==='url'?'':'none';}
+      d.addEventListener('change',u);u();
+    })();</script>
+  </form>
+  <h3 style="margin-top:26px">All QR codes</h3>
+  <table class="rsp">
+    <tr><th>Name</th><th>Destination</th><th>${esc(locLabel)}</th><th>Scans</th><th>Status</th><th></th></tr>
+    ${rows}
+  </table>
+  <p class="muted" style="margin-top:10px">The QR image uses your brand's design (set under Edit brand → QR code design). You can change a code's destination any time without reprinting — the printed QR always points at your OpenCard link.</p>`;
+  return shell("QR Codes", body);
+}
+
 export function cardList(
   locationName: string,
   locationId: string,
@@ -1390,8 +1477,8 @@ export function cardForm(opts: {
       <a class="btn secondary" href="/c/${esc(opts.card.slug)}" target="_blank">Preview</a>
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/analytics">Stats</a>
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/signature">Email signature</a>
-      ${opts.idCards ? `<a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf?back=1&v=2" title="Credit-card-sized PDF for badge printers (Datacard, Fargo, Zebra)">ID card PDF</a>
-      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf?orientation=portrait&back=1&v=2" title="Vertical badge layout">ID card (vertical)</a>` : ""}
+      ${opts.idCards ? `<a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf?back=1&v=2" title="Horizontal CR80 badge PDF for badge printers (Datacard, Fargo, Zebra)">ID card — horizontal</a>
+      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf?orientation=portrait&back=1&v=2" title="Vertical CR80 badge PDF (portrait layout)">ID card — vertical</a>` : ""}
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/turnover">Deprovision</a>
     </div>` : ""}
   </div>
@@ -2835,6 +2922,7 @@ export function analyticsView(stats: {
   campaigns?: { key: string; count: number }[];
   employees?: { key: string; count: number }[];
   deptPerf?: { key: string; count: number }[];
+  topLocations?: { key: string; count: number }[];
   range?: { key: string; label: string };
   ranges?: [string, string][];
   locationLabel?: string;
@@ -2887,6 +2975,15 @@ export function analyticsView(stats: {
       ? `<h3 style="margin-top:24px">Lead source mix</h3>
   <div class="panel" style="padding:14px">${svgBars(stats.sources.map((s) => ({ label: s.key, count: s.count })))}</div>`
       : "";
+  const geoSection = stats.topLocations
+    ? `<h3 style="margin-top:24px">Top scan locations</h3>
+  <p class="muted" style="font-size:12.5px;margin:2px 0 8px">Rough, city-level locations from IP lookup on card views, QR scans, and campaign clicks. Private/unresolvable networks are omitted.</p>
+  <table><tr><th>Location</th><th>Interactions</th></tr>${
+        stats.topLocations.length
+          ? stats.topLocations.map((r) => `<tr><td>${esc(r.key)}</td><td>${r.count}</td></tr>`).join("")
+          : `<tr><td colspan="2" class="muted">No located interactions in this range yet.</td></tr>`
+      }</table>`
+    : "";
   const leadCount = stats.leadCount ?? (t.connect || 0);
   const conversion = stats.conversion ?? 0;
   const assetScans = stats.assetScans ?? 0;
@@ -2931,6 +3028,7 @@ export function analyticsView(stats: {
   ${leaderboardSection}
   ${funnelSection}
   ${sourceBars}
+  ${geoSection}
   ${kvTable("Campaign performance", stats.campaigns, "Campaign")}
   ${kvTable("Top employees by leads", stats.employees, "Employee")}
   ${kvTable("Department performance", stats.deptPerf, "Department")}

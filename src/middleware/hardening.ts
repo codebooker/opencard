@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { config } from "../config";
+import { notFoundPage } from "../views/notfound";
 
 // Client IP for rate-limit keys and logs. Relies on Express's `trust proxy`
 // (set to the proxy hop count in server.ts) rather than reading X-Forwarded-For
@@ -22,14 +23,26 @@ function log(entry: Record<string, unknown>): void {
 // the just-picked file via URL.createObjectURL before anything is uploaded);
 // blob: URLs can only reference objects created by this same page, so this
 // grants nothing to third parties.
+// When the UserWay accessibility widget is enabled, its CDN + API must be
+// allowlisted (script/style from the CDN, XHR to its API, iframe for its menu).
+const USERWAY = config.userwayAccount
+  ? {
+      script: " https://cdn.userway.org",
+      style: " https://cdn.userway.org",
+      connect: " https://cdn.userway.org https://api.userway.org",
+      frame: " https://cdn.userway.org",
+      font: " https://cdn.userway.org",
+    }
+  : { script: "", style: "", connect: "", frame: "", font: "" };
+
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline'${USERWAY.script}`,
+  `style-src 'self' 'unsafe-inline'${USERWAY.style}`,
   "img-src 'self' data: blob: https:",
-  "font-src 'self' data:",
-  "connect-src 'self'",
-  "frame-src 'self'",
+  `font-src 'self' data:${USERWAY.font}`,
+  `connect-src 'self'${USERWAY.connect}`,
+  `frame-src 'self'${USERWAY.frame}`,
   "frame-ancestors 'self'",
   "object-src 'none'",
   "base-uri 'self'",
@@ -143,8 +156,13 @@ export function csrfGuard(req: Request, res: Response, next: NextFunction) {
 }
 
 // ---------- 404 + error handling ----------
-export function notFound(_req: Request, res: Response): void {
-  res.status(404).send("Not found");
+export function notFound(req: Request, res: Response): void {
+  // API/SCIM callers get plain text; humans get the branded page.
+  if (req.path.startsWith("/api/") || req.path.startsWith("/scim/") || !req.accepts("html")) {
+    res.status(404).send("Not found");
+    return;
+  }
+  res.status(404).type("html").send(notFoundPage());
 }
 
 export function errorHandler(err: any, req: Request, res: Response, next: NextFunction): void {

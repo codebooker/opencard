@@ -2,6 +2,8 @@ import { Router, Request } from "express";
 import { prisma, runWithOrg } from "../db";
 import { config } from "../config";
 import { qrPng } from "../qr";
+import { qrSvg, resolveQrDesign } from "../qr-style";
+import { geoFields } from "../geo";
 import { orgIdForHost, requestHost } from "../tenant-resolver";
 import { resolveAssetDestination } from "../assets";
 import { renderAssetLanding } from "../views/asset";
@@ -45,12 +47,24 @@ assetsRouter.get("/:slug", async (req, res) => {
     return notFound(res, "This event QR code isn't active right now.");
   }
 
-  await runWithOrg(asset.orgId, (db) =>
-    db.asset.update({
+  const ip = req.ip || req.socket.remoteAddress || "";
+  await runWithOrg(asset.orgId, async (db) => {
+    await db.asset.update({
       where: { id: asset.id },
       data: { scanCount: { increment: 1 }, lastScanAt: new Date() },
-    })
-  );
+    });
+    // Scan event row carries rough location for analytics.
+    await db.analyticsEvent.create({
+      data: {
+        assetId: asset.id,
+        orgId: asset.orgId,
+        type: "scan",
+        ip,
+        userAgent: req.headers["user-agent"] || "",
+        ...geoFields(ip),
+      },
+    });
+  });
 
   const dest = resolveAssetDestination(
     {
@@ -82,7 +96,15 @@ assetsRouter.post("/:slug/connect", async (req, res) => {
       select: { id: true, email: true, phone: true },
     });
     const duplicateOfId = findDuplicate({ email: data.email, phone: data.phone }, recent);
-    return db.lead.create({ data: { assetId: asset.id, orgId: asset.orgId, duplicateOfId, ...data } });
+    return db.lead.create({
+      data: {
+        assetId: asset.id,
+        orgId: asset.orgId,
+        duplicateOfId,
+        ...data,
+        ...geoFields(req.ip || req.socket.remoteAddress || ""),
+      },
+    });
   });
   emitEvent("lead.captured", leadPayload(lead, { asset }));
   notifyLead(lead, { asset });
@@ -98,7 +120,7 @@ assetsRouter.post("/:slug/connect", async (req, res) => {
   );
 });
 
-// Printable QR for the asset.
+// Printable QR for the asset — plain, single color.
 assetsRouter.get("/:slug/qr.png", async (req, res) => {
   const asset = await loadAsset(req.params.slug, await hostOrg(req));
   if (!asset) return res.status(404).send("Not found");
@@ -106,4 +128,16 @@ assetsRouter.get("/:slug/qr.png", async (req, res) => {
   const buf = await qrPng(`${config.cardUrl}/a/${asset.slug}`, primary);
   res.setHeader("Content-Type", "image/png");
   res.send(buf);
+});
+
+// Styled QR SVG — designed version (colors/gradient/dots/logo).
+assetsRouter.get("/:slug/qr.svg", async (req, res) => {
+  const asset = await loadAsset(req.params.slug, await hostOrg(req));
+  if (!asset) return res.status(404).send("Not found");
+  const primary = asset.location.primaryColor || asset.location.brand.primaryColor;
+  const design = resolveQrDesign(asset.qrDesign, asset.location.brand.qrDesign, primary);
+  const size = parseInt(String(req.query.size || ""), 10) || 600;
+  res.setHeader("Content-Type", "image/svg+xml");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.send(qrSvg(`${config.cardUrl}/a/${asset.slug}`, design, { size }));
 });

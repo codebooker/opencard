@@ -126,6 +126,7 @@ import { getSamlConfigForOrg, samlAcsUrl, samlSpIssuer, orgCanonicalHost } from 
 import { signEmail, verifyEmail } from "../selfauth";
 import { hashPassword, verifyPassword, generateTotpSecret, totpUri, verifyTotp } from "../security";
 import { qrDataUrl } from "../qr";
+import { qrSvg, parseQrDesign, qrDesignFromForm } from "../qr-style";
 import { currentTerminology } from "../terminology";
 import { defaultOrgId, orgIdForBrand, orgIdForLocation } from "../tenant";
 import { canAdd, orgHasFeature, orgPlanKey, orgUsage, orgAccessState } from "../entitlements";
@@ -1231,16 +1232,32 @@ adminRouter.get("/brands/:id/edit", async (req, res) => {
   const brandOrg = await prisma.org.findUnique({ where: { id: brand.orgId }, select: { idCardsEnabled: true } });
   res.send(V.brandForm(brand, stats, t, !!brandOrg?.idCardsEnabled));
 });
+// Live preview for the QR designer (admin-authed; params validated by
+// parseQrDesign, hostile values fall back to safe defaults).
+adminRouter.get("/qr-preview", async (req, res) => {
+  const design = parseQrDesign({
+    style: String(req.query.style || "square"),
+    fill: String(req.query.fill || "#111827"),
+    fill2: req.query.fill2 ? String(req.query.fill2) : null,
+    bg: String(req.query.bg || "#ffffff"),
+    logoUrl: req.query.logo ? String(req.query.logo) : null,
+  });
+  res.setHeader("Content-Type", "image/svg+xml");
+  res.setHeader("Cache-Control", "no-store");
+  res.send(qrSvg(`${config.cardUrl}/c/preview`, design, { size: 360 }));
+});
+
 adminRouter.post("/brands", upload.single("logoFile"), async (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canCreateBrand(p)) return forbidden(res);
   if (!(await canAdd(p.orgId, "brands"))) return limitReached(res, "brand");
   const b = req.body;
+  const newLogoUrl = uploadedUrl(req, "logoFile") || clean(b.logoUrl);
   await prisma.brand.create({
     data: {
       orgId: p.orgId,
       name: b.name,
-      logoUrl: uploadedUrl(req, "logoFile") || clean(b.logoUrl),
+      logoUrl: newLogoUrl,
       idCardBack: b.idCardBack === "triangles" ? "triangles" : "cubes",
       primaryColor: b.primaryColor || "#1f6f43",
       textColor: b.textColor || "#111827",
@@ -1248,6 +1265,7 @@ adminRouter.post("/brands", upload.single("logoFile"), async (req, res) => {
       font: b.font || "system",
       layout: b.layout || "classic",
       showQr: !!b.showQr,
+      qrDesign: qrDesignFromForm(b, newLogoUrl),
       selfEditFields: asArray(b.selfEditFields),
       leadFields: b.leadDefault ? Prisma.DbNull : asArray(b.leadFields),
       leadConsentText: b.leadDefault ? null : clean(b.leadConsentText),
@@ -1260,11 +1278,12 @@ adminRouter.post("/brands/:id", upload.single("logoFile"), async (req, res) => {
   const p = reqAdmin(req);
   if (!await RBAC.canManageBrandScoped(p, req.params.id)) return forbidden(res);
   const b = req.body;
+  const newLogoUrl = uploadedUrl(req, "logoFile") || clean(b.logoUrl);
   const brand = await prisma.brand.update({
     where: { id: req.params.id },
     data: {
       name: b.name,
-      logoUrl: uploadedUrl(req, "logoFile") || clean(b.logoUrl),
+      logoUrl: newLogoUrl,
       idCardBack: b.idCardBack === "triangles" ? "triangles" : "cubes",
       primaryColor: b.primaryColor,
       textColor: b.textColor,
@@ -1272,6 +1291,7 @@ adminRouter.post("/brands/:id", upload.single("logoFile"), async (req, res) => {
       font: b.font || "system",
       layout: b.layout,
       showQr: !!b.showQr,
+      qrDesign: qrDesignFromForm(b, newLogoUrl),
       selfEditFields: asArray(b.selfEditFields),
       leadFields: b.leadDefault ? Prisma.DbNull : asArray(b.leadFields),
       leadConsentText: b.leadDefault ? null : clean(b.leadConsentText),
@@ -1647,6 +1667,65 @@ function assetDataFromBody(b: any) {
     // destinationCardId validated against the rooftop by the caller
   };
 }
+
+// ---------- QR Codes hub (org-wide, top-nav) ----------
+// The friendly front door to trackable QR codes: list every asset the admin
+// can see and create new ones without digging into a location's Assets page.
+adminRouter.get("/qr", async (req, res) => {
+  const p = reqAdmin(req);
+  const locIds = await RBAC.accessibleLocationIds(p);
+  const [assets, locations, t] = await Promise.all([
+    prisma.asset.findMany({
+      where: { locationId: { in: locIds } },
+      include: { location: { select: { name: true } } },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.location.findMany({
+      where: { id: { in: locIds } },
+      select: { id: true, name: true, brand: { select: { name: true } } },
+      orderBy: { name: "asc" },
+    }),
+    currentTerminology(p.orgId),
+  ]);
+  res.send(
+    V.qrCodesView({
+      assets,
+      locations: locations.map((l) => ({ id: l.id, name: l.name, brandName: l.brand.name })),
+      cardBaseUrl: config.cardUrl,
+      created: req.query.created ? String(req.query.created) : null,
+      locationLabel: t.locationSingular,
+    })
+  );
+});
+
+adminRouter.post("/qr", async (req, res) => {
+  const p = reqAdmin(req);
+  const locIds = await RBAC.accessibleLocationIds(p);
+  const locationId = clean(req.body?.locationId);
+  if (!locationId || !locIds.includes(locationId)) return forbidden(res);
+  const loc = await prisma.location.findUnique({ where: { id: locationId }, select: { id: true, orgId: true } });
+  if (!loc) return res.status(404).send("Not found");
+  const name = clean(req.body?.name);
+  if (!name) return res.status(400).send("Name required");
+  const destinationType = req.body?.destinationType === "landing" ? "landing" : "url";
+  const destinationUrl = destinationType === "url" ? clean(req.body?.destinationUrl) : null;
+  if (destinationType === "url" && !/^https?:\/\/\S+$/i.test(destinationUrl ? (destinationUrl.startsWith("http") ? destinationUrl : `https://${destinationUrl}`) : "")) {
+    return res.status(400).send("A destination URL is required for a redirect QR code.");
+  }
+  const slug = await uniqueAssetSlug(name);
+  await prisma.asset.create({
+    data: {
+      orgId: loc.orgId,
+      locationId: loc.id,
+      type: "campaign",
+      name,
+      slug,
+      destinationType,
+      destinationUrl: destinationUrl ? (destinationUrl.startsWith("http") ? destinationUrl : `https://${destinationUrl}`) : null,
+    },
+  });
+  res.redirect(`/admin/qr?created=${encodeURIComponent(slug)}`);
+});
 
 adminRouter.get("/locations/:id/assets", async (req, res) => {
   const loc = await locationForDept(req.params.id);
@@ -2115,7 +2194,7 @@ adminRouter.get("/analytics", async (req, res) => {
   const per = new Map<string, { views: number; leads: number }>();
   locations.forEach((l) => per.set(l.id, { views: 0, leads: 0 }));
   viewsByCard.forEach((v) => {
-    const loc = cardLoc.get(v.cardId);
+    const loc = v.cardId ? cardLoc.get(v.cardId) : null;
     if (loc && per.has(loc)) per.get(loc)!.views += v._count._all;
   });
   // Breakdown counters.
@@ -2162,17 +2241,44 @@ adminRouter.get("/analytics", async (req, res) => {
   // Top cards by views (in range).
   const topViews = await prisma.analyticsEvent.groupBy({
     by: ["cardId"],
-    where: { type: "view", ...whereEvents },
+    where: { type: "view", cardId: { not: null }, ...whereEvents },
     _count: { _all: true },
     orderBy: { _count: { cardId: "desc" } },
     take: 10,
   });
-  const topCardRows = await prisma.card.findMany({ where: { id: { in: topViews.map((v) => v.cardId) } } });
+  const topCardRows = await prisma.card.findMany({
+    where: { id: { in: topViews.map((v) => v.cardId).filter((id): id is string => !!id) } },
+  });
   const byId = new Map(topCardRows.map((c) => [c.id, c]));
   const topCards = topViews.map((v) => {
-    const c = byId.get(v.cardId);
+    const c = v.cardId ? byId.get(v.cardId) : undefined;
     return { name: c ? `${c.firstName} ${c.lastName}` : "—", slug: c?.slug || "", views: v._count._all };
   });
+
+  // Top scan/view locations from IP geolocation (cards, asset scans, campaign
+  // clicks — anything in scope carrying a geo point in range).
+  const geoScope = cardIds
+    ? {
+        OR: [
+          { cardId: { in: cardIds } },
+          { asset: { locationId: { in: locIds } } },
+          { campaignRef: { orgId: p.orgId } },
+        ],
+      }
+    : {};
+  const geoRows = await prisma.analyticsEvent.groupBy({
+    by: ["geoCity", "geoRegion", "geoCountry"],
+    where: { geoCountry: { not: null }, ...geoScope, ...dateFilter },
+    _count: { _all: true },
+    orderBy: { _count: { geoCountry: "desc" } },
+    take: 12,
+  });
+  const geoCounts: Record<string, number> = {};
+  geoRows.forEach((g) => {
+    const label = [g.geoCity, g.geoRegion, g.geoCountry].filter(Boolean).join(", ");
+    if (label) geoCounts[label] = (geoCounts[label] || 0) + g._count._all;
+  });
+  const topLocations = topGroups(geoCounts, 12);
 
   // Reporting controls (CSV export + manager digest) — org-level, so gate to global admins.
   const orgSettings = p.global
@@ -2202,6 +2308,7 @@ adminRouter.get("/analytics", async (req, res) => {
       campaigns,
       employees,
       deptPerf,
+      topLocations,
       range: { key: range.key, label: range.label },
       ranges: ANALYTICS_RANGES,
       reports,

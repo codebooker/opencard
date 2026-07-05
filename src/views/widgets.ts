@@ -506,3 +506,72 @@ export function cardLivePreviewScript(): string {
     iframe.src=build();
   })();`;
 }
+
+// ---- Styled QR designer (brand form) ----
+// Renders the QR design controls + a live preview that hits /admin/qr-preview.
+// Field names match qrDesignFromForm() in src/qr-style.ts.
+export function qrDesignControls(current: {
+  style?: string;
+  fill?: string;
+  fill2?: string | null;
+  bg?: string;
+  logoUrl?: string | null;
+} | null, brandLogoUrl?: string | null): string {
+  const d = current || null;
+  const custom = !!d;
+  const style = d?.style || "square";
+  const fill = d?.fill || "#111827";
+  const fill2 = d?.fill2 || "";
+  const transparent = d?.bg === "transparent";
+  const bg = !d?.bg || d.bg === "transparent" ? "#ffffff" : d.bg;
+  const hasLogo = !!d?.logoUrl;
+  return `<div class="grid2" id="qrDesigner">
+    <div>
+      <label class="chk"><input type="radio" name="qrMode" value="inherit" ${custom ? "" : "checked"} /> Standard QR (single color, auto)</label>
+      <label class="chk"><input type="radio" name="qrMode" value="custom" ${custom ? "checked" : ""} /> Custom designed QR</label>
+      <div id="qrOpts" style="${custom ? "" : "opacity:.45;pointer-events:none"}">
+        <label>Dot style</label>
+        <select name="qrStyle">
+          <option value="square" ${style === "square" ? "selected" : ""}>Square (classic)</option>
+          <option value="rounded" ${style === "rounded" ? "selected" : ""}>Rounded</option>
+          <option value="dots" ${style === "dots" ? "selected" : ""}>Dots</option>
+        </select>
+        <label>Color</label><input type="color" name="qrFill" value="${esc(fill)}" />
+        <label class="chk"><input type="checkbox" name="qrGradient" value="1" ${fill2 ? "checked" : ""} /> Gradient to second color</label>
+        <input type="color" name="qrFill2" value="${esc(fill2 || "#25D1B3")}" />
+        <label>Background</label><input type="color" name="qrBg" value="${esc(bg)}" />
+        <label class="chk"><input type="checkbox" name="qrBgTransparent" value="1" ${transparent ? "checked" : ""} /> Transparent background</label>
+        <label class="chk"><input type="checkbox" name="qrLogo" value="1" ${hasLogo ? "checked" : ""} ${brandLogoUrl ? "" : "disabled"} /> Brand logo in the middle${brandLogoUrl ? "" : " (upload a logo first)"}</label>
+      </div>
+    </div>
+    <div style="text-align:center">
+      <img id="qrPreview" alt="QR preview" style="width:180px;height:180px;border:1px solid #e5e7eb;border-radius:12px;background:#fff" />
+      <p class="muted" style="font-size:12px">Live preview — always test-scan before printing.</p>
+    </div>
+  </div>
+  <script>(function(){
+    var root = document.getElementById('qrDesigner');
+    var img = document.getElementById('qrPreview');
+    var opts = document.getElementById('qrOpts');
+    var logo = ${JSON.stringify(brandLogoUrl || "")};
+    function v(n){ var el = root.querySelector('[name='+JSON.stringify(n)+']'); return el ? el.value : ''; }
+    function c(n){ var el = root.querySelector('[name='+JSON.stringify(n)+']'); return !!(el && el.checked); }
+    function mode(){ var el = root.querySelector('[name=qrMode]:checked'); return el ? el.value : 'inherit'; }
+    function update(){
+      var custom = mode() === 'custom';
+      opts.style.opacity = custom ? '' : '.45';
+      opts.style.pointerEvents = custom ? '' : 'none';
+      var q = custom
+        ? 'style=' + encodeURIComponent(v('qrStyle')) +
+          '&fill=' + encodeURIComponent(v('qrFill')) +
+          (c('qrGradient') ? '&fill2=' + encodeURIComponent(v('qrFill2')) : '') +
+          '&bg=' + encodeURIComponent(c('qrBgTransparent') ? 'transparent' : v('qrBg')) +
+          (c('qrLogo') && logo ? '&logo=' + encodeURIComponent(logo) : '')
+        : '';
+      img.src = '/admin/qr-preview' + (q ? '?' + q : '');
+    }
+    root.addEventListener('input', update);
+    root.addEventListener('change', update);
+    update();
+  })();</script>`;
+}

@@ -13,87 +13,90 @@ datasource db {
 model PlatformConfig {
   id              String @id @default("platform")
   signupPlan      String @default("individual") // plan tier for self-service signups
-  signupTrialDays Int    @default(30)        // trial length for self-service signups
+  signupTrialDays Int    @default(30) // trial length for self-service signups
 }
 
 model Org {
-  id          String   @id @default(cuid())
-  name        String
-  vertical    String   @default("general")
+  id                    String            @id @default(cuid())
+  name                  String
+  vertical              String            @default("general")
   // Platform-staff kill switch: blocks admin access, self-service, the API,
   // and all public surfaces (cards, assets, campaign links) for this org.
-  suspended   Boolean  @default(false)
+  suspended             Boolean           @default(false)
   // Self-signup email verification gate: public surfaces stay dark until the
   // owner confirms their address. Staff-created clients are verified at
   // creation; existing orgs are backfilled by the migration.
-  ownerVerifiedAt DateTime?
+  // Terms-of-service acceptance recorded at self-service signup.
+  tosAcceptedAt        DateTime?
+  tosVersion           String?
+  ownerVerifiedAt       DateTime?
   // First-run onboarding checklist on the dashboard; set when dismissed.
   onboardingDismissedAt DateTime?
   // Paid add-on: printable CR80 ID badges (front + patterned back). Staff
   // turn it on per client alongside the plan.
-  idCardsEnabled Boolean @default(false)
+  idCardsEnabled        Boolean           @default(false)
   // Tenant addressing. `subdomain` is the label under the platform domain
   // (e.g. "acme" -> acme.opencard.id); `customDomain` is a fully-qualified host
   // the customer points at us (e.g. cards.acmecorp.com). Both are optional and
   // unique. The host-based tenant resolver uses them; until DNS/TLS routing is
   // live these are simply unused metadata.
-  subdomain    String? @unique
-  customDomain String? @unique
+  subdomain             String?           @unique
+  customDomain          String?           @unique
   // Marketing analytics (Phase 7.4): injected into this org's public card + asset
   // landing pages so scans/views land in the customer's own GA4 / GTM.
-  gaMeasurementId String? // GA4 Measurement ID, e.g. G-XXXXXXXXXX
-  gtmContainerId  String? // Google Tag Manager container, e.g. GTM-XXXXXXX
+  gaMeasurementId       String? // GA4 Measurement ID, e.g. G-XXXXXXXXXX
+  gtmContainerId        String? // Google Tag Manager container, e.g. GTM-XXXXXXX
   // Scheduled manager digest (Phase 8.3): comma-separated recipients + cadence.
-  digestEmails     String?
-  digestCadence    String    @default("off") // off | weekly
-  digestLastSentAt DateTime?
+  digestEmails          String?
+  digestCadence         String            @default("off") // off | weekly
+  digestLastSentAt      DateTime?
   // Instant lead alerts to a Slack / Teams incoming webhook (Phase 14).
-  leadWebhookUrl   String?
+  leadWebhookUrl        String?
   // Data-retention policy (Phase 9.3): auto-delete leads older than N days.
   // null / 0 = keep forever.
-  leadRetentionDays Int?
+  leadRetentionDays     Int?
   // Billing / plan state. `plan` keys into src/plans.ts. Stripe ids are set once
   // hosted checkout is wired; until then plans are assigned by a platform owner.
-  plan                 String    @default("individual")
+  plan                  String            @default("individual")
   // Per-client seat (user/card) allowance set by OpenCard staff. null = use the
   // plan's card limit; -1 = unlimited (billed per seat); else a hard cap.
-  seatLimit            Int?
+  seatLimit             Int?
   // How this tenant is billed: standard (Stripe), demo (time-limited free comp,
   // then must subscribe), or free (permanent comp — friends/family).
-  billingMode          String    @default("standard") // standard | demo | free
-  subscriptionStatus   String    @default("trialing") // trialing | active | past_due | canceled
-  trialEndsAt          DateTime?
-  currentPeriodEnd     DateTime?
-  cancelAtPeriodEnd    Boolean   @default(false)
-  stripeCustomerId     String?   @unique
-  stripeSubscriptionId String?   @unique
+  billingMode           String            @default("standard") // standard | demo | free
+  subscriptionStatus    String            @default("trialing") // trialing | active | past_due | canceled
+  trialEndsAt           DateTime?
+  currentPeriodEnd      DateTime?
+  cancelAtPeriodEnd     Boolean           @default(false)
+  stripeCustomerId      String?           @unique
+  stripeSubscriptionId  String?           @unique
   // Per-tenant SCIM bearer token (only the SHA-256 hash is stored). Lets each
   // customer's IdP provision into their own org.
-  scimTokenHash        String?   @unique
-  terminology Json     @default("{\"brandSingular\":\"Brand\",\"brandPlural\":\"Brands\",\"locationSingular\":\"Location\",\"locationPlural\":\"Locations\",\"locationCodeLabel\":\"Location code\",\"cardSingular\":\"Card\",\"cardPlural\":\"Cards\",\"leadSingular\":\"Lead\",\"leadPlural\":\"Leads\"}")
-  brands            Brand[]
-  locations         Location[]
-  templates         Template[]
-  users             User[]
-  cards             Card[]
-  analyticsEvents   AnalyticsEvent[]
-  leads             Lead[]
-  apiKeys           ApiKey[]
-  webhookEndpoints  WebhookEndpoint[]
-  webhookDeliveries WebhookDelivery[]
-  adminUsers        AdminUser[]
-  samlConfig        SamlConfig?
-  directoryConfig   DirectoryConfig?
-  departments       Department[]
-  assets            Asset[]
-  leadEvents        LeadEvent[]
-  domains           TenantDomain[]
-  crmIntegrations   CrmIntegration[]
-  crmSyncLogs       CrmSyncLog[]
-  campaigns         Campaign[]
-  auditLogs         AuditLog[]
-  events            Event[]
-  createdAt   DateTime @default(now())
+  scimTokenHash         String?           @unique
+  terminology           Json              @default("{\"brandSingular\":\"Brand\",\"brandPlural\":\"Brands\",\"locationSingular\":\"Location\",\"locationPlural\":\"Locations\",\"locationCodeLabel\":\"Location code\",\"cardSingular\":\"Card\",\"cardPlural\":\"Cards\",\"leadSingular\":\"Lead\",\"leadPlural\":\"Leads\"}")
+  brands                Brand[]
+  locations             Location[]
+  templates             Template[]
+  users                 User[]
+  cards                 Card[]
+  analyticsEvents       AnalyticsEvent[]
+  leads                 Lead[]
+  apiKeys               ApiKey[]
+  webhookEndpoints      WebhookEndpoint[]
+  webhookDeliveries     WebhookDelivery[]
+  adminUsers            AdminUser[]
+  samlConfig            SamlConfig?
+  directoryConfig       DirectoryConfig?
+  departments           Department[]
+  assets                Asset[]
+  leadEvents            LeadEvent[]
+  domains               TenantDomain[]
+  crmIntegrations       CrmIntegration[]
+  crmSyncLogs           CrmSyncLog[]
+  campaigns             Campaign[]
+  auditLogs             AuditLog[]
+  events                Event[]
+  createdAt             DateTime          @default(now())
 }
 
 // A time-bounded event (auto show, tent sale, hiring event) that groups QR assets
@@ -136,18 +139,21 @@ model AuditLog {
 // A trackable campaign short link (Phase 7.4). Public URL /k/:code redirects to
 // `landingUrl` with the campaign's UTM params appended, and counts the click.
 model Campaign {
-  id          String   @id @default(cuid())
-  org         Org      @relation(fields: [orgId], references: [id])
+  id          String           @id @default(cuid())
+  org         Org              @relation(fields: [orgId], references: [id])
   orgId       String
-  code        String   @unique // short-link code used at /k/:code
+  code        String           @unique // short-link code used at /k/:code
   name        String
   landingUrl  String
   utmSource   String?
   utmMedium   String?
   utmCampaign String? // defaults to `code` when blank
-  active      Boolean  @default(true)
-  clicks      Int      @default(0)
-  createdAt   DateTime @default(now())
+  active      Boolean          @default(true)
+  clicks      Int              @default(0)
+  // Styled QR design JSON (see src/qr-style.ts); null = inherit brand/default.
+  qrDesign    String?
+  analytics   AnalyticsEvent[]
+  createdAt   DateTime         @default(now())
 
   @@index([orgId])
 }
@@ -202,23 +208,23 @@ model CrmSyncLog {
 // only auto-issue certs for hosts an admin has registered. Not RLS-scoped: it is
 // routing metadata resolved before authentication (like Org/AdminUser).
 model TenantDomain {
-  id         String    @id @default(cuid())
-  host       String    @unique // fully-qualified, lowercased (e.g. cards.mullinaxford.com)
+  id          String    @id @default(cuid())
+  host        String    @unique // fully-qualified, lowercased (e.g. cards.mullinaxford.com)
   // Which portal this host lands on: "user" (employee /me) or "admin" (/admin).
   // Both surfaces stay reachable; kind just sets the default landing for the root.
-  kind       String    @default("user")
-  org        Org       @relation(fields: [orgId], references: [id])
-  orgId      String
-  brand      Brand?    @relation(fields: [brandId], references: [id], onDelete: Cascade)
-  brandId    String?
-  location   Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  locationId String?
-  approved   Boolean   @default(true) // allowlist for Caddy on-demand TLS
+  kind        String    @default("user")
+  org         Org       @relation(fields: [orgId], references: [id])
+  orgId       String
+  brand       Brand?    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  brandId     String?
+  location    Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  locationId  String?
+  approved    Boolean   @default(true) // allowlist for Caddy on-demand TLS
   // Onboarding status shown in the self-serve domains hub: "pending" (DNS not
   // yet pointing at us) or "verified" (DNS resolves to us; cert auto-issues).
-  verifyState String?  // null | pending | verified
+  verifyState String? // null | pending | verified
   verifiedAt  DateTime?
-  createdAt  DateTime  @default(now())
+  createdAt   DateTime  @default(now())
 
   @@index([orgId])
   @@index([brandId])
@@ -227,75 +233,77 @@ model TenantDomain {
 
 // A brand under the org — owns its default design + logo.
 model Brand {
-  id           String     @id @default(cuid())
-  org          Org        @relation(fields: [orgId], references: [id])
-  orgId        String
-  name         String
-  logoUrl      String?
-  primaryColor String     @default("#1f6f43")
-  idCardBack   String     @default("cubes") // ID badge back design: cubes | triangles
-  textColor    String     @default("#111827")
-  bgColor      String     @default("#ffffff")
-  font         String     @default("system")
-  layout       String     @default("classic") // classic | banner | minimal | wave
-  defaultDomain String?
+  id                   String         @id @default(cuid())
+  org                  Org            @relation(fields: [orgId], references: [id])
+  orgId                String
+  name                 String
+  logoUrl              String?
+  primaryColor         String         @default("#1f6f43")
+  idCardBack           String         @default("cubes") // ID badge back design: cubes | triangles
+  textColor            String         @default("#111827")
+  bgColor              String         @default("#ffffff")
+  font                 String         @default("system")
+  layout               String         @default("classic") // classic | banner | minimal | wave
+  defaultDomain        String?
   // Show the QR code on the public card page (the qr.png endpoint stays available
   // regardless, for printing on physical NFC/PVC cards).
-  showQr       Boolean    @default(true)
+  showQr               Boolean        @default(true)
+  // Brand-wide styled QR design JSON (see src/qr-style.ts); cards/assets inherit.
+  qrDesign             String?
   // Brand-wide self-service policy: which card fields employees may edit at /me.
-  selfEditFields Json     @default("[\"photo\",\"bio\",\"phones\",\"emails\",\"socials\"]")
+  selfEditFields       Json           @default("[\"photo\",\"bio\",\"phones\",\"emails\",\"socials\"]")
   // Brand-default lead form: which fields show + consent/privacy text.
-  leadFields    Json?
-  leadConsentText String?
+  leadFields           Json?
+  leadConsentText      String?
   // Signature campaign banner (Phase 6.2): brand-wide promo that auto-appears in
   // every rooftop's signatures between the start/end window (either bound optional).
   signatureBannerText  String?
   signatureBannerHref  String?
   signatureBannerStart DateTime?
   signatureBannerEnd   DateTime?
-  locations    Location[]
-  templates    Template[]
-  domains      TenantDomain[]
-  createdAt    DateTime   @default(now())
+  locations            Location[]
+  templates            Template[]
+  domains              TenantDomain[]
+  createdAt            DateTime       @default(now())
 }
 
 // A store/site under a brand. Can override logo + design.
 model Location {
-  id           String   @id @default(cuid())
-  brand        Brand    @relation(fields: [brandId], references: [id])
-  brandId      String
-  org          Org      @relation(fields: [orgId], references: [id])
-  orgId        String
-  name         String
-  code         String?  // store number / external code used for AD mapping
-  logoUrl      String?  // override brand logo
-  primaryColor String?  // override brand color
-  layout       String?  // override brand layout
-  hideCardFooter Boolean @default(false) // hide the "Brand · Store" footer on this store's cards
-  hideDealerHeader Boolean @default(true) // store name + OEM badges above the dealer CTA buttons (hidden by default: redundant with the footer)
-  address      Json?    // default address shown on this store's cards
+  id                  String         @id @default(cuid())
+  brand               Brand          @relation(fields: [brandId], references: [id])
+  brandId             String
+  org                 Org            @relation(fields: [orgId], references: [id])
+  orgId               String
+  name                String
+  code                String? // store number / external code used for AD mapping
+  logoUrl             String? // override brand logo
+  primaryColor        String? // override brand color
+  layout              String? // override brand layout
+  hideCardFooter      Boolean        @default(false) // hide the "Brand · Store" footer on this store's cards
+  hideDealerHeader    Boolean        @default(true) // store name + OEM badges above the dealer CTA buttons (hidden by default: redundant with the footer)
+  address             Json? // default address shown on this store's cards
   // Dealership rooftop profile (Phase 4).
-  oemBrands    Json     @default("[]") // OEM franchises carried, e.g. ["Ford","Lincoln"]
-  phone        String?  // main dealership phone (click-to-call)
-  website      String?  // dealership website
-  salesUrl     String?  // sales inventory / contact CTA
-  serviceUrl   String?  // schedule-service CTA
-  timezone     String?  // IANA tz, e.g. America/New_York
+  oemBrands           Json           @default("[]") // OEM franchises carried, e.g. ["Ford","Lincoln"]
+  phone               String? // main dealership phone (click-to-call)
+  website             String? // dealership website
+  salesUrl            String? // sales inventory / contact CTA
+  serviceUrl          String? // schedule-service CTA
+  timezone            String? // IANA tz, e.g. America/New_York
   // Lead routing: a rooftop lead inbox (BDC/sales) + campaign->email overrides.
-  leadEmail       String?
-  campaignRouting Json? // { "campaign-name": "email@dealer.com" }
+  leadEmail           String?
+  campaignRouting     Json? // { "campaign-name": "email@dealer.com" }
   // Email-signature design + governance (Phase 6.2), per rooftop (each rooftop
   // has its own logo, so its own signature look / disclaimer / element locks).
-  signatureTheme      String  @default("classic") // classic | compact | modern | minimal
+  signatureTheme      String         @default("classic") // classic | compact | modern | minimal
   signatureDisclaimer String? // per-rooftop legal disclaimer appended to signatures
-  signatureLocks      Json    @default("[]") // element keys employees can't change, e.g. ["banner","disclaimer","ctas"]
-  users        User[]
-  cards        Card[]
-  departments  Department[]
-  assets       Asset[]
-  domains      TenantDomain[]
-  events       Event[]
-  createdAt    DateTime @default(now())
+  signatureLocks      Json           @default("[]") // element keys employees can't change, e.g. ["banner","disclaimer","ctas"]
+  users               User[]
+  cards               Card[]
+  departments         Department[]
+  assets              Asset[]
+  domains             TenantDomain[]
+  events              Event[]
+  createdAt           DateTime       @default(now())
 
   @@unique([brandId, code])
   @@index([orgId])
@@ -305,27 +313,30 @@ model Location {
 // or a trackable QR on a desk, a vehicle window, the service lane, an event, or a
 // campaign. Public URL: /a/:slug. Scans are counted.
 model Asset {
-  id                String    @id @default(cuid())
-  org               Org       @relation(fields: [orgId], references: [id])
+  id                String           @id @default(cuid())
+  org               Org              @relation(fields: [orgId], references: [id])
   orgId             String
-  location          Location  @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  location          Location         @relation(fields: [locationId], references: [id], onDelete: Cascade)
   locationId        String
   type              String // rooftop | department | desk | vehicle | service_lane | event | campaign
   name              String
-  slug              String    @unique // public URL: /a/:slug
-  destinationType   String    @default("landing") // url | card | sales | service | landing
+  slug              String           @unique // public URL: /a/:slug
+  destinationType   String           @default("landing") // url | card | sales | service | landing
   destinationUrl    String?
-  destinationCard   Card?     @relation("AssetDest", fields: [destinationCardId], references: [id], onDelete: SetNull)
+  destinationCard   Card?            @relation("AssetDest", fields: [destinationCardId], references: [id], onDelete: SetNull)
   destinationCardId String?
-  active            Boolean   @default(true)
-  scanCount         Int       @default(0)
+  active            Boolean          @default(true)
+  // Styled QR design JSON override (see src/qr-style.ts); null = brand default.
+  qrDesign          String?
+  scanCount         Int              @default(0)
   lastScanAt        DateTime?
   // When set, this QR asset belongs to an event and only resolves while the
   // event is live (Phase 10.2).
-  event             Event?    @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  event             Event?           @relation(fields: [eventId], references: [id], onDelete: SetNull)
   eventId           String?
   leads             Lead[]
-  createdAt         DateTime  @default(now())
+  analytics         AnalyticsEvent[]
+  createdAt         DateTime         @default(now())
 
   @@index([orgId])
   @@index([locationId])
@@ -352,95 +363,97 @@ model Department {
 
 // Reusable design preset, scoped to a brand.
 model Template {
-  id           String  @id @default(cuid())
-  brand        Brand   @relation(fields: [brandId], references: [id])
-  brandId      String
-  org          Org     @relation(fields: [orgId], references: [id])
-  orgId        String
-  name         String
-  layout       String  @default("classic")
-  primaryColor String  @default("#1f6f43")
-  textColor    String  @default("#111827")
-  bgColor      String  @default("#ffffff")
-  font         String  @default("system")
-  isDefault    Boolean @default(false)
+  id              String   @id @default(cuid())
+  brand           Brand    @relation(fields: [brandId], references: [id])
+  brandId         String
+  org             Org      @relation(fields: [orgId], references: [id])
+  orgId           String
+  name            String
+  layout          String   @default("classic")
+  primaryColor    String   @default("#1f6f43")
+  textColor       String   @default("#111827")
+  bgColor         String   @default("#ffffff")
+  font            String   @default("system")
+  isDefault       Boolean  @default(false)
   // Role-template behaviors (Phase 4.2b). A template can act as a full role
   // preset (e.g. "Service Advisor"), not just a design.
-  role          String? // role label, e.g. "Sales Consultant"
-  lockedFields  Json    @default("[]") // field keys removed from the self-edit policy
-  hiddenFields  Json    @default("[]") // field keys hidden from the public card
-  roleCtas      Json    @default("[]") // [{ label, url }] role-level CTAs
-  leadCapture   Boolean @default(true) // show the "share your details back" form
-  leadFields    Json? // configurable lead-form fields (null = inherit brand)
+  role            String? // role label, e.g. "Sales Consultant"
+  lockedFields    Json     @default("[]") // field keys removed from the self-edit policy
+  hiddenFields    Json     @default("[]") // field keys hidden from the public card
+  roleCtas        Json     @default("[]") // [{ label, url }] role-level CTAs
+  leadCapture     Boolean  @default(true) // show the "share your details back" form
+  leadFields      Json? // configurable lead-form fields (null = inherit brand)
   leadConsentText String? // consent/privacy text under the lead form (null = inherit)
-  disclaimer    String? // legal/disclaimer text shown on the card
-  showQr        Boolean? // QR on the card page (null = inherit brand)
-  emailSignature String? // signature block with {{token}} placeholders
-  cards        Card[]
-  createdAt    DateTime @default(now())
+  disclaimer      String? // legal/disclaimer text shown on the card
+  showQr          Boolean? // QR on the card page (null = inherit brand)
+  emailSignature  String? // signature block with {{token}} placeholders
+  cards           Card[]
+  createdAt       DateTime @default(now())
 
   @@index([orgId])
 }
 
 // An employee, attached to a location. Synced from AD/Azure AD or created by admin.
 model User {
-  id          String   @id @default(cuid())
-  location    Location @relation(fields: [locationId], references: [id])
-  locationId  String
-  org         Org      @relation(fields: [orgId], references: [id])
-  orgId       String
-  email       String   @unique
-  displayName String
-  externalId  String?  @unique // SCIM externalId / AD objectId
-  scimId      String?  @unique
+  id            String   @id @default(cuid())
+  location      Location @relation(fields: [locationId], references: [id])
+  locationId    String
+  org           Org      @relation(fields: [orgId], references: [id])
+  orgId         String
+  email         String   @unique
+  displayName   String
+  externalId    String?  @unique // SCIM externalId / AD objectId
+  scimId        String?  @unique
   // Which automated path created this user: "scim" | "import" | "jit".
   // Null = created by an admin by hand. Drives the sync health dashboard.
   provisionedBy String?
-  active      Boolean  @default(true)
-  card        Card?
-  createdAt   DateTime @default(now())
+  active        Boolean  @default(true)
+  card          Card?
+  createdAt     DateTime @default(now())
 
   @@index([orgId])
 }
 
 model Card {
-  id          String    @id @default(cuid())
-  location    Location  @relation(fields: [locationId], references: [id])
-  locationId  String
-  user        User?     @relation(fields: [userId], references: [id])
-  userId      String?   @unique
-  template    Template? @relation(fields: [templateId], references: [id])
-  templateId  String?
-  dept        Department? @relation(fields: [departmentId], references: [id])
+  id           String      @id @default(cuid())
+  location     Location    @relation(fields: [locationId], references: [id])
+  locationId   String
+  user         User?       @relation(fields: [userId], references: [id])
+  userId       String?     @unique
+  template     Template?   @relation(fields: [templateId], references: [id])
+  templateId   String?
+  dept         Department? @relation(fields: [departmentId], references: [id])
   departmentId String?
-  destAssets  Asset[]   @relation("AssetDest")
-  org         Org       @relation(fields: [orgId], references: [id])
-  orgId       String
+  destAssets   Asset[]     @relation("AssetDest")
+  org          Org         @relation(fields: [orgId], references: [id])
+  orgId        String
 
-  slug        String    @unique // public URL: /c/:slug
+  slug String @unique // public URL: /c/:slug
 
-  prefix      String?
-  firstName   String
-  lastName    String
-  pronouns    String?
-  title       String?
-  department  String?
-  company     String?
-  bio         String?
-  photoUrl    String?
+  prefix     String?
+  firstName  String
+  lastName   String
+  pronouns   String?
+  title      String?
+  department String?
+  company    String?
+  bio        String?
+  photoUrl   String?
+  // Styled QR design JSON override (see src/qr-style.ts); null = brand default.
+  qrDesign   String?
 
   // Flexible multi-value fields stored as JSON arrays (see ARCHITECTURE.md).
-  phones      Json      @default("[]")
-  emails      Json      @default("[]")
-  websites    Json      @default("[]")
-  socials     Json      @default("[]")
-  address     Json?
+  phones   Json  @default("[]")
+  emails   Json  @default("[]")
+  websites Json  @default("[]")
+  socials  Json  @default("[]")
+  address  Json?
 
   // Per-card overrides (most specific in the inheritance chain).
   layout       String?
   primaryColor String?
   logoUrl      String?
-  showQr       Boolean?  // null = inherit brand setting
+  showQr       Boolean? // null = inherit brand setting
 
   // Self-service: the employee who owns this card (matched to their SSO email),
   // and an optional per-card override of the brand's allowed-fields policy (null = inherit).
@@ -449,70 +462,86 @@ model Card {
 
   // Turnover: when the card is deactivated, /c/:slug 302-redirects here (e.g. to a
   // manager's card or the rooftop site) so scanned NFC/QR cards still land somewhere.
-  redirectUrl    String?
+  redirectUrl String?
 
-  active      Boolean   @default(true)
-  events      AnalyticsEvent[]
-  leads       Lead[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  active    Boolean          @default(true)
+  events    AnalyticsEvent[]
+  leads     Lead[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
 
   @@index([ownerEmail])
   @@index([orgId])
 }
 
 model AnalyticsEvent {
-  id        String   @id @default(cuid())
-  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  cardId    String
-  org       Org      @relation(fields: [orgId], references: [id])
-  orgId     String
-  type      String   // view | click | vcard | qr | connect
-  meta      String?
-  ip        String?
-  userAgent String?
-  createdAt DateTime @default(now())
+  id          String    @id @default(cuid())
+  // The subject is a card view/interaction, an asset QR scan, or a campaign
+  // link click (exactly one set).
+  card        Card?     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  cardId      String?
+  asset       Asset?    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetId     String?
+  campaignRef Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaignId  String?
+  org         Org       @relation(fields: [orgId], references: [id])
+  orgId       String
+  type        String // view | click | vcard | qr | connect | scan
+  meta        String?
+  ip          String?
+  userAgent   String?
+  // Rough location from offline IP lookup (city-level at best).
+  geoCity     String?
+  geoRegion   String?
+  geoCountry  String?
+  createdAt   DateTime  @default(now())
 
   @@index([cardId, type])
+  @@index([assetId, type])
+  @@index([campaignId, type])
   @@index([orgId])
 }
 
 model Lead {
-  id        String   @id @default(cuid())
+  id                 String      @id @default(cuid())
   // A lead comes from a card OR an asset landing page (exactly one).
-  card      Card?    @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  cardId    String?
-  asset     Asset?   @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  assetId   String?
-  org       Org      @relation(fields: [orgId], references: [id])
-  orgId     String
-  name      String
-  email     String?
-  phone     String?
-  company   String?
-  note      String?
+  card               Card?       @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  cardId             String?
+  asset              Asset?      @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetId            String?
+  org                Org         @relation(fields: [orgId], references: [id])
+  orgId              String
+  name               String
+  email              String?
+  phone              String?
+  company            String?
+  note               String?
   // Dealership lead fields (Phase 5).
   preferredContact   String? // email | phone | text | any
   vehicleInterest    String?
-  tradeIn            Boolean @default(false)
+  tradeIn            Boolean     @default(false)
   serviceNeed        String?
-  appointmentRequest Boolean @default(false)
-  consent            Boolean @default(false)
-  status             String  @default("new") // new | sent | synced | failed | archived
+  appointmentRequest Boolean     @default(false)
+  consent            Boolean     @default(false)
+  status             String      @default("new") // new | sent | synced | failed | archived
   assignedTo         String? // email of the person currently handling the lead
   // Duplicate detection: points to the earlier lead this one duplicates.
-  duplicateOf        Lead?   @relation("LeadDup", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicateOf        Lead?       @relation("LeadDup", fields: [duplicateOfId], references: [id], onDelete: SetNull)
   duplicateOfId      String?
-  duplicates         Lead[]  @relation("LeadDup")
+  duplicates         Lead[]      @relation("LeadDup")
   events             LeadEvent[]
   // Attribution / source tracking.
-  campaign    String?
-  utmSource   String?
-  utmMedium   String?
-  utmCampaign String?
-  referrer    String?
-  device      String? // mobile | tablet | desktop | bot | unknown
-  createdAt DateTime @default(now())
+  campaign           String?
+  utmSource          String?
+  utmMedium          String?
+  utmCampaign        String?
+  referrer           String?
+  device             String? // mobile | tablet | desktop | bot | unknown
+  // Rough location from offline IP lookup at capture time.
+  geoCity            String?
+  geoRegion          String?
+  geoCountry         String?
+  createdAt          DateTime    @default(now())
 
   @@index([cardId])
   @@index([assetId])
@@ -543,22 +572,22 @@ model LeadEvent {
 // An admin account with a role. Self-service (card owners) are NOT stored here;
 // anyone without an AdminUser record is a plain self-service user.
 model AdminUser {
-  id           String       @id @default(cuid())
-  email        String       @unique
+  id              String         @id @default(cuid())
+  email           String         @unique
   // The org this admin belongs to. NULL = platform-level admin (spans all orgs).
-  org          Org?         @relation(fields: [orgId], references: [id])
-  orgId        String?
-  name         String?
-  role         String       // platform_owner | org_owner | super_admin | general_admin | brand_admin | location_admin
-  passwordHash String? // scrypt hash; null = SSO-only account
-  mfaSecret    String? // base32 TOTP secret
-  mfaEnabled   Boolean      @default(false)
-  recoveryCodes Json? // SHA-256 hashes of unused one-time MFA recovery codes
+  org             Org?           @relation(fields: [orgId], references: [id])
+  orgId           String?
+  name            String?
+  role            String // platform_owner | org_owner | super_admin | general_admin | brand_admin | location_admin
+  passwordHash    String? // scrypt hash; null = SSO-only account
+  mfaSecret       String? // base32 TOTP secret
+  mfaEnabled      Boolean        @default(false)
+  recoveryCodes   Json? // SHA-256 hashes of unused one-time MFA recovery codes
   emailVerifiedAt DateTime? // set by the signup-verification / invite flows
-  active       Boolean      @default(true)
-  scopes       AdminScope[]
-  sessions     AdminSession[]
-  createdAt    DateTime     @default(now())
+  active          Boolean        @default(true)
+  scopes          AdminScope[]
+  sessions        AdminSession[]
+  createdAt       DateTime       @default(now())
 
   @@index([orgId])
 }
@@ -609,18 +638,18 @@ model AdminScope {
 
 // Issuable bearer key for the REST API. Only the SHA-256 hash is stored.
 model ApiKey {
-  id         String    @id @default(cuid())
-  org        Org       @relation(fields: [orgId], references: [id])
-  orgId      String
-  name       String
-  prefix     String // first chars of the key, for display
-  keyHash    String    @unique
+  id           String    @id @default(cuid())
+  org          Org       @relation(fields: [orgId], references: [id])
+  orgId        String
+  name         String
+  prefix       String // first chars of the key, for display
+  keyHash      String    @unique
   // Granted permission scopes (e.g. ["cards:read"]). Empty = full access.
-  scopes     Json      @default("[]")
+  scopes       Json      @default("[]")
   lastUsedAt   DateTime?
   lastUsedPath String? // "<METHOD> <path>" of the most recent request
-  revoked    Boolean   @default(false)
-  createdAt  DateTime  @default(now())
+  revoked      Boolean   @default(false)
+  createdAt    DateTime  @default(now())
 
   @@index([orgId])
 }

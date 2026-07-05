@@ -1,6 +1,8 @@
 // Public marketing landing page, served at the platform root (unregistered
 // hosts). Self-contained: its own inline styles, no dependency on the admin
-// stylesheet, no external CDNs.
+// stylesheet. The only external script is the UserWay accessibility widget.
+
+import { userwayScript } from "./html";
 
 const CSS = `
 :root{
@@ -398,12 +400,16 @@ export function marketingPage(): string {
     <span class="sp">
       <a href="#features">Features</a>
       <a href="#pricing">Pricing</a>
+      <a href="https://status.opencard.id">Status</a>
+      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
       <a href="/signup">Sign up</a>
       <a href="/admin/login">Sign in</a>
     </span>
   </div>
 </footer>
 
+${userwayScript()}
 </body>
 </html>`;
 }

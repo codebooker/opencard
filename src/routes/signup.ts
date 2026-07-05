@@ -8,6 +8,7 @@ import { sendMail } from "../notify";
 import { mailEnabled } from "../config";
 import { VERTICALS, isVertical } from "../terminology";
 import { page, esc } from "../views/html";
+import { TOS_VERSION } from "../views/legal";
 
 // Public self-service onboarding, magic-link first (BetterStack-style):
 //   1) /signup asks only for an email and sends a single-use link.
@@ -87,6 +88,10 @@ function signupPage(opts: { values?: any; error?: string; token?: string; fixedE
           <input name="brandName" value="${esc(v.brandName || "")}" placeholder="defaults to your org name" />
           <label>First location name <span class="muted">(optional)</span></label>
           <input name="locationName" value="${esc(v.locationName || "")}" placeholder="Main" />
+          <label style="display:flex;align-items:flex-start;gap:8px;margin:14px 0 4px;font-weight:normal;font-size:13.5px;line-height:1.5;cursor:pointer">
+            <input type="checkbox" name="tos" value="1" required ${v.tos ? "checked" : ""} style="margin-top:3px;flex:none;width:auto" />
+            <span>I agree to the <a href="/terms" target="_blank">Terms of Service</a> and <a href="/privacy" target="_blank">Privacy Policy</a></span>
+          </label>
           <button class="btn auth-submit" type="submit">Create account</button>
         </form>
         ${opts.fixedEmail ? "" : `<p class="auth-foot">Already have an account? <a href="/admin/login">Sign in</a></p>`}
@@ -168,10 +173,13 @@ signupRouter.post("/complete", async (req, res) => {
     brandName: clean(b.brandName),
     locationName: clean(b.locationName),
     businessType: isVertical(b.businessType) ? b.businessType : "general",
+    tos: b.tos === "1",
   };
   const password = String(b.password || "");
   if (!values.orgName || !values.adminName)
     return res.status(400).send(signupPage({ values, token: raw, fixedEmail: t0.email, error: "All required fields must be filled in." }));
+  if (!values.tos)
+    return res.status(400).send(signupPage({ values, token: raw, fixedEmail: t0.email, error: "You must agree to the Terms of Service and Privacy Policy to create an account." }));
   if (password.length < 8)
     return res.status(400).send(signupPage({ values, token: raw, fixedEmail: t0.email, error: "Password must be at least 8 characters." }));
   if (await prisma.adminUser.findUnique({ where: { email: t0.email } }))
@@ -198,8 +206,9 @@ signupRouter.post("/", async (req, res) => {
   const email = clean(b.email).toLowerCase();
   const password = String(b.password || "");
   const businessType = isVertical(b.businessType) ? b.businessType : "general";
-  const values = { orgName, adminName, email, brandName: clean(b.brandName), locationName: clean(b.locationName), businessType };
+  const values = { orgName, adminName, email, brandName: clean(b.brandName), locationName: clean(b.locationName), businessType, tos: b.tos === "1" };
   if (!orgName || !adminName || !email) return res.status(400).send(signupPage({ values, error: "All required fields must be filled in." }));
+  if (!values.tos) return res.status(400).send(signupPage({ values, error: "You must agree to the Terms of Service and Privacy Policy to create an account." }));
   if (!validEmail(email)) return res.status(400).send(signupPage({ values, error: "Enter a valid email address." }));
   if (password.length < 8) return res.status(400).send(signupPage({ values, error: "Password must be at least 8 characters." }));
   if (await prisma.adminUser.findUnique({ where: { email } })) {
@@ -232,6 +241,9 @@ async function createTenant(v: {
       subscriptionStatus: "trialing",
       trialEndsAt,
       ownerVerifiedAt: v.verified ? new Date() : null,
+      // ToS acceptance is enforced by the form handlers before we get here.
+      tosAcceptedAt: new Date(),
+      tosVersion: TOS_VERSION,
     },
   });
   await prisma.adminUser.create({

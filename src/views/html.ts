@@ -1,5 +1,15 @@
 // Tiny HTML helpers — no template engine needed.
 
+import { config } from "../config";
+
+// UserWay accessibility widget for public-facing pages. Empty string when not
+// configured (USERWAY_ACCOUNT=off), so pages render without any third-party
+// script. CSP in middleware/hardening.ts allowlists cdn.userway.org to match.
+export function userwayScript(): string {
+  if (!config.userwayAccount) return "";
+  return `<script src="https://cdn.userway.org/widget.js" data-account="${esc(config.userwayAccount)}"></script>`;
+}
+
 // Favicon link for OpenCard-branded (admin/auth) pages. Kept off public client
 // card pages, which carry the dealership's own brand rather than OpenCard's.
 export const OC_FAVICON = `<link rel="icon" type="image/svg+xml" href="/opencard-icon.svg" />`;
@@ -35,6 +45,7 @@ ${opts.head || ""}
 </head>
 <body class="${opts.bodyClass || ""}">
 ${opts.body}
+${userwayScript()}
 </body>
 </html>`;
 }

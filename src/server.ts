@@ -14,6 +14,7 @@ import { signupRouter } from "./routes/signup";
 import { apiRouter } from "./routes/api";
 import { previewRouter } from "./routes/preview";
 import { marketingPage } from "./views/marketing";
+import { termsPage, privacyPage } from "./views/legal";
 import { handleStripeWebhook } from "./stripe";
 import { qrPng } from "./qr";
 import { isDomainApproved, domainKindForHost, requestHost } from "./tenant-resolver";
@@ -120,6 +121,10 @@ app.get("/", async (req, res) => {
   if (kind) return res.redirect(kind === "user" ? "/me" : "/admin");
   res.type("html").send(marketingPage());
 });
+
+// Public legal pages (linked from the marketing footer and signup).
+app.get("/terms", (_req, res) => res.type("html").send(termsPage()));
+app.get("/privacy", (_req, res) => res.type("html").send(privacyPage()));
 
 app.use("/scim/v2", scimLimiter, scimRouter);
 app.use("/api/v1", apiLimiter, apiRouter);
