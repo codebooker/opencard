@@ -1,8 +1,6 @@
 import crypto from "crypto";
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "./db";
-import { config } from "./config";
-import { defaultOrgId } from "./tenant";
 import { ApiScope, hasScope, sanitizeScopes } from "./api-scopes";
 
 const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
@@ -19,19 +17,14 @@ export function generateApiKey(): { raw: string; hash: string; prefix: string } 
   return { raw, hash: sha256(raw), prefix: raw.slice(0, 16) };
 }
 
-// Authenticate a REST API request and resolve its tenant (org) + scopes. Accepts
-// a valid issued API key (scoped to that key's org + granted scopes) OR the admin
-// token (default org, unrestricted).
+// Authenticate a REST API request and resolve its tenant (org) + scopes.
+// Accepts only a valid issued API key (scoped to that key's org + granted
+// scopes). The unrestricted ADMIN_TOKEN master-key path was removed — API
+// access is now always a per-key, revocable credential.
 export async function requireApi(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
   if (!token) return res.status(401).json({ error: "missing_bearer_token" });
-
-  if (token === config.adminToken) {
-    (req as any).apiOrgId = await defaultOrgId();
-    (req as any).apiScopes = null; // unrestricted
-    return next();
-  }
 
   const key = await prisma.apiKey.findUnique({ where: { keyHash: sha256(token) } });
   if (!key || key.revoked) return res.status(401).json({ error: "invalid_api_key" });

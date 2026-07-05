@@ -2298,7 +2298,7 @@ export function adminsView(admins: any[]): string {
         <td class="rsp-actions"><a href="/admin/admins/${esc(a.id)}/edit">Edit</a></td></tr>`;
         })
         .join("")
-    : `<tr><td colspan="7" class="muted">No admin accounts yet. The ADMIN_TOKEN is the bootstrap super admin.</td></tr>`;
+    : `<tr><td colspan="7" class="muted">No admin accounts yet. Bootstrap the first one on the server: <code>node dist/scripts/make-admin.js you@example.com</code>.</td></tr>`;
   const body = `
   <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar"><h2>Admin accounts</h2><a class="btn" href="/admin/admins/new">+ New admin</a></div>

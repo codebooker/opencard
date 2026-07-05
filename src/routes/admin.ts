@@ -9,7 +9,6 @@ import {
   reqAdmin,
   forbidden,
   loginPage,
-  breakglassPage,
   mfaPage,
   forgotPage,
   resetPage,
@@ -176,19 +175,9 @@ adminRouter.get("/login", async (req, res) =>
   )
 );
 
-// Super-admin break-glass token login — on its own unlinked page.
-adminRouter.get("/login/breakglass", (_req, res) => res.send(breakglassPage()));
-
-adminRouter.post("/login/token", async (req, res) => {
-  if ((req.body?.token || "") === config.adminToken) {
-    res.cookie("oc_admin", config.adminToken, cookieOptions(12 * 60 * 60 * 1000));
-    recordAudit({ orgId: await defaultOrgId(), actor: { role: "platform_owner" }, action: "login.token", ip: reqIp(req) });
-    return res.redirect("/admin");
-  }
-  recordAudit({ orgId: await defaultOrgId(), action: "login.failed", summary: "break-glass token", ip: reqIp(req) });
-  res.status(401).send(breakglassPage("Invalid token."));
-});
-
+// The ADMIN_TOKEN break-glass login was removed (single-point-of-failure god
+// credential). First-admin bootstrap and lockout recovery now run on the box:
+//   node dist/scripts/make-admin.js <email> [name] [role]
 // Email + password. MFA is optional: if the account has it enabled we ask for a
 // code, otherwise we sign in directly. Admins can turn MFA on later under
 // Admin -> Security.
@@ -236,7 +225,6 @@ adminRouter.get("/logout", async (req, res) => {
   const sess = await findSession(req.cookies?.[SESSION_COOKIE]);
   if (sess) await revokeSession(sess.id, sess.adminUserId);
   res.clearCookie(SESSION_COOKIE, clearCookieOptions());
-  res.clearCookie("oc_admin", clearCookieOptions());
   res.clearCookie("oc_emp", clearCookieOptions());
   res.redirect("/admin/login");
 });

@@ -27,7 +27,8 @@ x-web: &web
     APP_URL: ${APP_URL:?Set APP_URL (e.g. https://opencard.id)}
     CARD_URL: ${CARD_URL:?Set CARD_URL (e.g. https://tapshare.cards)}
     PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-}
-    ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in deploy/.env}
+    # ADMIN_TOKEN removed: the god-token break-glass path was decommissioned.
+    # Admin bootstrap/recovery is now `node dist/scripts/make-admin.js` on the box.
     SCIM_TOKEN: ${SCIM_TOKEN:?Set SCIM_TOKEN in deploy/.env}
     SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in deploy/.env}
     UPLOAD_DIR: /app/uploads

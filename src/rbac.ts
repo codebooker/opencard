@@ -34,26 +34,14 @@ export async function getAdmin(req: Request): Promise<AdminPrincipal | null> {
   const cookies = (req as any).cookies || {};
   let p: AdminPrincipal | null = null;
 
-  // 1) Break-glass platform owner via ADMIN_TOKEN (cookie or bearer).
-  const header = req.headers.authorization || "";
-  const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (bearer === config.adminToken || cookies.oc_admin === config.adminToken) {
-    p = {
-      email: null,
-      name: "Platform owner (token)",
-      role: "platform_owner",
-      orgId: await defaultOrgId(),
-      platform: true,
-      global: true,
-      super: true,
-      staffAdmin: true,
-      brandIds: [],
-      locationIds: [],
-      actingOrgId: null,
-    };
-  } else {
-    // 2) DB-backed session (password/MFA sign-ins; revocable) — preferred.
-    // 3) Signed email cookie (SSO sign-ins via /me; stateless) — fallback.
+  {
+    // Admin identity comes only from real, revocable, per-user accounts:
+    // (1) DB-backed session (password/MFA sign-ins) — preferred.
+    // (2) Signed email cookie (SSO sign-ins via /me; stateless) — fallback.
+    // The old ADMIN_TOKEN "break-glass" god-credential was removed: a single
+    // static token granting platform-owner was a standing single point of
+    // failure. Recovery/bootstrap now happens on the box via
+    // `node dist/scripts/make-admin.js` (requires shell access).
     let au: (Awaited<ReturnType<typeof adminByEmail>>) | null = null;
     const sess = await findSession(cookies[SESSION_COOKIE]);
     if (sess) {

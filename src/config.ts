@@ -42,7 +42,6 @@ export const config = {
   baseUrl,
   cardUrl,
   secureCookies: baseUrl.startsWith("https://"),
-  adminToken: secret("ADMIN_TOKEN", "dev-admin-token-9f3a04a640e84d2c9df0"),
   scimToken: secret("SCIM_TOKEN", "dev-scim-token-c02c9c55a8434e04a53f"),
   sessionSecret: secret("SESSION_SECRET", "dev-session-secret-4a857b6c30aa445fb04a"),
   // Azure AD / Entra OIDC for employee self-service sign-in at /me.

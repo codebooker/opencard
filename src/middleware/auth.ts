@@ -135,23 +135,6 @@ export function authNoticePage(title: string, message: string, cta: { href: stri
   return authCard(title, message, `<a class="btn auth-submit auth-sso" href="${esc(cta.href)}">${esc(cta.label)}</a>`);
 }
 
-// Break-glass token sign-in. Deliberately on its own unlinked page
-// (/admin/login/breakglass) — an emergency door shouldn't be advertised on
-// the login screen.
-export function breakglassPage(error?: string): string {
-  return authCard(
-    "Break-glass access",
-    "Platform-owner emergency sign-in using the instance's ADMIN_TOKEN.",
-    `<form method="POST" action="/admin/login/token" class="auth-form">
-      <label>Admin token</label>
-      <input name="token" type="password" autocomplete="off" placeholder="ADMIN_TOKEN" required autofocus />
-      <button class="btn auth-submit" type="submit">Sign in with token</button>
-    </form>
-    <p class="auth-foot"><a href="/admin/login">Back to normal sign in</a></p>`,
-    { error }
-  );
-}
-
 export function mfaPage(error?: string): string {
   return page({
     title: "Two-factor",
