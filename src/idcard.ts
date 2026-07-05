@@ -240,25 +240,35 @@ const CUBE_CELL: { d: string; op: number }[] = [
   { d: "M 35.506,102.502 0.002,123 v 0.002 H 142 v -0.008 l -35.494,-20.492 -35.5,20.496 z", op: 0.6 },
 ];
 
-function drawCubeHalf(doc: PDFKit.PDFDocument, x: number, w: number, H: number, color: string, mirror: boolean) {
+function drawCubeLayer(
+  doc: PDFKit.PDFDocument,
+  W: number,
+  H: number,
+  color: string,
+  mirror: boolean,
+  phaseX: number
+) {
   const CELL_W = 142;
   const CELL_H = 123;
-  const scale = 34 / CELL_W; // ~34pt tiles on the badge
+  // Jack's SVG: pattern cell at scale 0.4 inside a 0.178 group = 10.1mm
+  // cells -> ~28.7pt on the badge.
+  const scale = 28.66 / CELL_W;
   doc.save();
-  doc.rect(x, 0, w, H).clip();
-  const cols = Math.ceil(w / (CELL_W * scale)) + 1;
+  doc.rect(0, 0, W, H).clip();
+  if (mirror) {
+    // Mirror about the card's vertical center line, like the SVG's
+    // scale(-1,1) rect (its phase offset keeps the lattice aligned).
+    doc.translate(W, 0);
+    doc.scale(-1, 1);
+  }
+  const cols = Math.ceil(W / (CELL_W * scale)) + 2;
   const rows = Math.ceil(H / (CELL_H * scale)) + 1;
+  const startX = -((phaseX % (CELL_W * scale)) + CELL_W * scale) % (CELL_W * scale);
   for (let cy = 0; cy < rows; cy++) {
     for (let cx = 0; cx < cols; cx++) {
       doc.save();
-      if (mirror) {
-        // Mirror around the half's own vertical axis, tiling from its right edge.
-        doc.translate(x + w - cx * CELL_W * scale, cy * CELL_H * scale);
-        doc.scale(-scale, scale);
-      } else {
-        doc.translate(x + cx * CELL_W * scale, cy * CELL_H * scale);
-        doc.scale(scale, scale);
-      }
+      doc.translate(startX + cx * CELL_W * scale, cy * CELL_H * scale);
+      doc.scale(scale, scale);
       for (const p of CUBE_CELL) {
         doc.path(p.d).fillOpacity(p.op).fill(color);
       }
@@ -272,27 +282,26 @@ function drawCubeHalf(doc: PDFKit.PDFDocument, x: number, w: number, H: number, 
 function drawBackPage(doc: PDFKit.PDFDocument, W: number, H: number, primary: string, name: string, orgName: string) {
   doc.addPage({ size: [W, H], margin: 0 });
   doc.rect(0, 0, W, H).fill("#ffffff");
-  const dark = shadeHex(primary, 0.62);
-  // Left half: darker shade. Right half: the brand primary, mirrored.
-  drawCubeHalf(doc, 0, W / 2, H, dark, false);
-  drawCubeHalf(doc, W / 2, W / 2, H, primary, true);
-  // Vertical text: company up the left edge, name up the right edge.
-  const vtext = (t: string, xCenter: number) => {
+  // Jack's layering: the DARK pattern underneath, the primary-colored pattern
+  // mirrored on top with a phase shift — the translucent cube faces blend the
+  // two into one continuous two-tone lattice (no seam, no visible mirror).
+  const dark = shadeHex(primary, 0.64);
+  drawCubeLayer(doc, W, H, dark, false, 0);
+  drawCubeLayer(doc, W, H, primary, true, 14.2);
+  // Vertical text, reading top-to-bottom from the top edge (per the SVG):
+  // name down the LEFT edge, company down the RIGHT edge.
+  const vtext = (t: string, anchorX: number) => {
     doc.save();
-    doc.rotate(-90, { origin: [xCenter, H / 2] });
-    doc.fillColor("#f9f9f9").fillOpacity(1).font("Helvetica-Bold").fontSize(12);
-    // After rotating -90 about (xc, H/2): drawn (sx, sy) lands at
-    // (xc + sy - H/2, H/2 - sx + xc). Start at sx = xc - H/2 + 14,
-    // sy = H/2 - 6 so the run is bottom-to-top, centered on xc.
-    doc.text(t.toUpperCase(), xCenter - H / 2 + 14, H / 2 - 6, {
-      width: H - 28,
-      align: "center",
-      characterSpacing: 1.4,
+    doc.rotate(90, { origin: [anchorX, 10] });
+    doc.fillColor("#f9f9f9").fillOpacity(1).font("Helvetica-Bold").fontSize(9);
+    doc.text(t.toUpperCase(), anchorX, 10, {
+      width: H - 24,
+      characterSpacing: 0.9,
       lineBreak: false,
       ellipsis: true,
     });
     doc.restore();
   };
-  vtext(orgName, W * 0.25);
-  vtext(name, W * 0.75);
+  vtext(name, 21);
+  vtext(orgName, W - 18);
 }
