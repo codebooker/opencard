@@ -1,6 +1,12 @@
 name: Deploy
 
 # Push-to-deploy for the production VM.
+#
+# The deploy job runs on a SELF-HOSTED runner installed on the VM itself
+# (systemd service actions.runner.codebooker-opencard.opencard-vm). It reaches
+# out to GitHub, so no inbound SSH is needed — the Hetzner firewall can keep
+# port 22 closed to everything except the operator's IP. Tests still run on a
+# GitHub-hosted runner.
 on:
   push:
     branches: [main]
@@ -16,40 +22,27 @@ jobs:
 
   deploy:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, opencard-vm]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Load SSH key
+      - name: Sync code into /opt/opencard
+        # Local copy on the box. --delete keeps the tree matching git, but the
+        # host-managed infra (Caddyfile, certs), runtime secrets (.env files),
+        # and data (uploads, backups) are excluded so they survive.
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
-
-      - name: Sync code to VM
-        # Same excludes as deploy.command: host-managed infra (Caddyfile,
-        # certs), runtime secrets (.env files), and data (uploads, backups)
-        # must survive --delete.
-        run: |
-          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key" \
+          rsync -a --delete \
             --exclude '.git' --exclude 'node_modules' --exclude 'dist' --exclude '.test-build' \
             --exclude 'uploads' --exclude 'deploy/.env' --exclude 'deploy/certs' --exclude 'deploy/deploy.config' \
             --exclude 'deploy/backup.env' --exclude 'deploy/healthcheck.env' \
             --exclude '/Caddyfile' --exclude '/certs' --exclude '*.log' --exclude '/backups' \
-            ./ "root@${{ secrets.VM_HOST }}:/opt/opencard/"
+            ./ /opt/opencard/
 
       - name: Rolling deploy (zero downtime)
-        # 1. Build the new image while the old containers keep serving.
-        # 2. Recreate web_a and wait for its healthcheck; Caddy fails over to
-        #    web_b meanwhile. If the new image is broken, --wait fails, the
-        #    deploy aborts, and the old code keeps running on web_b.
-        # 3. Reload Caddy config gracefully (no listener restart).
-        # 4. Recreate web_b the same way; Caddy is on web_a (new code) already.
-        # 5. Final `up` reconciles the rest (db config, orphans from the old
-        #    single-`web` layout).
+        # Build the new image while the old containers serve; recreate web_a and
+        # wait for its healthcheck (Caddy fails over to web_b); reload Caddy;
+        # then web_b. A broken image fails --wait and aborts with old code live.
         run: |
-          ssh -i ~/.ssh/deploy_key "root@${{ secrets.VM_HOST }}" bash -s <<'EOF'
           set -euo pipefail
           cd /opt/opencard
           cp deploy/Caddyfile Caddyfile
@@ -60,7 +53,6 @@ jobs:
           $DC exec -T caddy caddy reload --config /etc/caddy/Caddyfile || $DC up -d caddy
           $DC up -d --no-deps --wait web_b
           $DC up -d --remove-orphans
-          EOF
 
       - name: Smoke test
         run: |
