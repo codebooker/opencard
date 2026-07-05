@@ -155,7 +155,7 @@ export async function buildIdCardPdf(input: IdCardInput, orientation: "landscape
     hump().lineTo(W, H).lineTo(0, H).closePath().fill("#ffffff");
     // …with the primary-colored ribbon on the seam.
     hump().lineWidth(4).stroke(primary);
-    if (logo) doc.image(logo, W - 52, PHOTO_H - 8 - W * (40.43 / 210) + 7, { fit: [40, 11], align: "right" });
+    if (logo) doc.image(logo, W - 52, PHOTO_H - 8 - W * (40.43 / 210) + 10, { fit: [40, 11], align: "right" });
     doc.fillColor("#111111").font("Helvetica-Bold").fontSize(11.5);
     doc.text(name, 12, PHOTO_H + 19, { width: W - 24, lineBreak: false, ellipsis: true });
     if (input.title) {
