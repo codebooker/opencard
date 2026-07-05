@@ -170,13 +170,13 @@ export async function buildIdCardPdf(
     hump().lineWidth(4).stroke(primary);
     if (logo) doc.image(logo, W - 52, PHOTO_H - 8 - W * (40.43 / 210) + 10, { fit: [40, 11], align: "right" });
     doc.fillColor("#111111").font("Helvetica-Bold").fontSize(11.5);
-    doc.text(name, 12, PHOTO_H + 10, { width: W - 24, lineBreak: false, ellipsis: true });
+    doc.text(name, 12, PHOTO_H + 2, { width: W - 24, lineBreak: false, ellipsis: true });
     if (input.title) {
       doc.fillColor(primary).font("Helvetica").fontSize(7.5);
-      doc.text(input.title, 12, PHOTO_H + 25, { width: W - 24, lineBreak: false, ellipsis: true });
+      doc.text(input.title, 12, PHOTO_H + 17, { width: W - 24, lineBreak: false, ellipsis: true });
     }
     doc.fillColor("#777777").font("Helvetica").fontSize(6);
-    doc.text(input.orgName, 12, PHOTO_H + (input.title ? 35 : 25), { width: W - 24, lineBreak: false, ellipsis: true });
+    doc.text(input.orgName, 12, PHOTO_H + (input.title ? 27 : 17), { width: W - 24, lineBreak: false, ellipsis: true });
     const QR = 54;
     doc.image(qr, (W - QR) / 2, H - QR - 13, { width: QR, height: QR });
     doc.fillColor("#666666").font("Helvetica").fontSize(5);
