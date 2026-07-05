@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import sharp from "sharp";
 import fs from "fs";
 import path from "path";
 import { qrPng } from "./qr";
@@ -51,7 +52,14 @@ async function loadImage(url: string | null | undefined): Promise<Buffer | null>
     if (!buf || buf.length < 8) return null;
     const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
     const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
-    return isJpeg || isPng ? buf : null;
+    if (isJpeg || isPng) return buf;
+    // webp/gif/avif uploads (allowed on cards) can't go into a PDF directly —
+    // transcode to PNG. Any failure just drops the image, never the badge.
+    try {
+      return await sharp(buf).png().toBuffer();
+    } catch {
+      return null;
+    }
   } catch {
     return null;
   }
@@ -123,7 +131,7 @@ export async function buildIdCardPdf(input: IdCardInput, orientation: "landscape
     // Portrait wave badge: the digital wave card, translated to print —
     // full-bleed photo up top, the signature curve, logo under it, identity
     // left-aligned, black QR at the bottom.
-    const PHOTO_H = 118; // generous hero — the photo is the point
+    const PHOTO_H = 132; // generous hero — the photo is the point
     // Cover the accent band too; the wave hero owns the whole top.
     if (photo) {
       doc.save();
@@ -157,17 +165,17 @@ export async function buildIdCardPdf(input: IdCardInput, orientation: "landscape
     hump().lineWidth(4).stroke(primary);
     if (logo) doc.image(logo, W - 52, PHOTO_H - 8 - W * (40.43 / 210) + 10, { fit: [40, 11], align: "right" });
     doc.fillColor("#111111").font("Helvetica-Bold").fontSize(11.5);
-    doc.text(name, 12, PHOTO_H + 19, { width: W - 24, lineBreak: false, ellipsis: true });
+    doc.text(name, 12, PHOTO_H + 10, { width: W - 24, lineBreak: false, ellipsis: true });
     if (input.title) {
       doc.fillColor(primary).font("Helvetica").fontSize(7.5);
-      doc.text(input.title, 12, PHOTO_H + 34, { width: W - 24, lineBreak: false, ellipsis: true });
+      doc.text(input.title, 12, PHOTO_H + 25, { width: W - 24, lineBreak: false, ellipsis: true });
     }
     doc.fillColor("#777777").font("Helvetica").fontSize(6);
-    doc.text(input.orgName, 12, PHOTO_H + (input.title ? 45 : 34), { width: W - 24, lineBreak: false, ellipsis: true });
+    doc.text(input.orgName, 12, PHOTO_H + (input.title ? 35 : 25), { width: W - 24, lineBreak: false, ellipsis: true });
     const QR = 54;
-    doc.image(qr, (W - QR) / 2, H - QR - 17, { width: QR, height: QR });
+    doc.image(qr, (W - QR) / 2, H - QR - 13, { width: QR, height: QR });
     doc.fillColor("#666666").font("Helvetica").fontSize(5);
-    doc.text("SCAN TO CONNECT", 0, H - 12, { width: W, align: "center", characterSpacing: 0.6 });
+    doc.text("SCAN TO CONNECT", 0, H - 9, { width: W, align: "center", characterSpacing: 0.6 });
   } else {
     // Portrait badge: photo top-center, identity, QR bottom.
     circlePhoto(W / 2, 46, 30);
