@@ -136,17 +136,26 @@ export async function buildIdCardPdf(input: IdCardInput, orientation: "landscape
       doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(34);
       doc.text(initials, 0, PHOTO_H / 2 - 17, { width: W, align: "center" });
     }
-    // White body rises over the photo bottom along the hump: crest on the
-    // left, sweeping down to a pocket on the right where the logo sits.
+    // White body rises along the customer-supplied hump: flat low on the
+    // left, S-sweep up to a high shelf on the right (Jack's SVG geometry,
+    // scaled: x-span 210 -> W, rise 40.43 -> proportional).
+    const lowY = PHOTO_H - 8;
+    const rise = W * (40.43 / 210);
+    const x1 = W * (97.45 / 210); // end of the flat left run
     const hump = () =>
       doc
-        .moveTo(0, PHOTO_H - 14)
-        .bezierCurveTo(W * 0.14, PHOTO_H - 30, W * 0.3, PHOTO_H - 32, W * 0.48, PHOTO_H - 20)
-        .bezierCurveTo(W * 0.66, PHOTO_H - 8, W * 0.84, PHOTO_H - 4, W, PHOTO_H - 10);
+        .moveTo(0, lowY)
+        .lineTo(x1, lowY)
+        .bezierCurveTo(
+          x1 + W * (21.36 / 210), lowY - rise * (0.559 / 40.43),
+          x1 + W * (31.13 / 210), lowY - rise * (39.32 / 40.43),
+          x1 + W * (55.13 / 210), lowY - rise
+        )
+        .lineTo(W, lowY - rise);
     hump().lineTo(W, H).lineTo(0, H).closePath().fill("#ffffff");
     // …with the primary-colored ribbon on the seam.
     hump().lineWidth(4).stroke(primary);
-    if (logo) doc.image(logo, W - 52, PHOTO_H + 3, { fit: [40, 11], align: "right" });
+    if (logo) doc.image(logo, W - 52, PHOTO_H - 8 - W * (40.43 / 210) + 7, { fit: [40, 11], align: "right" });
     doc.fillColor("#111111").font("Helvetica-Bold").fontSize(11.5);
     doc.text(name, 12, PHOTO_H + 19, { width: W - 24, lineBreak: false, ellipsis: true });
     if (input.title) {
