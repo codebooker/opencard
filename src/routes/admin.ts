@@ -1994,6 +1994,7 @@ adminRouter.get("/cards/:id/idcard.pdf", async (req, res) => {
   if (!(await RBAC.canAccessLocation(reqAdmin(req), card.locationId))) return forbidden(res);
   const orientation = req.query.orientation === "portrait" ? "portrait" : "landscape";
   const withBack = req.query.back === "1";
+  const backStyle = req.query.backstyle === "triangles" ? ("triangles" as const) : ("cubes" as const);
   const primary = card.primaryColor || card.template?.primaryColor || card.location.primaryColor || card.location.brand.primaryColor;
   const pdf = await buildIdCardPdf(
     {
@@ -2008,7 +2009,8 @@ adminRouter.get("/cards/:id/idcard.pdf", async (req, res) => {
       layout: card.layout || card.template?.layout || card.location.layout || card.location.brand.layout,
     },
     orientation,
-    withBack
+    withBack,
+    backStyle
   );
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${card.slug}-idcard-${orientation}${withBack ? "-2sided" : ""}.pdf"`);

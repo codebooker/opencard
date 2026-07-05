@@ -70,7 +70,8 @@ const isHex = (s: string) => /^#[0-9a-fA-F]{3,8}$/.test(s);
 export async function buildIdCardPdf(
   input: IdCardInput,
   orientation: "landscape" | "portrait" = "landscape",
-  withBack = false
+  withBack = false,
+  backStyle: BackStyle = "cubes"
 ): Promise<Buffer> {
   const W = orientation === "landscape" ? CR80_W : CR80_H;
   const H = orientation === "landscape" ? CR80_H : CR80_W;
@@ -198,7 +199,7 @@ export async function buildIdCardPdf(
     if (logo) doc.image(logo, (W - 60) / 2, H - 11, { fit: [60, 8], align: "center" });
   }
 
-  if (withBack) drawBackPage(doc, W, H, primary, name, input.orgName);
+  if (withBack) drawBackPage(doc, W, H, primary, name, input.orgName, backStyle, input.slug);
 
   doc.end();
   return done;
@@ -279,27 +280,117 @@ function drawCubeLayer(
   doc.fillOpacity(1);
 }
 
-function drawBackPage(doc: PDFKit.PDFDocument, W: number, H: number, primary: string, name: string, orgName: string) {
+// Blend the primary toward white; w=1 -> full primary, w=0 -> white.
+function tint(primary: string, w: number): string {
+  const h = primary.replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h.slice(0, 6);
+  const n = parseInt(full, 16);
+  const ch = (v: number) => Math.round(255 - (255 - v) * w);
+  const r = ch((n >> 16) & 255);
+  const g = ch((n >> 8) & 255);
+  const b = ch(n & 255);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
+}
+
+// Deterministic PRNG so a person's badge back is identical on every print.
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+// Jack's second back design (cardback2.svg): a random triangle mosaic.
+// Interlocking left/right triangles (cell 77x88.9 units -> ~12pt columns),
+// each picking one of six tones — the SVG's grays (0x94..0xfe) recolored as
+// tints of the brand primary.
+function drawTriangleBack(doc: PDFKit.PDFDocument, W: number, H: number, primary: string, seedKey: string) {
+  const GRAYS = [0x94, 0xa5, 0xb4, 0xe1, 0xf2, 0xfe];
+  const palette = GRAYS.map((g) => tint(primary, (255 - g) / (255 - 0x94)));
+  const rnd = mulberry32(hashStr(seedKey));
+  const CW = 12.1; // column width (77 units at the SVG's effective scale)
+  const HH = 6.7; // half a triangle's vertical span (44.456 units)
+  const cols = Math.ceil(W / CW) + 1;
+  const rows = Math.ceil(H / HH) + 2;
+  const pick = () => palette[Math.floor(rnd() * palette.length)];
+  for (let c = 0; c < cols; c++) {
+    const x0 = c * CW;
+    for (let r = -1; r < rows; r++) {
+      const y = r * HH;
+      // Left-pointing: vertical edge on the right column line.
+      doc
+        .moveTo(x0 + CW, y + HH)
+        .lineTo(x0, y)
+        .lineTo(x0 + CW, y - HH)
+        .closePath()
+        .fill(pick());
+      // Right-pointing: vertical edge on the left column line.
+      doc
+        .moveTo(x0, y + 2 * HH)
+        .lineTo(x0, y)
+        .lineTo(x0 + CW, y + HH)
+        .closePath()
+        .fill(pick());
+    }
+  }
+}
+
+export type BackStyle = "cubes" | "triangles";
+
+function drawBackPage(
+  doc: PDFKit.PDFDocument,
+  W: number,
+  H: number,
+  primary: string,
+  name: string,
+  orgName: string,
+  style: BackStyle = "cubes",
+  seedKey = ""
+) {
   doc.addPage({ size: [W, H], margin: 0 });
   doc.rect(0, 0, W, H).fill("#ffffff");
+  if (style === "triangles") {
+    drawTriangleBack(doc, W, H, primary, seedKey || name);
+    drawBackText(doc, W, H, name, orgName, shadeHex(primary, 0.45));
+    return;
+  }
   // Jack's layering: the DARK pattern underneath, the primary-colored pattern
   // mirrored on top with a phase shift — the translucent cube faces blend the
   // two into one continuous two-tone lattice (no seam, no visible mirror).
   const dark = shadeHex(primary, 0.64);
   drawCubeLayer(doc, W, H, dark, false, 0);
   drawCubeLayer(doc, W, H, primary, true, 14.2);
-  // Vertical text, reading top-to-bottom from the top edge (per the SVG):
-  // name down the LEFT edge, company down the RIGHT edge.
+  drawBackText(doc, W, H, name, orgName);
+}
+
+// Vertical text, reading top-to-bottom from the top edge (per Jack's SVGs):
+// name down the LEFT edge, company down the RIGHT edge.
+function drawBackText(doc: PDFKit.PDFDocument, W: number, H: number, name: string, orgName: string, outline?: string) {
   const vtext = (t: string, anchorX: number) => {
     doc.save();
     doc.rotate(90, { origin: [anchorX, 10] });
-    doc.fillColor("#f9f9f9").fillOpacity(1).font("Helvetica-Bold").fontSize(9);
-    doc.text(t.toUpperCase(), anchorX, 10, {
-      width: H - 24,
-      characterSpacing: 0.9,
-      lineBreak: false,
-      ellipsis: true,
-    });
+    doc.font("Helvetica-Bold").fontSize(9).fillOpacity(1);
+    const opts = { width: H - 24, characterSpacing: 0.9, lineBreak: false, ellipsis: true } as any;
+    // Thin dark outline keeps white text legible over light mosaic tiles.
+    if (outline) {
+      doc.fillColor("#f9f9f9").strokeColor(outline).lineWidth(0.8);
+      doc.text(t.toUpperCase(), anchorX, 10, { ...opts, fill: true, stroke: true });
+    } else {
+      doc.fillColor("#f9f9f9");
+      doc.text(t.toUpperCase(), anchorX, 10, opts);
+    }
     doc.restore();
   };
   vtext(name, 21);
