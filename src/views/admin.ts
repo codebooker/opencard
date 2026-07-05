@@ -1332,7 +1332,8 @@ export function cardList(
       <td class="rsp-actions">
         <a href="/admin/cards/${esc(c.id)}/edit">Edit</a> ·
         <a href="/admin/cards/${esc(c.id)}/analytics">Stats</a> ·
-        <a href="/c/${esc(c.slug)}/qr.png" target="_blank">QR</a>
+        <a href="/c/${esc(c.slug)}/qr.png" target="_blank">QR</a> ·
+        <a href="/admin/cards/${esc(c.id)}/idcard.pdf?orientation=portrait" title="Print-ready CR80 badge PDF (credit-card size)">ID card</a>
       </td></tr>`
             )
             .join("")
