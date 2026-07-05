@@ -149,6 +149,15 @@ async function ensureFeature(res: any, orgId: string, feature: Feature, label: s
 
 export const adminRouter = Router();
 
+// Nothing under /admin may be cached by browsers or CDNs. Cloudflare caches
+// URLs by file EXTENSION by default — .pdf (ID badges) and .csv (exports)
+// are on its list, which once served a stale authenticated badge from the
+// edge cache. no-store closes both the staleness and the exposure.
+adminRouter.use((_req, res, next) => {
+  res.setHeader("Cache-Control", "private, no-store");
+  next();
+});
+
 // ---------- auth ----------
 // Client-branded login when the request arrives on a registered client domain.
 const brandingFor = (req: any) => loginBrandingForHost(requestHost(req));
