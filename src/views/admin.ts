@@ -1331,15 +1331,18 @@ export function assetsView(data: { location: any; assets: any[]; cards: any[]; c
 // Org-wide QR Codes hub: every trackable QR in one place, with a create form.
 // Backed by the same Asset model as the per-location Assets view.
 export function qrCodesView(data: {
-  assets: any[]; // include: location { name, brand { name } }
+  assets: any[]; // include: location { name }, org { name }
   locations: { id: string; name: string; brandName: string }[];
   cardBaseUrl: string;
   created?: string | null; // slug of a just-created code (success banner)
   locationLabel?: string;
+  platformConsole?: boolean; // platform staff, NOT drilled into a client
+  actingClientName?: string; // platform staff drilled into this client
 }): string {
   const base = (data.cardBaseUrl || "").replace(/\/+$/, "");
   const locLabel = data.locationLabel || "Location";
   const createdAsset = data.created ? data.assets.find((a) => a.slug === data.created) : null;
+  const showClientCol = !!data.platformConsole;
 
   const rows = data.assets.length
     ? data.assets
@@ -1353,6 +1356,7 @@ export function qrCodesView(data: {
                 : "Landing page with lead form";
           return `<tr>
       <td>${esc(a.name)}</td>
+      ${showClientCol ? `<td data-label="Client" class="muted">${esc(a.org?.name || "")}</td>` : ""}
       <td data-label="Destination" class="muted">${dest}</td>
       <td data-label="${esc(locLabel)}" class="muted">${esc(a.location?.name || "")}</td>
       <td data-label="Scans">${a.scanCount}</td>
@@ -1365,21 +1369,25 @@ export function qrCodesView(data: {
       </td></tr>`;
         })
         .join("")
-    : `<tr><td colspan="6" class="muted">No QR codes yet — create your first one below.</td></tr>`;
+    : `<tr><td colspan="${showClientCol ? 7 : 6}" class="muted">No QR codes yet${data.platformConsole ? "." : " — create your first one below."}</td></tr>`;
 
   const locOpts = data.locations
     .map((l) => `<option value="${esc(l.id)}">${esc(l.brandName)} — ${esc(l.name)}</option>`)
     .join("");
 
-  const body = `
-  <div class="topbar"><h2>QR Codes</h2></div>
-  <p class="muted">Trackable QR codes that send people wherever you want. Every scan is counted and located (city-level) in <a href="/admin/analytics">Analytics</a> — then the visitor is redirected instantly, or shown a lead-capture page if you choose "Landing page".</p>
-  ${
-    createdAsset
-      ? `<p class="auth-banner" style="max-width:none">QR code created — link: <a href="${esc(base)}/a/${esc(createdAsset.slug)}" target="_blank">${esc(base)}/a/${esc(createdAsset.slug)}</a> · <a href="${esc(base)}/a/${esc(createdAsset.slug)}/qr.svg" target="_blank"><strong>Download the QR</strong></a></p>`
-      : ""
-  }
-  <h3 style="margin-top:18px">Create a QR code</h3>
+  // Platform staff drilled into a client: same context banner as the dashboard.
+  const clientBanner = data.actingClientName
+    ? `<div class="stat" style="border:1px solid #2563eb;background:#eff6ff;margin-bottom:12px">Managing client <strong>${esc(
+        data.actingClientName
+      )}</strong> · <a href="/admin/clients/exit">← back to all clients</a></div>`
+    : "";
+
+  const createSection = data.platformConsole
+    ? `<div class="stat" style="border:1px solid #d97706;background:#fffbeb;margin:12px 0">
+      You're on the <strong>platform console</strong>, viewing every client's QR codes. To create or edit one,
+      open the client's workspace first (<a href="/admin">Dashboard</a> → choose the client → Manage) so the code
+      is filed under the right account.</div>`
+    : `<h3 style="margin-top:18px">Create a QR code</h3>
   <form class="editor" method="POST" action="/admin/qr" style="max-width:640px">
     <div class="grid2">
       <div><label>Name</label><input name="name" placeholder="e.g. Showroom window — summer promo" required /></div>
@@ -1398,10 +1406,21 @@ export function qrCodesView(data: {
       function u(){w.style.display=d.value==='url'?'':'none';}
       d.addEventListener('change',u);u();
     })();</script>
-  </form>
+  </form>`;
+
+  const body = `
+  ${clientBanner}
+  <div class="topbar"><h2>QR Codes</h2></div>
+  <p class="muted">Trackable QR codes that send people wherever you want. Every scan is counted and located (city-level) in <a href="/admin/analytics">Analytics</a> — then the visitor is redirected instantly, or shown a lead-capture page if you choose "Landing page".</p>
+  ${
+    createdAsset
+      ? `<p class="auth-banner" style="max-width:none">QR code created — link: <a href="${esc(base)}/a/${esc(createdAsset.slug)}" target="_blank">${esc(base)}/a/${esc(createdAsset.slug)}</a> · <a href="${esc(base)}/a/${esc(createdAsset.slug)}/qr.svg" target="_blank"><strong>Download the QR</strong></a></p>`
+      : ""
+  }
+  ${createSection}
   <h3 style="margin-top:26px">All QR codes</h3>
   <table class="rsp">
-    <tr><th>Name</th><th>Destination</th><th>${esc(locLabel)}</th><th>Scans</th><th>Status</th><th></th></tr>
+    <tr><th>Name</th>${showClientCol ? "<th>Client</th>" : ""}<th>Destination</th><th>${esc(locLabel)}</th><th>Scans</th><th>Status</th><th></th></tr>
     ${rows}
   </table>
   <p class="muted" style="margin-top:10px">The QR image uses your brand's design (set under Edit brand → QR code design). You can change a code's destination any time without reprinting — the printed QR always points at your OpenCard link.</p>`;

@@ -1673,20 +1673,31 @@ function assetDataFromBody(b: any) {
 // can see and create new ones without digging into a location's Assets page.
 adminRouter.get("/qr", async (req, res) => {
   const p = reqAdmin(req);
+  // Platform console (not drilled into a client): tenants must not blend into
+  // one create form. Show a cross-client overview and point staff at the
+  // client drill-in flow for creation.
+  const platformConsole = RBAC.seesAllOrgs(p);
   const locIds = await RBAC.accessibleLocationIds(p);
   const [assets, locations, t] = await Promise.all([
     prisma.asset.findMany({
       where: { locationId: { in: locIds } },
-      include: { location: { select: { name: true } } },
+      include: { location: { select: { name: true } }, org: { select: { name: true } } },
       orderBy: { createdAt: "desc" },
     }),
-    prisma.location.findMany({
-      where: { id: { in: locIds } },
-      select: { id: true, name: true, brand: { select: { name: true } } },
-      orderBy: { name: "asc" },
-    }),
-    currentTerminology(p.orgId),
+    platformConsole
+      ? Promise.resolve([])
+      : prisma.location.findMany({
+          where: { id: { in: locIds } },
+          select: { id: true, name: true, brand: { select: { name: true } } },
+          orderBy: { name: "asc" },
+        }),
+    currentTerminology(p.actingOrgId || p.orgId),
   ]);
+  let actingClientName: string | undefined;
+  if (p.actingOrgId) {
+    const org = await prisma.org.findUnique({ where: { id: p.actingOrgId }, select: { name: true } });
+    actingClientName = org?.name;
+  }
   res.send(
     V.qrCodesView({
       assets,
@@ -1694,12 +1705,17 @@ adminRouter.get("/qr", async (req, res) => {
       cardBaseUrl: config.cardUrl,
       created: req.query.created ? String(req.query.created) : null,
       locationLabel: t.locationSingular,
+      platformConsole,
+      actingClientName,
     })
   );
 });
 
 adminRouter.post("/qr", async (req, res) => {
   const p = reqAdmin(req);
+  // Creation is per-tenant: platform staff must drill into a client first so a
+  // new code can't be filed under the wrong org.
+  if (RBAC.seesAllOrgs(p)) return forbidden(res, "Open a client workspace first, then create their QR codes.");
   const locIds = await RBAC.accessibleLocationIds(p);
   const locationId = clean(req.body?.locationId);
   if (!locationId || !locIds.includes(locationId)) return forbidden(res);
