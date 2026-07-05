@@ -1349,7 +1349,7 @@ export function cardList(
         <a href="/admin/cards/${esc(c.id)}/analytics">Stats</a> ·
         <a href="/c/${esc(c.slug)}/qr.png" target="_blank">QR</a>${
           idCards
-            ? ` · <a href="/admin/cards/${esc(c.id)}/idcard.pdf?orientation=portrait&back=1" title="Two-sided CR80 badge PDF: front + patterned back (page 2 for duplex printers)">ID card</a>`
+            ? ` · <a href="/admin/cards/${esc(c.id)}/idcard.pdf?orientation=portrait&back=1&v=2" title="Two-sided CR80 badge PDF: front + patterned back (page 2 for duplex printers)">ID card</a>`
             : ""
         }
       </td></tr>`
@@ -1390,8 +1390,8 @@ export function cardForm(opts: {
       <a class="btn secondary" href="/c/${esc(opts.card.slug)}" target="_blank">Preview</a>
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/analytics">Stats</a>
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/signature">Email signature</a>
-      ${opts.idCards ? `<a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf?back=1" title="Credit-card-sized PDF for badge printers (Datacard, Fargo, Zebra)">ID card PDF</a>
-      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf?orientation=portrait&back=1" title="Vertical badge layout">ID card (vertical)</a>` : ""}
+      ${opts.idCards ? `<a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf?back=1&v=2" title="Credit-card-sized PDF for badge printers (Datacard, Fargo, Zebra)">ID card PDF</a>
+      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf?orientation=portrait&back=1&v=2" title="Vertical badge layout">ID card (vertical)</a>` : ""}
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/turnover">Deprovision</a>
     </div>` : ""}
   </div>
