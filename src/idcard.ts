@@ -312,19 +312,20 @@ function hashStr(s: string): number {
   return h >>> 0;
 }
 
-// Jack's second back design (cardback2.svg): a random triangle mosaic.
-// Interlocking left/right triangles (cell 77x88.9 units -> ~12pt columns),
-// each picking one of six tones — the SVG's grays (0x94..0xfe) recolored as
-// tints of the brand primary.
-function drawTriangleBack(doc: PDFKit.PDFDocument, W: number, H: number, primary: string, seedKey: string) {
+// Jack's second back design (cardback2.svg, v2): a solid brand-color
+// rectangle with the gray triangle mosaic laid over it at 40% opacity —
+// subtle texture on brand color; recoloring only touches the rectangle.
+function drawTriangleBack(doc: PDFKit.PDFDocument, W: number, H: number, seedKey: string) {
   const GRAYS = [0x94, 0xa5, 0xb4, 0xe1, 0xf2, 0xfe];
-  const palette = GRAYS.map((g) => tint(primary, (255 - g) / (255 - 0x94)));
+  const palette = GRAYS.map((g) => `#${((g << 16) | (g << 8) | g).toString(16).padStart(6, "0")}`);
   const rnd = mulberry32(hashStr(seedKey));
   const CW = 12.1; // column width (77 units at the SVG's effective scale)
   const HH = 6.7; // half a triangle's vertical span (44.456 units)
   const cols = Math.ceil(W / CW) + 1;
   const rows = Math.ceil(H / HH) + 2;
   const pick = () => palette[Math.floor(rnd() * palette.length)];
+  doc.save();
+  doc.fillOpacity(0.4); // the whole mosaic sits at 40% over the brand color
   for (let c = 0; c < cols; c++) {
     const x0 = c * CW;
     for (let r = -1; r < rows; r++) {
@@ -345,6 +346,8 @@ function drawTriangleBack(doc: PDFKit.PDFDocument, W: number, H: number, primary
         .fill(pick());
     }
   }
+  doc.restore();
+  doc.fillOpacity(1);
 }
 
 export type BackStyle = "cubes" | "triangles";
@@ -362,8 +365,9 @@ function drawBackPage(
   doc.addPage({ size: [W, H], margin: 0 });
   doc.rect(0, 0, W, H).fill("#ffffff");
   if (style === "triangles") {
-    drawTriangleBack(doc, W, H, primary, seedKey || name);
-    drawBackText(doc, W, H, name, orgName, shadeHex(primary, 0.45));
+    doc.rect(0, 0, W, H).fill(primary); // THE recolorable rectangle
+    drawTriangleBack(doc, W, H, seedKey || name);
+    drawBackText(doc, W, H, name, orgName);
     return;
   }
   // Jack's layering: the DARK pattern underneath, the primary-colored pattern
