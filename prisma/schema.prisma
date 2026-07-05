@@ -12,7 +12,7 @@ datasource db {
 // changes / redeploys). Single row with a fixed id.
 model PlatformConfig {
   id              String @id @default("platform")
-  signupPlan      String @default("starter") // plan tier for self-service signups
+  signupPlan      String @default("individual") // plan tier for self-service signups
   signupTrialDays Int    @default(30)        // trial length for self-service signups
 }
 
@@ -54,7 +54,7 @@ model Org {
   leadRetentionDays Int?
   // Billing / plan state. `plan` keys into src/plans.ts. Stripe ids are set once
   // hosted checkout is wired; until then plans are assigned by a platform owner.
-  plan                 String    @default("starter")
+  plan                 String    @default("individual")
   // Per-client seat (user/card) allowance set by OpenCard staff. null = use the
   // plan's card limit; -1 = unlimited (billed per seat); else a hard cap.
   seatLimit            Int?

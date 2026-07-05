@@ -1,6 +1,6 @@
 // Database-aware entitlement checks built on the pure plan engine in ./plans.
 import { prisma } from "./db";
-import { Feature, LimitKey, hasFeature, withinLimit, withinSeatLimit } from "./plans";
+import { DEFAULT_PLAN, Feature, LimitKey, hasFeature, withinLimit, withinSeatLimit } from "./plans";
 import { accessState, AccessState } from "./access";
 
 // Current access state (active / expired) for an org, from its billing fields.
@@ -18,7 +18,7 @@ export async function orgAccessState(orgId: string): Promise<AccessState> {
 
 export async function orgPlanKey(orgId: string): Promise<string> {
   const org = await prisma.org.findUnique({ where: { id: orgId }, select: { plan: true } });
-  return org?.plan ?? "starter";
+  return org?.plan ?? DEFAULT_PLAN;
 }
 
 export async function orgHasFeature(orgId: string, feature: Feature): Promise<boolean> {
@@ -44,7 +44,7 @@ export async function canAdd(orgId: string, key: LimitKey): Promise<boolean> {
   const count = await counters[key](orgId);
   if (key === "cards") {
     const org = await prisma.org.findUnique({ where: { id: orgId }, select: { plan: true, seatLimit: true } });
-    return withinSeatLimit(org?.seatLimit, org?.plan || "starter", count);
+    return withinSeatLimit(org?.seatLimit, org?.plan || DEFAULT_PLAN, count);
   }
   const plan = await orgPlanKey(orgId);
   return withinLimit(plan, key, count);

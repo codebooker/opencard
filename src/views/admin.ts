@@ -340,9 +340,9 @@ export function staffForm(allowedRoles: string[], staff?: any): string {
 
 // One-line summary of what each plan tier includes (shown on the client form).
 const PLAN_BLURBS: Record<PlanKey, string> = {
-  starter: "Try-it-out tier: 1 brand, 1 location, 25 cards, lead capture only.",
+  individual: "One card for one person: QR code, vCard, lead capture.",
   team: "Single business: self-service editing, email signatures, CSV export, API. Up to 250 cards.",
-  dealer_group: "Multi-rooftop groups: everything in Team plus SSO, SCIM provisioning, webhooks, CRM sync, custom domains, advanced analytics. Up to 5,000 cards.",
+  multi_location_brand: "Multi-brand, multi-location organizations: everything in Team plus SSO, SCIM provisioning, webhooks, CRM sync, custom domains, advanced analytics. Up to 5,000 cards.",
   enterprise: "Everything, unlimited, plus audit logs. Custom pricing.",
 };
 

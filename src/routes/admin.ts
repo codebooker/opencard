@@ -129,7 +129,7 @@ import { qrDataUrl } from "../qr";
 import { currentTerminology } from "../terminology";
 import { defaultOrgId, orgIdForBrand, orgIdForLocation } from "../tenant";
 import { canAdd, orgHasFeature, orgPlanKey, orgUsage, orgAccessState } from "../entitlements";
-import { requiredPlanFor, planFor, PLANS, PLAN_ORDER, isPlanKey, parseSeatLimit, Feature, LimitKey } from "../plans";
+import { requiredPlanFor, planFor, PLANS, PLAN_ORDER, isPlanKey, parseSeatLimit, DEFAULT_PLAN, Feature, LimitKey } from "../plans";
 import { accessSummary } from "../access";
 import { stripe, stripeEnabled } from "../stripe";
 import * as RBAC from "../rbac";
@@ -791,7 +791,7 @@ adminRouter.post("/clients", async (req, res) => {
     data: {
       name,
       vertical: isVertical(b.businessType) ? b.businessType : "general",
-      plan: isPlanKey(b.plan) ? b.plan : "starter",
+      plan: isPlanKey(b.plan) ? b.plan : DEFAULT_PLAN,
       billingMode: mode,
       idCardsEnabled: b.idCards === "1",
       seatLimit: parseSeatLimit(b.seatLimit),

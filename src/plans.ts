@@ -1,7 +1,14 @@
 // Plans and entitlements — pure, no runtime deps, so it is unit-testable and can
 // be imported anywhere (routes, views, tests) without pulling in the database.
 
-export type PlanKey = "starter" | "team" | "dealer_group" | "enterprise";
+export type PlanKey = "individual" | "team" | "multi_location_brand" | "enterprise";
+
+// Older orgs may still carry a legacy plan string in the DB; map those to the
+// current lineup so nothing breaks mid-migration.
+export const LEGACY_PLAN_ALIASES: Record<string, PlanKey> = {
+  starter: "individual",
+  dealer_group: "multi_location_brand",
+};
 
 // Feature flags gated by plan tier.
 export type Feature =
@@ -33,12 +40,12 @@ export interface Plan {
 const UNLIMITED = -1;
 
 export const PLANS: Record<PlanKey, Plan> = {
-  starter: {
-    key: "starter",
-    label: "Starter",
-    price: "Free",
+  individual: {
+    key: "individual",
+    label: "Individual",
+    price: "$4.99/mo",
     features: ["leadCapture"],
-    limits: { brands: 1, locations: 1, cards: 25, admins: 2, apiKeys: 0, customDomains: 0 },
+    limits: { brands: 1, locations: 1, cards: 1, admins: 1, apiKeys: 0, customDomains: 0 },
   },
   team: {
     key: "team",
@@ -47,9 +54,9 @@ export const PLANS: Record<PlanKey, Plan> = {
     features: ["selfService", "leadCapture", "emailSignatures", "csvExport", "api"],
     limits: { brands: 3, locations: 10, cards: 250, admins: 10, apiKeys: 3, customDomains: 0 },
   },
-  dealer_group: {
-    key: "dealer_group",
-    label: "Dealer Group",
+  multi_location_brand: {
+    key: "multi_location_brand",
+    label: "Multi Location Brand",
     price: "$199/mo",
     features: [
       "selfService",
@@ -95,16 +102,26 @@ export const PLANS: Record<PlanKey, Plan> = {
   },
 };
 
-export const PLAN_ORDER: PlanKey[] = ["starter", "team", "dealer_group", "enterprise"];
-export const DEFAULT_PLAN: PlanKey = "starter";
+export const PLAN_ORDER: PlanKey[] = ["individual", "team", "multi_location_brand", "enterprise"];
+export const DEFAULT_PLAN: PlanKey = "individual";
 
 export function isPlanKey(key: string): key is PlanKey {
   return Object.prototype.hasOwnProperty.call(PLANS, key);
 }
 
-// Resolve a (possibly unknown) plan string to a Plan, falling back to the default.
+// Canonicalize a plan string: current keys pass through, legacy keys map to
+// their replacement, anything else is null.
+export function normalizePlanKey(key: string): PlanKey | null {
+  if (isPlanKey(key)) return key;
+  return Object.prototype.hasOwnProperty.call(LEGACY_PLAN_ALIASES, key)
+    ? LEGACY_PLAN_ALIASES[key]
+    : null;
+}
+
+// Resolve a (possibly unknown or legacy) plan string to a Plan, falling back to
+// the default.
 export function planFor(key: string): Plan {
-  return isPlanKey(key) ? PLANS[key] : PLANS[DEFAULT_PLAN];
+  return PLANS[normalizePlanKey(key) ?? DEFAULT_PLAN];
 }
 
 export function hasFeature(planKey: string, feature: Feature): boolean {

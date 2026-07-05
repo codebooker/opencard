@@ -64,8 +64,11 @@ export const config = {
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
     // One recurring Price id per paid plan (from the Stripe dashboard).
     prices: {
+      individual: process.env.STRIPE_PRICE_INDIVIDUAL || "",
       team: process.env.STRIPE_PRICE_TEAM || "",
-      dealer_group: process.env.STRIPE_PRICE_DEALER_GROUP || "",
+      // Falls back to the legacy env name so existing deployments keep working.
+      multi_location_brand:
+        process.env.STRIPE_PRICE_MULTI_LOCATION_BRAND || process.env.STRIPE_PRICE_DEALER_GROUP || "",
       enterprise: process.env.STRIPE_PRICE_ENTERPRISE || "",
     } as Record<string, string>,
   },

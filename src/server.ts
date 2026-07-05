@@ -13,6 +13,7 @@ import { selfRouter } from "./routes/selfservice";
 import { signupRouter } from "./routes/signup";
 import { apiRouter } from "./routes/api";
 import { previewRouter } from "./routes/preview";
+import { marketingPage } from "./views/marketing";
 import { handleStripeWebhook } from "./stripe";
 import { qrPng } from "./qr";
 import { isDomainApproved, domainKindForHost, requestHost } from "./tenant-resolver";
@@ -111,11 +112,13 @@ app.get("/tls/authorize", async (req, res) => {
   res.status(ok ? 200 : 403).end();
 });
 
-// The root lands on the portal this custom domain is for (employee vs admin);
-// both surfaces stay reachable by path. Unregistered hosts default to /admin.
+// The root of a registered client custom domain lands on that client's portal
+// (employee vs admin); both surfaces stay reachable by path. Unregistered
+// hosts (the platform's own domain) get the public marketing site.
 app.get("/", async (req, res) => {
   const kind = await domainKindForHost(requestHost(req));
-  res.redirect(kind === "user" ? "/me" : "/admin");
+  if (kind) return res.redirect(kind === "user" ? "/me" : "/admin");
+  res.type("html").send(marketingPage());
 });
 
 app.use("/scim/v2", scimLimiter, scimRouter);

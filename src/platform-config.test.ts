@@ -11,7 +11,7 @@ test("clampTrialDays keeps 1..365 and rounds", () => {
   assert.equal(clampTrialDays(NaN), PLATFORM_DEFAULTS.signupTrialDays);
 });
 
-test("platform defaults are starter + 30 days", () => {
-  assert.equal(PLATFORM_DEFAULTS.signupPlan, "starter");
+test("platform defaults are individual + 30 days", () => {
+  assert.equal(PLATFORM_DEFAULTS.signupPlan, "individual");
   assert.equal(PLATFORM_DEFAULTS.signupTrialDays, 30);
 });
