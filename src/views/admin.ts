@@ -1370,6 +1370,8 @@ export function cardForm(opts: {
       <a class="btn secondary" href="/c/${esc(opts.card.slug)}" target="_blank">Preview</a>
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/analytics">Stats</a>
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/signature">Email signature</a>
+      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf" title="Credit-card-sized PDF for badge printers (Datacard, Fargo, Zebra)">ID card PDF</a>
+      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf?orientation=portrait" title="Vertical badge layout">ID card (vertical)</a>
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/turnover">Deprovision</a>
     </div>` : ""}
   </div>

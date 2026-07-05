@@ -78,6 +78,7 @@ import {
 } from "../dirimport";
 import { parseCsv, guessMapping, mapCsvRow, CsvTarget } from "../csvimport";
 import { bucketDays } from "../charts";
+import { buildIdCardPdf } from "../idcard";
 import { presetByKey } from "../layouts";
 import multer from "multer";
 import { runWithOrg } from "../db";
@@ -1980,6 +1981,35 @@ adminRouter.post("/cards/:id/turnover", async (req, res) => {
   }
 
   res.redirect(`/admin/cards?locationId=${card.locationId}`);
+});
+
+// Printable CR80 ID card PDF (badge printers): photo, logo, name, title,
+// black QR to the public card. ?orientation=portrait for vertical badges.
+adminRouter.get("/cards/:id/idcard.pdf", async (req, res) => {
+  const card = await prisma.card.findUnique({
+    where: { id: req.params.id },
+    include: { location: { include: { brand: true } }, template: true },
+  });
+  if (!card) return res.status(404).send("Not found");
+  if (!(await RBAC.canAccessLocation(reqAdmin(req), card.locationId))) return forbidden(res);
+  const orientation = req.query.orientation === "portrait" ? "portrait" : "landscape";
+  const primary = card.primaryColor || card.template?.primaryColor || card.location.primaryColor || card.location.brand.primaryColor;
+  const pdf = await buildIdCardPdf(
+    {
+      firstName: card.firstName,
+      lastName: card.lastName,
+      title: card.title,
+      photoUrl: card.photoUrl,
+      logoUrl: card.logoUrl || card.location.logoUrl || card.location.brand.logoUrl,
+      slug: card.slug,
+      primaryColor: primary,
+      orgName: card.company || card.location.brand.name,
+    },
+    orientation
+  );
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${card.slug}-idcard-${orientation}.pdf"`);
+  res.send(pdf);
 });
 
 // Card ids the principal may see (null = no restriction, i.e. global admin).
