@@ -796,6 +796,7 @@ adminRouter.post("/clients", async (req, res) => {
       vertical: isVertical(b.businessType) ? b.businessType : "general",
       plan: isPlanKey(b.plan) ? b.plan : "starter",
       billingMode: mode,
+      idCardsEnabled: b.idCards === "1",
       seatLimit: parseSeatLimit(b.seatLimit),
       // Staff-created clients skip signup email verification (staff vouches).
       ownerVerifiedAt: new Date(),
@@ -815,7 +816,7 @@ adminRouter.get("/clients/:orgId/settings", async (req, res) => {
 adminRouter.post("/clients/:orgId/settings", async (req, res) => {
   if (!reqAdmin(req).platform) return forbidden(res);
   const b = req.body;
-  const data: any = { seatLimit: parseSeatLimit(b.seatLimit) };
+  const data: any = { seatLimit: parseSeatLimit(b.seatLimit), idCardsEnabled: b.idCards === "1" };
   if (clean(b.name)) data.name = clean(b.name);
   if (isVertical(b.businessType)) data.vertical = b.businessType;
   if (isPlanKey(b.plan)) data.plan = b.plan;
@@ -1215,7 +1216,8 @@ adminRouter.post("/billing/portal", async (req, res) => {
 // ---------- brands ----------
 adminRouter.get("/brands/new", async (req, res) => {
   if (!RBAC.canCreateBrand(reqAdmin(req))) return forbidden(res);
-  res.send(V.brandForm(undefined, undefined, await currentTerminology(reqAdmin(req).orgId)));
+  const orgNew = await prisma.org.findUnique({ where: { id: reqAdmin(req).orgId }, select: { idCardsEnabled: true } });
+  res.send(V.brandForm(undefined, undefined, await currentTerminology(reqAdmin(req).orgId), !!orgNew?.idCardsEnabled));
 });
 adminRouter.get("/brands/:id/edit", async (req, res) => {
   if (!await RBAC.canManageBrandScoped(reqAdmin(req),req.params.id)) return forbidden(res);
@@ -1229,7 +1231,8 @@ adminRouter.get("/brands/:id/edit", async (req, res) => {
     locations: brand.locations.length,
     cards: brand.locations.reduce((sum, l) => sum + l._count.cards, 0),
   };
-  res.send(V.brandForm(brand, stats, t));
+  const brandOrg = await prisma.org.findUnique({ where: { id: brand.orgId }, select: { idCardsEnabled: true } });
+  res.send(V.brandForm(brand, stats, t, !!brandOrg?.idCardsEnabled));
 });
 adminRouter.post("/brands", upload.single("logoFile"), async (req, res) => {
   const p = reqAdmin(req);
@@ -1241,6 +1244,7 @@ adminRouter.post("/brands", upload.single("logoFile"), async (req, res) => {
       orgId: p.orgId,
       name: b.name,
       logoUrl: uploadedUrl(req, "logoFile") || clean(b.logoUrl),
+      idCardBack: b.idCardBack === "triangles" ? "triangles" : "cubes",
       primaryColor: b.primaryColor || "#1f6f43",
       textColor: b.textColor || "#111827",
       bgColor: b.bgColor || "#ffffff",
@@ -1264,6 +1268,7 @@ adminRouter.post("/brands/:id", upload.single("logoFile"), async (req, res) => {
     data: {
       name: b.name,
       logoUrl: uploadedUrl(req, "logoFile") || clean(b.logoUrl),
+      idCardBack: b.idCardBack === "triangles" ? "triangles" : "cubes",
       primaryColor: b.primaryColor,
       textColor: b.textColor,
       bgColor: b.bgColor,
@@ -1712,7 +1717,8 @@ adminRouter.get("/cards", async (req, res) => {
     where: { locationId },
     orderBy: { lastName: "asc" },
   });
-  res.send(V.cardList(loc.name, locationId, cards, t));
+  const cardsOrg = await prisma.org.findUnique({ where: { id: loc.orgId }, select: { idCardsEnabled: true } });
+  res.send(V.cardList(loc.name, locationId, cards, t, !!cardsOrg?.idCardsEnabled));
 });
 
 function brandFields(brand: { selfEditFields: unknown } | null): string[] | undefined {
@@ -1756,8 +1762,17 @@ adminRouter.get("/cards/new", async (req, res) => {
   if (!loc) return res.status(404).send(`${t.locationSingular} not found`);
   const templates = await prisma.template.findMany({ where: { brandId: loc.brandId } });
   const departments = await prisma.department.findMany({ where: { locationId }, orderBy: { name: "asc" } });
+  const newCardOrg = await prisma.org.findUnique({ where: { id: loc.orgId }, select: { idCardsEnabled: true } });
   res.send(
-    V.cardForm({ locationId, templates, departments, brandSelfFields: brandFields(loc.brand), terminology: t, baseDesign: baseDesign(loc) })
+    V.cardForm({
+      locationId,
+      templates,
+      departments,
+      brandSelfFields: brandFields(loc.brand),
+      terminology: t,
+      baseDesign: baseDesign(loc),
+      idCards: !!newCardOrg?.idCardsEnabled,
+    })
   );
 });
 
@@ -1783,6 +1798,7 @@ adminRouter.get("/cards/:id/edit", async (req, res) => {
       brandSelfFields: brandFields(card.location.brand),
       terminology: t,
       baseDesign: baseDesign(card.location),
+      idCards: !!(await prisma.org.findUnique({ where: { id: card.orgId }, select: { idCardsEnabled: true } }))?.idCardsEnabled,
     })
   );
 });
@@ -1992,9 +2008,16 @@ adminRouter.get("/cards/:id/idcard.pdf", async (req, res) => {
   });
   if (!card) return res.status(404).send("Not found");
   if (!(await RBAC.canAccessLocation(reqAdmin(req), card.locationId))) return forbidden(res);
+  // Paid add-on: staff enable ID card printing per client (Edit client page).
+  const idOrg = await prisma.org.findUnique({ where: { id: card.orgId }, select: { idCardsEnabled: true } });
+  if (!idOrg?.idCardsEnabled) {
+    return res.status(403).send("ID card printing is an add-on that isn't enabled for this workspace. OpenCard staff can enable it on the Edit client page.");
+  }
   const orientation = req.query.orientation === "portrait" ? "portrait" : "landscape";
   const withBack = req.query.back === "1";
-  const backStyle = req.query.backstyle === "triangles" ? ("triangles" as const) : ("cubes" as const);
+  const brandBack = (card.location.brand as any).idCardBack === "triangles" ? "triangles" : "cubes";
+  const backStyle =
+    req.query.backstyle === "triangles" ? ("triangles" as const) : req.query.backstyle === "cubes" ? ("cubes" as const) : brandBack;
   const primary = card.primaryColor || card.template?.primaryColor || card.location.primaryColor || card.location.brand.primaryColor;
   const pdf = await buildIdCardPdf(
     {

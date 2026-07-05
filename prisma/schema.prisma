@@ -29,6 +29,9 @@ model Org {
   ownerVerifiedAt DateTime?
   // First-run onboarding checklist on the dashboard; set when dismissed.
   onboardingDismissedAt DateTime?
+  // Paid add-on: printable CR80 ID badges (front + patterned back). Staff
+  // turn it on per client alongside the plan.
+  idCardsEnabled Boolean @default(false)
   // Tenant addressing. `subdomain` is the label under the platform domain
   // (e.g. "acme" -> acme.opencard.id); `customDomain` is a fully-qualified host
   // the customer points at us (e.g. cards.acmecorp.com). Both are optional and
@@ -230,6 +233,7 @@ model Brand {
   name         String
   logoUrl      String?
   primaryColor String     @default("#1f6f43")
+  idCardBack   String     @default("cubes") // ID badge back design: cubes | triangles
   textColor    String     @default("#111827")
   bgColor      String     @default("#ffffff")
   font         String     @default("system")

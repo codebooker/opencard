@@ -398,6 +398,10 @@ export function clientForm(org?: any): string {
       <p class="muted" style="margin:6px 0 0">${org ? "Saving with Trial selected restarts the trial clock from today." : "The trial starts when the workspace is created."}</p>
     </div>
     ${planGuide()}
+    <label class="chk" style="margin:12px 0"><input type="checkbox" name="idCards" value="1" ${
+      o.idCardsEnabled ? "checked" : ""
+    } /> <strong>ID card printing add-on</strong></label>
+    <p class="muted" style="margin:-6px 0 10px">Print-ready CR80 badge PDFs (front in the card design, patterned back) for Datacard/Fargo/Zebra printers. Off = no ID card buttons or downloads for this client.</p>
     <label>User allowance</label>
     <input name="seatLimit" value="${esc(seatVal)}" placeholder="e.g. 50, or unlimited" />
     <p class="muted" style="margin:6px 0 0">Blank = the plan's default · <code>unlimited</code> = per-seat billing · or a fixed number of users.</p>
@@ -587,7 +591,7 @@ export function brandForm(
   brand?: any,
   stats?: { locations: number; cards: number },
   t: Terminology = GENERAL_TERMINOLOGY
-): string {
+, idCardsEnabled = false): string {
   const b = brand || {};
   const action = brand ? `/admin/brands/${brand.id}` : "/admin/brands";
   const brandDomains = (b.domains as any[]) || [];
@@ -617,6 +621,17 @@ export function brandForm(
       bgColor: b.bgColor,
       font: b.font,
     })}
+
+    ${
+      idCardsEnabled
+        ? `<h3>ID card back design</h3>
+    <p class="muted">The back of printed ID badges for this brand (fronts always use the person's card design).</p>
+    <div class="self-fields">
+      <label class="chk"><input type="radio" name="idCardBack" value="cubes" ${(b.idCardBack || "cubes") !== "triangles" ? "checked" : ""} /> Cubes — two-tone isometric lattice in the brand color</label>
+      <label class="chk"><input type="radio" name="idCardBack" value="triangles" ${b.idCardBack === "triangles" ? "checked" : ""} /> Triangles — brand-color base with a subtle mosaic texture</label>
+    </div>`
+        : `<p class="muted" style="margin-top:14px">Printable ID badges (front + designed back) are an OpenCard add-on — contact us to enable them for this workspace.</p>`
+    }
     <label class="chk" style="margin-top:12px"><input type="checkbox" name="showQr" value="1" ${
       b.showQr === false ? "" : "checked"
     } /> Show the QR code on the card page</label>
@@ -1311,7 +1326,7 @@ export function cardList(
   locationId: string,
   cards: any[],
   t: Terminology = GENERAL_TERMINOLOGY
-): string {
+, idCards = false): string {
   const body = `
   <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar">
@@ -1332,8 +1347,11 @@ export function cardList(
       <td class="rsp-actions">
         <a href="/admin/cards/${esc(c.id)}/edit">Edit</a> ·
         <a href="/admin/cards/${esc(c.id)}/analytics">Stats</a> ·
-        <a href="/c/${esc(c.slug)}/qr.png" target="_blank">QR</a> ·
-        <a href="/admin/cards/${esc(c.id)}/idcard.pdf?orientation=portrait&back=1" title="Two-sided CR80 badge PDF: front + patterned back (page 2 for duplex printers)">ID card</a>
+        <a href="/c/${esc(c.slug)}/qr.png" target="_blank">QR</a>${
+          idCards
+            ? ` · <a href="/admin/cards/${esc(c.id)}/idcard.pdf?orientation=portrait&back=1" title="Two-sided CR80 badge PDF: front + patterned back (page 2 for duplex printers)">ID card</a>`
+            : ""
+        }
       </td></tr>`
             )
             .join("")
@@ -1351,6 +1369,7 @@ export function cardForm(opts: {
   brandSelfFields?: string[];
   terminology?: Terminology;
   baseDesign?: { layout: string; primary: string; text: string; bg: string; font: string; logo: string };
+  idCards?: boolean;
 }): string {
   const t = opts.terminology || GENERAL_TERMINOLOGY;
   const c = opts.card || {};
@@ -1371,8 +1390,8 @@ export function cardForm(opts: {
       <a class="btn secondary" href="/c/${esc(opts.card.slug)}" target="_blank">Preview</a>
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/analytics">Stats</a>
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/signature">Email signature</a>
-      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf" title="Credit-card-sized PDF for badge printers (Datacard, Fargo, Zebra)">ID card PDF</a>
-      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf?orientation=portrait" title="Vertical badge layout">ID card (vertical)</a>
+      ${opts.idCards ? `<a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf?back=1" title="Credit-card-sized PDF for badge printers (Datacard, Fargo, Zebra)">ID card PDF</a>
+      <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/idcard.pdf?orientation=portrait&back=1" title="Vertical badge layout">ID card (vertical)</a>` : ""}
       <a class="btn secondary" href="/admin/cards/${esc(opts.card.id)}/turnover">Deprovision</a>
     </div>` : ""}
   </div>
