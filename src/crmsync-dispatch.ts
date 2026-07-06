@@ -3,6 +3,7 @@ import { buildCrmPayload, nextSyncStatus, httpOk } from "./crmsync";
 import { hubspotProperties, hubspotEmail, HUBSPOT_CONTACTS_URL, hubspotContactByEmailUrl } from "./hubspot";
 import { salesforceBody, salesforceUrl } from "./salesforce";
 import { assertPublicUrl } from "./ssrf";
+import { readSecret } from "./secretbox";
 
 // DB + HTTP side of CRM sync (the pure mapping/state logic lives in crmsync.ts).
 // Fire-and-forget on capture; never throws into the caller.
@@ -68,6 +69,8 @@ async function attempt(
 ): Promise<void> {
   let code: number | null = null;
   let error: string | null = "not configured";
+  // Sealed at rest — decrypt for use (legacy plaintext rows pass through).
+  const token = readSecret(integration.token);
   if (integration.provider === "zapier") {
     if (integration.endpoint) {
       // Tenant-supplied URL — SSRF guard at send time (defeats DNS rebinding).
@@ -82,11 +85,11 @@ async function attempt(
       error = "no webhook URL configured";
     }
   } else if (integration.provider === "hubspot") {
-    if (!integration.token) {
+    if (!token) {
       error = "no HubSpot token configured";
     } else {
       const props = hubspotProperties(lead, integration.fieldMap);
-      const headers = { authorization: `Bearer ${integration.token}` };
+      const headers = { authorization: `Bearer ${token}` };
       // Create the contact; if it already exists (409), update it by email.
       const created = await httpSend(HUBSPOT_CONTACTS_URL, "POST", { properties: props }, headers);
       const email = hubspotEmail(lead, props);
@@ -99,7 +102,7 @@ async function attempt(
   } else if (integration.provider === "salesforce") {
     // Web-to-Lead: the org id (oid) is stored in `token`; `endpoint` optionally
     // overrides the submission URL (e.g. a sandbox host).
-    if (!integration.token) {
+    if (!token) {
       error = "no Salesforce Org ID (oid) configured";
     } else {
       const sfTarget = salesforceUrl(integration.endpoint);
@@ -107,7 +110,7 @@ async function attempt(
       if (!safe.ok) {
         error = `blocked: ${safe.error || "unsafe URL"}`;
       } else {
-        const body = salesforceBody(lead, integration.token, integration.fieldMap);
+        const body = salesforceBody(lead, token, integration.fieldMap);
         ({ code, error } = await httpForm(sfTarget, body));
       }
     }

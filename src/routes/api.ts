@@ -32,8 +32,34 @@ function cardWriteData(b: any, opts: { create?: boolean } = {}) {
   if (b.address !== undefined) out.address = b.address === null ? Prisma.DbNull : b.address;
   if (typeof b.active === "boolean") out.active = b.active;
   if (b.showQr === null || typeof b.showQr === "boolean") out.showQr = b.showQr;
-  if (b.templateId !== undefined) out.templateId = str(b.templateId);
+  // NOTE: templateId is intentionally NOT copied here — it's a cross-entity
+  // relationship and must be validated against the card's org + brand by the
+  // caller (see resolveApiTemplateId) to prevent attaching another tenant's
+  // template. `null` explicitly clears it.
   return out;
+}
+
+// Resolve a caller-supplied templateId, ensuring it belongs to this org and the
+// card's brand. Returns: undefined = leave unchanged, null = clear, or a valid
+// id. Rejects (throws) an unknown/foreign id so the write fails loudly.
+async function resolveApiTemplateId(
+  db: Prisma.TransactionClient,
+  org: string,
+  brandId: string,
+  raw: unknown
+): Promise<string | null | undefined> {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === "") return null;
+  const id = String(raw);
+  const tpl = await db.template.findFirst({ where: { id, orgId: org, brandId }, select: { id: true } });
+  if (!tpl) throw new ApiError(422, "template_not_found_for_brand");
+  return tpl.id;
+}
+
+class ApiError extends Error {
+  constructor(public status: number, public code: string) {
+    super(code);
+  }
 }
 
 function brandJson(b: any) {
@@ -162,24 +188,43 @@ apiRouter.post("/cards", requireScope("cards:write"), async (req, res) => {
   }
   const org = apiOrgId(req);
   const slug = await uniqueSlug(String(b.firstName), String(b.lastName));
-  const card = await runWithOrg(org, async (db) => {
-    const loc = await db.location.findFirst({ where: { id: String(b.locationId), orgId: org } });
-    if (!loc) return null;
-    return db.card.create({
-      data: { locationId: loc.id, orgId: loc.orgId, slug, ...cardWriteData(b, { create: true }) },
+  let card;
+  try {
+    card = await runWithOrg(org, async (db) => {
+      const loc = await db.location.findFirst({ where: { id: String(b.locationId), orgId: org } });
+      if (!loc) return null;
+      const templateId = await resolveApiTemplateId(db, org, loc.brandId, b.templateId);
+      const data: any = { locationId: loc.id, orgId: loc.orgId, slug, ...cardWriteData(b, { create: true }) };
+      if (templateId !== undefined) data.templateId = templateId;
+      return db.card.create({ data });
     });
-  });
+  } catch (e) {
+    if (e instanceof ApiError) return res.status(e.status).json({ error: e.code });
+    throw e;
+  }
   if (!card) return res.status(422).json({ error: "location_not_found" });
   emitEvent(card.orgId, "card.created", cardPayload(card));
   res.status(201).json({ data: cardPayload(card) });
 });
 apiRouter.patch("/cards/:id", requireScope("cards:write"), async (req, res) => {
   const org = apiOrgId(req);
-  const card = await runWithOrg(org, async (db) => {
-    const exists = await db.card.findFirst({ where: { id: req.params.id, orgId: org } });
-    if (!exists) return null;
-    return db.card.update({ where: { id: req.params.id }, data: cardWriteData(req.body || {}) });
-  });
+  let card;
+  try {
+    card = await runWithOrg(org, async (db) => {
+      const exists = await db.card.findFirst({
+        where: { id: req.params.id, orgId: org },
+        include: { location: { select: { brandId: true } } },
+      });
+      if (!exists) return null;
+      const data: any = cardWriteData(req.body || {});
+      const templateId = await resolveApiTemplateId(db, org, exists.location.brandId, (req.body || {}).templateId);
+      if (templateId !== undefined) data.templateId = templateId;
+      return db.card.update({ where: { id: req.params.id }, data });
+    });
+  } catch (e) {
+    if (e instanceof ApiError) return res.status(e.status).json({ error: e.code });
+    throw e;
+  }
   if (!card) return res.status(404).json({ error: "not_found" });
   emitEvent(card.orgId, "card.updated", cardPayload(card));
   res.json({ data: cardPayload(card) });

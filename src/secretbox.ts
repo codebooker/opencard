@@ -19,6 +19,15 @@ export function seal(plain: string): string {
   return `v1:${Buffer.concat([iv, tag, ct]).toString("base64")}`;
 }
 
+// Read a stored secret that MAY be sealed (v1:) or legacy plaintext. Sealed
+// values are decrypted; anything else is returned as-is. Lets us encrypt going
+// forward without a data migration — legacy rows keep working and get sealed
+// the next time they're saved. Returns null for empty input.
+export function readSecret(stored: string | null | undefined): string | null {
+  if (!stored) return null;
+  return stored.startsWith("v1:") ? open(stored) : stored;
+}
+
 // Returns null on tamper/corruption/wrong key rather than throwing — callers
 // treat that as "not configured" and re-prompt for the secret.
 export function open(sealed: string): string | null {

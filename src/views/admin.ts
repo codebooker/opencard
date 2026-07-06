@@ -2536,6 +2536,7 @@ export function integrationsView(data: {
   crmIntegrations?: any[];
   crmLocations?: { id: string; name: string }[];
   leadWebhookUrl?: string;
+  newWebhookSecret?: string | null;
 }): string {
   const keyScopes = (k: any) => {
     const s = Array.isArray(k.scopes) ? k.scopes : [];
@@ -2576,7 +2577,7 @@ export function integrationsView(data: {
               )}`
             : "—"
         }</td>
-        <td><details><summary class="muted">secret</summary><code style="font-size:11px">${esc(e.secret)}</code></details></td>
+        <td class="muted" style="font-size:11px">shown once at creation</td>
         <td style="white-space:nowrap"><a class="btn secondary" href="/admin/webhooks/${esc(e.id)}">Inspect</a>
         <form method="POST" action="/admin/webhooks/${esc(e.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this webhook?')"><button class="btn danger" type="submit">Delete</button></form></td>
       </tr>`;
@@ -2837,6 +2838,15 @@ export function integrationsView(data: {
   <section class="panel">
   <h3>Webhooks</h3>
   <p class="muted">We POST signed JSON to your URL on each subscribed event. Verify with the <code>X-OpenCard-Signature</code> header (HMAC-SHA256 of the body, using the endpoint secret).</p>
+  ${
+    data.newWebhookSecret
+      ? `<div class="stat" style="border:1px solid #16a34a;background:#f0fdf4;margin-bottom:12px">
+      <strong>Signing secret (shown once — copy it now):</strong>
+      <p><code style="font-size:14px;word-break:break-all">${esc(data.newWebhookSecret)}</code></p>
+      <p class="muted" style="margin:0">Store it securely. For your protection we don't display it again — regenerate the endpoint if it's lost.</p>
+    </div>`
+      : ""
+  }
   <table>
     <tr><th>URL</th><th>Events</th><th>Status</th><th>Last delivery</th><th>Secret</th><th></th></tr>
     ${epRows}
@@ -2895,9 +2905,9 @@ export function webhookDetailView(data: {
         <td class="muted">${d.durationMs != null ? d.durationMs + " ms" : "—"}</td>
         <td><details><summary class="muted">inspect</summary>
           <div style="padding:8px 0;max-width:640px">
-            <p style="margin:4px 0"><strong>Request</strong> — signature <code style="font-size:11px;word-break:break-all">${esc(
-              d.signature || ""
-            )}</code></p>
+            <p style="margin:4px 0"><strong>Request</strong> — signature <code style="font-size:11px;word-break:break-all">${
+              d.signature ? esc(d.signature.slice(0, 16)) + "…(redacted)" : "—"
+            }</code></p>
             <pre ${PRE}>${esc(prettyJson(d.requestBody))}</pre>
             <p style="margin:8px 0 4px"><strong>Response</strong> ${
               d.statusCode != null ? `HTTP ${d.statusCode}` : ""

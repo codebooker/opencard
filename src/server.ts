@@ -2,6 +2,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import path from "path";
 import { config } from "./config";
+import { rlsEnforced } from "./db";
 import { cardsRouter } from "./routes/cards";
 import { assetsRouter } from "./routes/assets";
 import { campaignRouter } from "./routes/campaigns";
@@ -28,6 +29,18 @@ import {
   notFound,
   errorHandler,
 } from "./middleware/hardening";
+
+// Fail closed: in production, tenant isolation must be backed by Postgres RLS
+// (the least-privilege opencard_app role). If APP_DB_PASSWORD is unset, RLS is
+// inert and isolation would rely on app-level filters alone — refuse to boot.
+if (config.isProduction && !rlsEnforced) {
+  // eslint-disable-next-line no-console
+  console.error(
+    "FATAL: APP_DB_PASSWORD is not set, so Postgres row-level security is not enforced. " +
+      "Set APP_DB_PASSWORD (and the matching opencard_app role) before running in production."
+  );
+  process.exit(1);
+}
 
 const app = express();
 // Trust exactly the configured number of proxy hops (default 1: Caddy). With a
@@ -86,7 +99,7 @@ app.use(
   })
 );
 
-app.get("/healthz", (_req, res) => res.json({ ok: true }));
+app.get("/healthz", (_req, res) => res.json({ ok: true, rlsEnforced }));
 
 // Generic QR image for an arbitrary https URL. Used by email signatures to render
 // a campaign QR (auto-generated from the campaign banner link). Public + cached.

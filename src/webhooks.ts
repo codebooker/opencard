@@ -2,6 +2,7 @@ import { prisma } from "./db";
 import { config } from "./config";
 import { signBody, buildEnvelope, deliveryHeaders, truncate, pickHeaders } from "./webhook-core";
 import { assertPublicUrl } from "./ssrf";
+import { readSecret } from "./secretbox";
 
 export const WEBHOOK_EVENTS = [
   "lead.captured",
@@ -41,7 +42,10 @@ async function deliver(
   attempt: number,
   autoRetry: boolean
 ): Promise<void> {
-  const signature = signBody(ep.secret, body);
+  // Signing secret is sealed at rest — decrypt for HMAC (legacy plaintext rows
+  // pass through unchanged).
+  const signingSecret = readSecret(ep.secret) || ep.secret;
+  const signature = signBody(signingSecret, body);
   const started = Date.now();
   // Re-check at delivery time: a hostname that passed config-time validation
   // could resolve to a private address later (DNS rebinding).

@@ -132,6 +132,7 @@ import { defaultOrgId, orgIdForBrand, orgIdForLocation } from "../tenant";
 import { canAdd, orgHasFeature, orgPlanKey, orgUsage, orgAccessState } from "../entitlements";
 import { requiredPlanFor, planFor, PLANS, PLAN_ORDER, isPlanKey, parseSeatLimit, DEFAULT_PLAN, Feature, LimitKey } from "../plans";
 import { validateOutboundUrl } from "../ssrf";
+import { seal } from "../secretbox";
 import { accessSummary } from "../access";
 import { stripe, stripeEnabled } from "../stripe";
 import * as RBAC from "../rbac";
@@ -2700,7 +2701,7 @@ adminRouter.get("/leads.csv", async (req, res) => {
 
 // ---------- integrations: API keys + webhooks + SCIM ----------
 // API keys and webhooks are per-org; only platform owners see across orgs.
-async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: string | null = null, newScimToken: string | null = null) {
+async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: string | null = null, newScimToken: string | null = null, newWebhookSecret: string | null = null) {
   const orgFilter = RBAC.seesAllOrgs(p) ? {} : { orgId: p.orgId };
   const [keys, endpoints, saml, org, crmIntegrations, crmLocations] = await Promise.all([
     prisma.apiKey.findMany({ where: orgFilter, orderBy: { createdAt: "desc" } }),
@@ -2742,6 +2743,7 @@ async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: stri
       crmIntegrations,
       crmLocations,
       leadWebhookUrl: org?.leadWebhookUrl || "",
+      newWebhookSecret,
     })
   );
 }
@@ -2832,10 +2834,17 @@ adminRouter.post("/crm", async (req, res) => {
       orgId: p.orgId,
       provider,
       name,
-      // endpoint = zapier webhook, or salesforce optional URL override.
+      // endpoint = zapier webhook, or salesforce optional URL override (a URL,
+      // not a secret — stored in the clear).
       endpoint: provider === "zapier" ? endpoint : provider === "salesforce" ? sfUrl || null : null,
-      // token = hubspot token, or salesforce oid.
-      token: provider === "hubspot" ? token : provider === "salesforce" ? sfOid : null,
+      // token = hubspot token or salesforce oid — sealed at rest (see secretbox).
+      // Guards above guarantee the relevant value is present for its provider.
+      token:
+        provider === "hubspot" && token
+          ? seal(token)
+          : provider === "salesforce" && sfOid
+            ? seal(sfOid)
+            : null,
       fieldMap: parseFieldMapLines(b.fieldMap) as any,
       locationId,
       enabled: true,
@@ -2966,10 +2975,13 @@ adminRouter.post("/webhooks", async (req, res) => {
   const events = asArray(req.body?.events).filter((e) => (WEBHOOK_EVENTS as readonly string[]).includes(e));
   const secret = "whsec_" + crypto.randomBytes(24).toString("hex");
   await prisma.webhookEndpoint.create({
-    data: { url, secret, events: events.length ? events : ["lead.captured"], orgId: p.orgId },
+    // Signing secret sealed at rest; shown to the admin once via the redirect.
+    data: { url, secret: seal(secret), events: events.length ? events : ["lead.captured"], orgId: p.orgId },
   });
   audit(req, p, "webhook.create", { targetType: "WebhookEndpoint", summary: url });
-  res.redirect("/admin/integrations");
+  // Render inline (not a redirect) so the one-time secret never lands in the
+  // URL, browser history, or access logs.
+  return renderIntegrations(res, p, null, null, secret);
 });
 
 adminRouter.post("/webhooks/:id/delete", async (req, res) => {
