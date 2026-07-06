@@ -62,5 +62,5 @@ export function renderAssetLanding(asset: any, baseUrl: string, attribution: Lea
   ${loc.hideCardFooter ? "" : `<footer class="brand">${esc(loc.brand?.name || "")} · ${esc(loc.name)}</footer>`}
 </main>
 ${leadRefScript}`;
-  return page({ title: `${loc.name} — ${asset.name}`, body, bodyClass: "card-body", head: analyticsHead });
+  return page({ title: `${loc.name} — ${asset.name}`, body, bodyClass: "card-body", head: analyticsHead, noUserway: true });
 }

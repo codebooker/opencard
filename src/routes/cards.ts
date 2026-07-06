@@ -236,6 +236,7 @@ cardsRouter.post("/:slug/connect", async (req, res) => {
       )}"><section class="ident"><h1>Thanks!</h1><p class="company">Your details were sent to ${esc(
         [card.firstName, card.lastName].join(" ")
       )}.</p></section><a class="cta" href="/c/${esc(card.slug)}">Back to card</a></main>`,
+      noUserway: true,
     })
   );
 });

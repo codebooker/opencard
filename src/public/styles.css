@@ -110,8 +110,10 @@ code { background: var(--wash-2); border: 1px solid var(--line-soft); border-rad
 .hero-wave .wave-fill { fill: var(--bg); }
 .hero-wave .wave-line { stroke: var(--primary); stroke-width: 8; vector-effect: non-scaling-stroke; }
 /* Logo sits in the white band just below the wave, right-aligned (off the photo). */
-.layout-wave .wave-logo-wrap { display: flex; justify-content: flex-end; padding: 0 24px; margin-top: -46px; position: relative; z-index: 2; }
-.layout-wave .wave-logo-wrap img { max-height: 36px; max-width: 46%; object-fit: contain; }
+/* Constrained to the white pocket right of the wave's descending curve so
+   wide logos can't collide with the stroke or bleed past the card edge. */
+.layout-wave .wave-logo-wrap { display: flex; justify-content: flex-end; padding: 0 24px; margin-top: -38px; position: relative; z-index: 2; }
+.layout-wave .wave-logo-wrap img { max-height: 30px; max-width: 26%; object-fit: contain; object-position: right center; }
 
 .layout-wave .ident { text-align: left; padding: 18px 24px 6px; }
 .layout-wave .ident h1 { font-size: 28px; }

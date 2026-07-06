@@ -26,13 +26,16 @@ export function esc(s: unknown): string {
 
 // Bump when styles.css changes so browsers/CDN refetch instead of serving a
 // stale cached copy (the stylesheet URL becomes a new cache key).
-export const ASSET_VER = "20260704i";
+export const ASSET_VER = "20260706a";
 
 export function page(opts: {
   title: string;
   body: string;
   head?: string;
   bodyClass?: string;
+  // Public card/landing surfaces are phone-first and carry the client's brand,
+  // not OpenCard's — the floating accessibility widget looks out of place there.
+  noUserway?: boolean;
 }): string {
   return `<!doctype html>
 <html lang="en">
@@ -45,7 +48,7 @@ ${opts.head || ""}
 </head>
 <body class="${opts.bodyClass || ""}">
 ${opts.body}
-${userwayScript()}
+${opts.noUserway ? "" : userwayScript()}
 </body>
 </html>`;
 }

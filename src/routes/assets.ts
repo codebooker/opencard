@@ -116,6 +116,7 @@ assetsRouter.post("/:slug/connect", async (req, res) => {
         asset.location.name
       )}.</p></section></main>`,
       bodyClass: "card-body",
+      noUserway: true,
     })
   );
 });

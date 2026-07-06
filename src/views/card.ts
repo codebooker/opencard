@@ -281,5 +281,5 @@ document.querySelectorAll('[data-track]').forEach(function (el) {
 });
 </script>
 `;
-  return page({ title: fullName + " — " + card.location.brand.name, body, bodyClass: "card-body", head: analyticsHead });
+  return page({ title: fullName + " — " + card.location.brand.name, body, bodyClass: "card-body", head: analyticsHead, noUserway: true });
 }
