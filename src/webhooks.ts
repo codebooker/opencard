@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { config } from "./config";
 import { signBody, buildEnvelope, deliveryHeaders, truncate, pickHeaders } from "./webhook-core";
+import { assertPublicUrl } from "./ssrf";
 
 export const WEBHOOK_EVENTS = [
   "lead.captured",
@@ -12,12 +13,15 @@ export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 type Endpoint = { id: string; orgId: string; url: string; secret: string };
 
-// Fire-and-forget: find active endpoints subscribed to `event` and deliver to each.
-// Never throws into the caller (webhooks must not break the request).
-export function emitEvent(event: WebhookEvent, data: unknown): void {
+// Fire-and-forget: find the ORG's active endpoints subscribed to `event` and
+// deliver to each. `orgId` MUST be the authoritative org of the entity that
+// produced the event — never a request-derived value — so one tenant's events
+// can never reach another tenant's webhooks. Never throws into the caller.
+export function emitEvent(orgId: string, event: WebhookEvent, data: unknown): void {
+  if (!orgId) return; // fail closed: no org, no delivery
   (async () => {
     try {
-      const endpoints = await prisma.webhookEndpoint.findMany({ where: { active: true } });
+      const endpoints = await prisma.webhookEndpoint.findMany({ where: { orgId, active: true } });
       for (const ep of endpoints) {
         const events = Array.isArray(ep.events) ? (ep.events as string[]) : [];
         // Build the envelope ONCE so retries resend an identical payload (stable
@@ -39,6 +43,17 @@ async function deliver(
 ): Promise<void> {
   const signature = signBody(ep.secret, body);
   const started = Date.now();
+  // Re-check at delivery time: a hostname that passed config-time validation
+  // could resolve to a private address later (DNS rebinding).
+  const safe = await assertPublicUrl(ep.url);
+  if (!safe.ok) {
+    await logDelivery({
+      ep, event, attempt, success: false, statusCode: null, durationMs: 0,
+      requestBody: body, signature, responseHeaders: null, responseBody: null,
+      error: `blocked: ${safe.error || "unsafe URL"}`,
+    });
+    return;
+  }
   try {
     const resp = await fetch(ep.url, {
       method: "POST",

@@ -2,6 +2,7 @@ import nodemailer, { Transporter } from "nodemailer";
 import { config, mailEnabled } from "./config";
 import { resolveRecipients, buildLeadEmail } from "./routing";
 import { prisma } from "./db";
+import { assertPublicUrl } from "./ssrf";
 
 // Lead notifications: resolve recipients via routing, then email them (or log the
 // intended delivery when SMTP isn't configured). Never throws into the caller.
@@ -27,10 +28,22 @@ export async function sendMail(to: string[], subject: string, text: string): Pro
     if (!to.length) return { delivered: "none (no recipients)" };
     const t = getTransport();
     if (!t) {
-      // Include the body so links (reset/verify/invite) are usable from logs in dev.
+      // SMTP not configured. NEVER log the body by default — reset/verify/invite/
+      // signup messages carry single-use auth tokens, and logs are broadly
+      // accessible. In production, fail closed. For local dev only, an explicit
+      // MAIL_LOG_AUTH_LINKS=1 opt-in prints the body so links are usable.
+      const logBody = process.env.MAIL_LOG_AUTH_LINKS === "1" && !config.isProduction;
       // eslint-disable-next-line no-console
-      console.log(JSON.stringify({ msg: "mail", to, subject, text, delivered: "logged (SMTP not configured)" }));
-      return { delivered: "logged" };
+      console.log(
+        JSON.stringify({
+          msg: "mail",
+          to,
+          subject,
+          ...(logBody ? { text } : {}),
+          delivered: config.isProduction ? "NOT SENT — SMTP not configured" : "logged (SMTP not configured)",
+        })
+      );
+      return { delivered: config.isProduction ? "not_sent" : "logged" };
     }
     await t.sendMail({ from: config.smtp.from, to: to.join(","), subject, text });
     return { delivered: "smtp" };
@@ -46,7 +59,9 @@ export async function sendMail(to: string[], subject: string, text: string): Pro
 // page's "Send test" button.
 export async function postChatWebhook(url: string, text: string): Promise<{ ok: boolean; status?: number; error?: string }> {
   try {
-    if (!/^https:\/\//.test(url)) return { ok: false, error: "Webhook URL must be https." };
+    // SSRF guard: tenant-configured chat hook resolved + range-checked at send time.
+    const safe = await assertPublicUrl(url);
+    if (!safe.ok) return { ok: false, error: safe.error || "Webhook URL not allowed." };
     const resp = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

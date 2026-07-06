@@ -131,8 +131,16 @@ function disabledPage(): string {
   });
 }
 
+// In production, signup REQUIRES verified email (SMTP). The SMTP-less one-form
+// flow auto-verifies accounts, which would let anyone create a workspace under
+// any email — so it's confined to non-production. If prod has signups on but no
+// SMTP, we show "disabled" rather than create unverified accounts.
+function signupBlockedNoMail(): boolean {
+  return config.isProduction && !mailEnabled;
+}
+
 signupRouter.get("/", async (_req, res) => {
-  if (!config.signupsEnabled) return res.status(404).send(disabledPage());
+  if (!config.signupsEnabled || signupBlockedNoMail()) return res.status(404).send(disabledPage());
   const cfg = await getPlatformConfig();
   const codeRequired = !!cfg.signupAccessCode;
   res.send(mailEnabled ? emailFirstPage({ codeRequired }) : signupPage({ codeRequired }));
@@ -222,7 +230,7 @@ signupRouter.post("/complete", async (req, res) => {
 
 // Legacy one-form flow — only reachable when SMTP isn't configured.
 signupRouter.post("/", async (req, res) => {
-  if (!config.signupsEnabled) return res.status(404).send(disabledPage());
+  if (!config.signupsEnabled || signupBlockedNoMail()) return res.status(404).send(disabledPage());
   if (mailEnabled) return res.redirect("/signup"); // magic-link flow owns signup when mail works
   const b = req.body || {};
   const cfg0 = await getPlatformConfig();

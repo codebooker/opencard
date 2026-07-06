@@ -2,6 +2,7 @@ import { prisma } from "./db";
 import { buildCrmPayload, nextSyncStatus, httpOk } from "./crmsync";
 import { hubspotProperties, hubspotEmail, HUBSPOT_CONTACTS_URL, hubspotContactByEmailUrl } from "./hubspot";
 import { salesforceBody, salesforceUrl } from "./salesforce";
+import { assertPublicUrl } from "./ssrf";
 
 // DB + HTTP side of CRM sync (the pure mapping/state logic lives in crmsync.ts).
 // Fire-and-forget on capture; never throws into the caller.
@@ -69,8 +70,14 @@ async function attempt(
   let error: string | null = "not configured";
   if (integration.provider === "zapier") {
     if (integration.endpoint) {
-      const payload = buildCrmPayload(lead, ctx, integration.fieldMap);
-      ({ code, error } = await httpSend(integration.endpoint, "POST", payload));
+      // Tenant-supplied URL — SSRF guard at send time (defeats DNS rebinding).
+      const safe = await assertPublicUrl(integration.endpoint);
+      if (!safe.ok) {
+        error = `blocked: ${safe.error || "unsafe URL"}`;
+      } else {
+        const payload = buildCrmPayload(lead, ctx, integration.fieldMap);
+        ({ code, error } = await httpSend(integration.endpoint, "POST", payload));
+      }
     } else {
       error = "no webhook URL configured";
     }
@@ -95,8 +102,14 @@ async function attempt(
     if (!integration.token) {
       error = "no Salesforce Org ID (oid) configured";
     } else {
-      const body = salesforceBody(lead, integration.token, integration.fieldMap);
-      ({ code, error } = await httpForm(salesforceUrl(integration.endpoint), body));
+      const sfTarget = salesforceUrl(integration.endpoint);
+      const safe = await assertPublicUrl(sfTarget);
+      if (!safe.ok) {
+        error = `blocked: ${safe.error || "unsafe URL"}`;
+      } else {
+        const body = salesforceBody(lead, integration.token, integration.fieldMap);
+        ({ code, error } = await httpForm(sfTarget, body));
+      }
     }
   } else {
     error = `provider "${integration.provider}" not yet supported`;

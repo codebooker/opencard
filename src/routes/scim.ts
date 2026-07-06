@@ -185,7 +185,7 @@ scimRouter.post("/Users", async (req, res) => {
     })
   );
 
-  if (user.card) emitEvent("card.created", cardPayload(user.card));
+  if (user.card) emitEvent(user.card.orgId, "card.created", cardPayload(user.card));
   res.status(201).json(scimUserResponse(user, user.card, req));
 });
 

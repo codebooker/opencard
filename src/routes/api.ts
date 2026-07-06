@@ -170,7 +170,7 @@ apiRouter.post("/cards", requireScope("cards:write"), async (req, res) => {
     });
   });
   if (!card) return res.status(422).json({ error: "location_not_found" });
-  emitEvent("card.created", cardPayload(card));
+  emitEvent(card.orgId, "card.created", cardPayload(card));
   res.status(201).json({ data: cardPayload(card) });
 });
 apiRouter.patch("/cards/:id", requireScope("cards:write"), async (req, res) => {
@@ -181,7 +181,7 @@ apiRouter.patch("/cards/:id", requireScope("cards:write"), async (req, res) => {
     return db.card.update({ where: { id: req.params.id }, data: cardWriteData(req.body || {}) });
   });
   if (!card) return res.status(404).json({ error: "not_found" });
-  emitEvent("card.updated", cardPayload(card));
+  emitEvent(card.orgId, "card.updated", cardPayload(card));
   res.json({ data: cardPayload(card) });
 });
 apiRouter.delete("/cards/:id", requireScope("cards:write"), async (req, res) => {
@@ -193,7 +193,7 @@ apiRouter.delete("/cards/:id", requireScope("cards:write"), async (req, res) => 
     return found;
   });
   if (!card) return res.status(404).json({ error: "not_found" });
-  emitEvent("card.deleted", { id: card.id, slug: card.slug });
+  emitEvent(card.orgId, "card.deleted", { id: card.id, slug: card.slug });
   res.json({ data: { id: card.id, deleted: true } });
 });
 

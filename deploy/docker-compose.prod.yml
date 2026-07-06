@@ -32,7 +32,10 @@ x-web: &web
     SCIM_TOKEN: ${SCIM_TOKEN:?Set SCIM_TOKEN in deploy/.env}
     SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in deploy/.env}
     UPLOAD_DIR: /app/uploads
-    SIGNUPS_ENABLED: ${SIGNUPS_ENABLED:-1}
+    # Off by default: opt in with SIGNUPS_ENABLED=1 in deploy/.env once SMTP is
+    # configured. Without SMTP the app blocks signups in production anyway
+    # (magic-link verification is required — no auto-verified accounts).
+    SIGNUPS_ENABLED: ${SIGNUPS_ENABLED:-0}
     SEED_DEMO: ${SEED_DEMO:-0}
     AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
     AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}

@@ -131,6 +131,7 @@ import { currentTerminology } from "../terminology";
 import { defaultOrgId, orgIdForBrand, orgIdForLocation } from "../tenant";
 import { canAdd, orgHasFeature, orgPlanKey, orgUsage, orgAccessState } from "../entitlements";
 import { requiredPlanFor, planFor, PLANS, PLAN_ORDER, isPlanKey, parseSeatLimit, DEFAULT_PLAN, Feature, LimitKey } from "../plans";
+import { validateOutboundUrl } from "../ssrf";
 import { accessSummary } from "../access";
 import { stripe, stripeEnabled } from "../stripe";
 import * as RBAC from "../rbac";
@@ -1315,9 +1316,15 @@ adminRouter.post("/brands/:id", upload.single("logoFile"), async (req, res) => {
 // Delete a brand and everything under it. Guarded: the typed name must match
 // exactly (also enforced client-side with two extra confirmations).
 adminRouter.post("/brands/:id/delete", async (req, res) => {
-  if (!RBAC.canDeleteBrand(reqAdmin(req))) return forbidden(res);
-  const brand = await prisma.brand.findUnique({
-    where: { id: req.params.id },
+  const p = reqAdmin(req);
+  // Role gate (super) AND tenant scope: an org owner must not be able to delete
+  // another tenant's brand even with its id + name. Platform staff on the
+  // console (seesAllOrgs) may act cross-org; everyone else is confined to their
+  // org, and canManageBrandScoped verifies the brand belongs to their scope.
+  if (!RBAC.canDeleteBrand(p)) return forbidden(res);
+  if (!(await RBAC.canManageBrandScoped(p, req.params.id))) return forbidden(res);
+  const brand = await prisma.brand.findFirst({
+    where: RBAC.seesAllOrgs(p) ? { id: req.params.id } : { id: req.params.id, orgId: p.orgId },
     include: { locations: true },
   });
   if (!brand) return res.status(404).send("Not found");
@@ -1985,7 +1992,7 @@ adminRouter.post("/cards", cardUploads, async (req, res) => {
   const card = await prisma.card.create({
     data: { locationId: b.locationId, orgId: loc.orgId, slug, ...data },
   });
-  emitEvent("card.created", cardPayload(card));
+  emitEvent(card.orgId, "card.created", cardPayload(card));
   res.redirect(`/admin/cards?locationId=${b.locationId}`);
 });
 
@@ -2001,7 +2008,7 @@ adminRouter.post("/cards/:id", cardUploads, async (req, res) => {
   data.templateId = await allowedTemplateId(clean(b.templateId), existing.location.brandId);
   await applyDepartment(data, b, existing.locationId);
   const card = await prisma.card.update({ where: { id: req.params.id }, data });
-  emitEvent("card.updated", cardPayload(card));
+  emitEvent(card.orgId, "card.updated", cardPayload(card));
   res.redirect(`/admin/cards?locationId=${existing.locationId}`);
 });
 
@@ -2009,7 +2016,7 @@ adminRouter.post("/cards/:id/delete", async (req, res) => {
   const card = await prisma.card.findUnique({ where: { id: req.params.id } });
   if (card && !(await RBAC.canAccessLocation(reqAdmin(req), card.locationId))) return forbidden(res);
   await prisma.card.delete({ where: { id: req.params.id } });
-  if (card) emitEvent("card.deleted", { id: card.id, slug: card.slug });
+  if (card) emitEvent(card.orgId, "card.deleted", { id: card.id, slug: card.slug });
   res.redirect(`/admin/cards?locationId=${card?.locationId || ""}`);
 });
 
@@ -2097,7 +2104,7 @@ adminRouter.post("/cards/:id/turnover", async (req, res) => {
           ...data,
         },
       });
-      emitEvent("card.created", cardPayload(replacement));
+      emitEvent(replacement.orgId, "card.created", cardPayload(replacement));
     }
   }
 
@@ -2750,7 +2757,10 @@ adminRouter.post("/lead-webhook", async (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canManageIntegrations(p)) return forbidden(res);
   const url = clean(req.body?.leadWebhookUrl) || null;
-  if (url && !/^https:\/\//.test(url)) return res.status(400).send("Webhook URL must start with https://");
+  if (url) {
+    const chk = validateOutboundUrl(url);
+    if (!chk.ok) return res.status(400).send(chk.error || "Invalid webhook URL.");
+  }
   await prisma.org.update({ where: { id: p.orgId }, data: { leadWebhookUrl: url } });
   audit(req, p, "leadwebhook.update", { summary: url ? "set" : "cleared" });
   res.redirect("/admin/integrations");
@@ -2804,6 +2814,13 @@ adminRouter.post("/crm", async (req, res) => {
   if (provider === "zapier" && !endpoint) return res.redirect("/admin/integrations");
   if (provider === "hubspot" && !token) return res.redirect("/admin/integrations");
   if (provider === "salesforce" && !sfOid) return res.redirect("/admin/integrations");
+  // SSRF guard on tenant-supplied outbound URLs (zapier endpoint, salesforce override).
+  for (const candidate of [provider === "zapier" ? endpoint : "", provider === "salesforce" ? sfUrl : ""]) {
+    if (candidate) {
+      const chk = validateOutboundUrl(candidate);
+      if (!chk.ok) return res.status(400).send(chk.error || "Invalid endpoint URL.");
+    }
+  }
   // Scope to a rooftop the admin can reach, or all rooftops in the org.
   let locationId: string | null = null;
   if (b.locationId) {
@@ -2944,6 +2961,8 @@ adminRouter.post("/webhooks", async (req, res) => {
   if (!(await ensureFeature(res, p.orgId, "webhooks", "Webhooks"))) return;
   const url = clean(req.body?.url);
   if (!url) return res.redirect("/admin/integrations");
+  const urlChk = validateOutboundUrl(url);
+  if (!urlChk.ok) return res.status(400).send(urlChk.error || "Invalid webhook URL.");
   const events = asArray(req.body?.events).filter((e) => (WEBHOOK_EVENTS as readonly string[]).includes(e));
   const secret = "whsec_" + crypto.randomBytes(24).toString("hex");
   await prisma.webhookEndpoint.create({

@@ -215,6 +215,6 @@ selfRouter.post("/", selfUploads, async (req, res) => {
   // Employees only ever touch their own card; the update runs under RLS so the
   // database also guarantees it can't write outside the card's org.
   const updated = await runWithOrg(card.orgId, (db) => db.card.update({ where: { id: card.id }, data }));
-  emitEvent("card.updated", cardPayload(updated));
+  emitEvent(updated.orgId, "card.updated", cardPayload(updated));
   res.redirect("/me?saved=1");
 });

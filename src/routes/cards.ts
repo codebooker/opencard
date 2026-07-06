@@ -225,7 +225,7 @@ cardsRouter.post("/:slug/connect", async (req, res) => {
     });
     return created;
   });
-  emitEvent("lead.captured", leadPayload(lead, { card }));
+  emitEvent(card.orgId, "lead.captured", leadPayload(lead, { card }));
   notifyLead(lead, { card });
   syncLeadToCrm(lead, { card });
   res.send(

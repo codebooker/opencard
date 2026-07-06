@@ -120,7 +120,7 @@ export async function jitProvision(
         include: { card: true },
       })
     );
-    if (user.card) emitEvent("card.created", cardPayload(user.card));
+    if (user.card) emitEvent(user.card.orgId, "card.created", cardPayload(user.card));
     return "created";
   } catch {
     return "failed";

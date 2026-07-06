@@ -106,7 +106,7 @@ assetsRouter.post("/:slug/connect", async (req, res) => {
       },
     });
   });
-  emitEvent("lead.captured", leadPayload(lead, { asset }));
+  emitEvent(asset.orgId, "lead.captured", leadPayload(lead, { asset }));
   notifyLead(lead, { asset });
   syncLeadToCrm(lead, { asset });
   res.send(
