@@ -314,6 +314,38 @@ adminRouter.post("/invite", async (req, res) => {
 // everything below requires an admin principal (attached as req.admin)
 adminRouter.use(requireAdmin);
 
+// MFA enforcement for platform (OpenCard staff) accounts. These credentials can
+// reach every tenant, billing, integrations, and destructive operations, so a
+// stolen password alone must not be enough. Until the account enrolls TOTP, we
+// confine it to the enrollment surface (and logout). Org/tenant admins keep
+// self-service MFA (encouraged, not forced) so we don't lock customers out.
+const MFA_EXEMPT_PATHS = new Set([
+  "/logout",
+  "/security",
+  "/security/mfa/start",
+  "/security/mfa/enable",
+  "/security/mfa/recovery",
+]);
+adminRouter.use(async (req, res, next) => {
+  const p = reqAdmin(req);
+  if (!p.platform || !p.email) return next();
+  if (MFA_EXEMPT_PATHS.has(req.path)) return next();
+  const au = await prisma.adminUser.findUnique({
+    where: { email: p.email },
+    select: { mfaEnabled: true },
+  });
+  if (au?.mfaEnabled) return next();
+  // Not enrolled yet. GET -> the security page (with a required-notice); any
+  // other method -> block with a clear message.
+  if (req.method === "GET") return res.redirect("/admin/security?mfa=required");
+  return res.status(403).send(
+    page({
+      title: "Two-factor required",
+      body: `<main class="card" style="max-width:520px"><section class="ident"><h1>Two-factor required</h1><p class="company">OpenCard staff accounts must enable two-factor authentication before making changes.</p></section><a class="cta" href="/admin/security">Set up two-factor</a></main>`,
+    })
+  );
+});
+
 // Workspace access gate: when a tenant's demo/trial has lapsed (or a subscription
 // is past due / canceled), block state-changing actions and steer them to billing.
 // Reads still work, so they can see their data and the plan page. Platform owners
@@ -966,6 +998,8 @@ adminRouter.get("/security", async (req, res) => {
       ? `<p style="color:#15803d">Two-factor is now enabled.</p>`
       : req.query.mfa === "off"
       ? `<p class="muted">Two-factor disabled.</p>`
+      : req.query.mfa === "required"
+      ? `<p style="color:#b45309"><strong>Two-factor is required for OpenCard staff accounts.</strong> Enable it below to continue.</p>`
       : "";
   const workspace = p.platform
     ? null
@@ -1064,6 +1098,9 @@ adminRouter.post("/verify/resend", async (req, res) => {
 adminRouter.post("/security/mfa/disable", async (req, res) => {
   const p = reqAdmin(req);
   if (!p.email) return forbidden(res);
+  // Platform (staff) accounts must keep MFA on — disabling would just bounce
+  // them into the enrollment gate on the next request.
+  if (p.platform) return forbidden(res, "Two-factor is required for OpenCard staff accounts and can't be disabled.");
   await prisma.adminUser.update({ where: { email: p.email }, data: { mfaEnabled: false, mfaSecret: null, recoveryCodes: Prisma.DbNull } });
   res.redirect("/admin/security?mfa=off");
 });
