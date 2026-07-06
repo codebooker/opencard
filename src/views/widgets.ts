@@ -516,7 +516,7 @@ export function qrDesignControls(current: {
   fill2?: string | null;
   bg?: string;
   logoUrl?: string | null;
-} | null, brandLogoUrl?: string | null): string {
+} | null, brandLogoUrl?: string | null, uid = "qr"): string {
   const d = current || null;
   const custom = !!d;
   const style = d?.style || "square";
@@ -525,11 +525,12 @@ export function qrDesignControls(current: {
   const transparent = d?.bg === "transparent";
   const bg = !d?.bg || d.bg === "transparent" ? "#ffffff" : d.bg;
   const hasLogo = !!d?.logoUrl;
-  return `<div class="grid2" id="qrDesigner">
+  const ID = (n: string) => `${n}_${uid}`;
+  return `<div class="grid2" id="${ID("qrDesigner")}">
     <div>
       <label class="chk"><input type="radio" name="qrMode" value="inherit" ${custom ? "" : "checked"} /> Standard QR (single color, auto)</label>
       <label class="chk"><input type="radio" name="qrMode" value="custom" ${custom ? "checked" : ""} /> Custom designed QR</label>
-      <div id="qrOpts" style="${custom ? "" : "opacity:.45;pointer-events:none"}">
+      <div id="${ID("qrOpts")}" style="${custom ? "" : "opacity:.45;pointer-events:none"}">
         <label>Dot style</label>
         <select name="qrStyle">
           <option value="square" ${style === "square" ? "selected" : ""}>Square (classic)</option>
@@ -545,14 +546,14 @@ export function qrDesignControls(current: {
       </div>
     </div>
     <div style="text-align:center">
-      <img id="qrPreview" alt="QR preview" style="width:180px;height:180px;border:1px solid #e5e7eb;border-radius:12px;background:#fff" />
+      <img id="${ID("qrPreview")}" alt="QR preview" style="width:180px;height:180px;border:1px solid #e5e7eb;border-radius:12px;background:#fff" />
       <p class="muted" style="font-size:12px">Live preview — always test-scan before printing.</p>
     </div>
   </div>
   <script>(function(){
-    var root = document.getElementById('qrDesigner');
-    var img = document.getElementById('qrPreview');
-    var opts = document.getElementById('qrOpts');
+    var root = document.getElementById(${JSON.stringify("qrDesigner_")} + ${JSON.stringify(uid)});
+    var img = document.getElementById(${JSON.stringify("qrPreview_")} + ${JSON.stringify(uid)});
+    var opts = document.getElementById(${JSON.stringify("qrOpts_")} + ${JSON.stringify(uid)});
     var logo = ${JSON.stringify(brandLogoUrl || "")};
     function v(n){ var el = root.querySelector('[name='+JSON.stringify(n)+']'); return el ? el.value : ''; }
     function c(n){ var el = root.querySelector('[name='+JSON.stringify(n)+']'); return !!(el && el.checked); }

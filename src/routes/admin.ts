@@ -1752,15 +1752,16 @@ adminRouter.get("/locations/:id/assets", async (req, res) => {
   const loc = await locationForDept(req.params.id);
   if (!loc) return res.status(404).send("Not found");
   if (!await RBAC.canManageBrandScoped(reqAdmin(req),loc.brandId)) return forbidden(res);
-  const [assets, cards] = await Promise.all([
+  const [assets, cards, brand] = await Promise.all([
     prisma.asset.findMany({ where: { locationId: loc.id }, orderBy: { createdAt: "desc" } }),
     prisma.card.findMany({
       where: { locationId: loc.id, active: true },
       select: { id: true, firstName: true, lastName: true },
       orderBy: { firstName: "asc" },
     }),
+    prisma.brand.findUnique({ where: { id: loc.brandId }, select: { logoUrl: true, qrDesign: true } }),
   ]);
-  res.send(V.assetsView({ location: loc, assets, cards, cardBaseUrl: config.cardUrl }));
+  res.send(V.assetsView({ location: loc, assets, cards, cardBaseUrl: config.cardUrl, brand }));
 });
 
 adminRouter.post("/locations/:id/assets", async (req, res) => {
@@ -1777,16 +1778,19 @@ adminRouter.post("/locations/:id/assets", async (req, res) => {
       if (ok) destinationCardId = cid;
     }
   }
+  // Per-asset QR design override ("Standard" = inherit brand -> null).
+  const assetBrand = await prisma.brand.findUnique({ where: { id: loc.brandId }, select: { logoUrl: true } });
+  const qrDesign = qrDesignFromForm(req.body, assetBrand?.logoUrl);
   const assetId = clean(req.body?.assetId);
   if (assetId) {
     await prisma.asset.updateMany({
       where: { id: assetId, locationId: loc.id },
-      data: { ...data, destinationCardId },
+      data: { ...data, destinationCardId, qrDesign },
     });
   } else {
     const slug = await uniqueAssetSlug(data.name);
     await prisma.asset.create({
-      data: { ...data, destinationCardId, orgId: loc.orgId, locationId: loc.id, slug },
+      data: { ...data, destinationCardId, qrDesign, orgId: loc.orgId, locationId: loc.id, slug },
     });
   }
   res.redirect(`/admin/locations/${loc.id}/assets`);

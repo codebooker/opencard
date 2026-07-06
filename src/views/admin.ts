@@ -1263,8 +1263,18 @@ export function departmentsView(data: { location: any; departments: any[] }, t: 
 }
 
 // Manage dealership QR/NFC assets within a rooftop.
-export function assetsView(data: { location: any; assets: any[]; cards: any[]; cardBaseUrl: string }): string {
+export function assetsView(data: {
+  location: any;
+  assets: any[];
+  cards: any[];
+  cardBaseUrl: string;
+  brand?: { logoUrl?: string | null; qrDesign?: string | null } | null;
+}): string {
   const loc = data.location;
+  const brandLogo = data.brand?.logoUrl || null;
+  const qrFields = (a: any, uid: string) => `
+    <label style="margin-top:10px">QR design <span class="muted">(this code only; "Standard" inherits the brand design)</span></label>
+    ${qrDesignControls(parseQrDesign(a.qrDesign), brandLogo, uid)}`;
   const base = (data.cardBaseUrl || "").replace(/\/+$/, "");
   const typeOpts = (sel: string) =>
     ASSET_TYPES.map(([v, l]) => `<option value="${esc(v)}" ${sel === v ? "selected" : ""}>${esc(l)}</option>`).join("");
@@ -1299,6 +1309,7 @@ export function assetsView(data: { location: any; assets: any[]; cards: any[]; c
           <div><label>Name</label><input name="name" value="${esc(a.name)}" required /></div>
         </div>
         ${destFields(a)}
+        ${qrFields(a, a.id)}
         <p class="muted" style="margin-top:8px">Public: <a href="${esc(url)}" target="_blank">${esc(
           url
         )}</a> · <a href="${esc(url)}/qr.png" target="_blank">QR</a> · ${a.scanCount} scan${
@@ -1325,6 +1336,7 @@ export function assetsView(data: { location: any; assets: any[]; cards: any[]; c
       <div><label>Name</label><input name="name" placeholder="e.g. Summer Sales Event" required /></div>
     </div>
     ${destFields({ destinationType: "landing", destinationUrl: "", destinationCardId: "" })}
+    ${qrFields({ qrDesign: null }, "new")}
     <p style="margin-top:10px"><button class="btn" type="submit">Add asset</button>
     <a class="btn secondary" href="/admin/locations/${esc(loc.id)}/edit">Cancel</a></p>
   </form>`;
