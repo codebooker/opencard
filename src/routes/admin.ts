@@ -1247,9 +1247,13 @@ adminRouter.get("/qr-preview", async (req, res) => {
     bg: String(req.query.bg || "#ffffff"),
     logoUrl: req.query.logo ? String(req.query.logo) : null,
   });
+  // Encode a REAL destination so test-scanning the preview works: the entity's
+  // own public path when provided, else the marketing site.
+  const rawPath = String(req.query.path || "");
+  const target = /^\/(c|a|k)\/[a-z0-9-]{1,80}$/.test(rawPath) ? `${config.cardUrl}${rawPath}` : config.baseUrl;
   res.setHeader("Content-Type", "image/svg+xml");
   res.setHeader("Cache-Control", "no-store");
-  res.send(qrSvg(`${config.cardUrl}/c/preview`, design, { size: 360 }));
+  res.send(qrSvg(target, design, { size: 360 }));
 });
 
 adminRouter.post("/brands", upload.single("logoFile"), async (req, res) => {

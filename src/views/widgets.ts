@@ -516,7 +516,7 @@ export function qrDesignControls(current: {
   fill2?: string | null;
   bg?: string;
   logoUrl?: string | null;
-} | null, brandLogoUrl?: string | null, uid = "qr"): string {
+} | null, brandLogoUrl?: string | null, uid = "qr", previewPath = ""): string {
   const d = current || null;
   const custom = !!d;
   const style = d?.style || "square";
@@ -555,6 +555,7 @@ export function qrDesignControls(current: {
     var img = document.getElementById(${JSON.stringify("qrPreview_")} + ${JSON.stringify(uid)});
     var opts = document.getElementById(${JSON.stringify("qrOpts_")} + ${JSON.stringify(uid)});
     var logo = ${JSON.stringify(brandLogoUrl || "")};
+    var ppath = ${JSON.stringify(previewPath || "")};
     function v(n){ var el = root.querySelector('[name='+JSON.stringify(n)+']'); return el ? el.value : ''; }
     function c(n){ var el = root.querySelector('[name='+JSON.stringify(n)+']'); return !!(el && el.checked); }
     function mode(){ var el = root.querySelector('[name=qrMode]:checked'); return el ? el.value : 'inherit'; }
@@ -569,7 +570,8 @@ export function qrDesignControls(current: {
           '&bg=' + encodeURIComponent(c('qrBgTransparent') ? 'transparent' : v('qrBg')) +
           (c('qrLogo') && logo ? '&logo=' + encodeURIComponent(logo) : '')
         : '';
-      img.src = '/admin/qr-preview' + (q ? '?' + q : '');
+      var qs = (ppath ? 'path=' + encodeURIComponent(ppath) : '') + (q ? (ppath ? '&' : '') + q : '');
+      img.src = '/admin/qr-preview' + (qs ? '?' + qs : '');
     }
     root.addEventListener('input', update);
     root.addEventListener('change', update);

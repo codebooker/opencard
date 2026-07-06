@@ -1274,7 +1274,7 @@ export function assetsView(data: {
   const brandLogo = data.brand?.logoUrl || null;
   const qrFields = (a: any, uid: string) => `
     <label style="margin-top:10px">QR design <span class="muted">(this code only; "Standard" inherits the brand design)</span></label>
-    ${qrDesignControls(parseQrDesign(a.qrDesign), brandLogo, uid)}`;
+    ${qrDesignControls(parseQrDesign(a.qrDesign), brandLogo, uid, a.slug ? `/a/${a.slug}` : "")}`;
   const base = (data.cardBaseUrl || "").replace(/\/+$/, "");
   const typeOpts = (sel: string) =>
     ASSET_TYPES.map(([v, l]) => `<option value="${esc(v)}" ${sel === v ? "selected" : ""}>${esc(l)}</option>`).join("");
