@@ -206,6 +206,16 @@ export function qrDesignFromForm(b: Record<string, any>, logoUrl?: string | null
   });
 }
 
+// Short fingerprint of a stored design, used as a cache-busting query param on
+// qr.png/qr.svg links: any design change yields a new URL, so CDN/browser
+// caches (e.g. Cloudflare's 4h image TTL) never serve a stale style.
+export function qrVersion(...designs: (string | null | undefined)[]): string {
+  const s = designs.map((d) => d || "").join("|");
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
 // Resolve the effective design for an entity: its own stored design, else the
 // brand's, else a default tinted with the brand primary color.
 export function resolveQrDesign(

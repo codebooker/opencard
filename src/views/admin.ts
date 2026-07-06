@@ -3,7 +3,7 @@ import { Address } from "../types";
 import { AdminPrincipal, ROLE_LABELS } from "../rbac";
 import { showsBilling, canManageStaffTarget, Role } from "../roles";
 import { PLAN_ORDER, PLANS, PlanKey } from "../plans";
-import { parseQrDesign } from "../qr-style";
+import { parseQrDesign, qrVersion } from "../qr-style";
 import { API_SCOPES, SCOPE_LABELS } from "../api-scopes";
 import { GENERAL_TERMINOLOGY, Terminology, lower, VERTICALS } from "../terminology";
 import {
@@ -1312,7 +1312,7 @@ export function assetsView(data: {
         ${qrFields(a, a.id)}
         <p class="muted" style="margin-top:8px">Public: <a href="${esc(url)}" target="_blank">${esc(
           url
-        )}</a> · <a href="${esc(url)}/qr.png" target="_blank">QR</a> · ${a.scanCount} scan${
+        )}</a> · <a href="${esc(url)}/qr.png?v=${qrVersion(a.qrDesign)}" target="_blank">QR</a> · ${a.scanCount} scan${
             a.scanCount === 1 ? "" : "s"
           } · <span class="pill ${a.active ? "on" : "off"}">${a.active ? "active" : "off"}</span></p>
         <p style="margin-top:8px"><button class="btn" type="submit">Save</button>
@@ -1378,8 +1378,8 @@ export function qrCodesView(data: {
       <td data-label="Status"><span class="pill ${a.active ? "on" : "off"}">${a.active ? "active" : "off"}</span></td>
       <td class="rsp-actions">
         <a href="${esc(url)}" target="_blank">Link</a> ·
-        <a href="${esc(url)}/qr.svg" target="_blank" title="Styled QR (brand design), crisp at any size">QR</a> ·
-        <a href="${esc(url)}/qr.png" target="_blank" title="Plain PNG">PNG</a> ·
+        <a href="${esc(url)}/qr.svg?v=${qrVersion(a.qrDesign)}" target="_blank" title="Styled QR (brand design), crisp at any size">QR</a> ·
+        <a href="${esc(url)}/qr.png?v=${qrVersion(a.qrDesign)}" target="_blank" title="Styled PNG">PNG</a> ·
         <a href="/admin/locations/${esc(a.locationId)}/assets">Edit</a>
       </td></tr>`;
         })
@@ -1429,7 +1429,7 @@ export function qrCodesView(data: {
   <p class="muted">Trackable QR codes that send people wherever you want. Every scan is counted and located (city-level) in <a href="/admin/analytics">Analytics</a> — then the visitor is redirected instantly, or shown a lead-capture page if you choose "Landing page".</p>
   ${
     createdAsset
-      ? `<p class="auth-banner" style="max-width:none">QR code created — link: <a href="${esc(base)}/a/${esc(createdAsset.slug)}" target="_blank">${esc(base)}/a/${esc(createdAsset.slug)}</a> · <a href="${esc(base)}/a/${esc(createdAsset.slug)}/qr.svg" target="_blank"><strong>Download the QR</strong></a></p>`
+      ? `<p class="auth-banner" style="max-width:none">QR code created — link: <a href="${esc(base)}/a/${esc(createdAsset.slug)}" target="_blank">${esc(base)}/a/${esc(createdAsset.slug)}</a> · <a href="${esc(base)}/a/${esc(createdAsset.slug)}/qr.svg?v=${qrVersion(createdAsset.qrDesign)}" target="_blank"><strong>Download the QR</strong></a></p>`
       : ""
   }
   ${createSection}
@@ -1468,7 +1468,7 @@ export function cardList(
       <td class="rsp-actions">
         <a href="/admin/cards/${esc(c.id)}/edit">Edit</a> ·
         <a href="/admin/cards/${esc(c.id)}/analytics">Stats</a> ·
-        <a href="/c/${esc(c.slug)}/qr.png" target="_blank">QR</a>${
+        <a href="/c/${esc(c.slug)}/qr.png?v=${qrVersion(c.qrDesign)}" target="_blank">QR</a>${
           idCards
             ? ` · <a href="/admin/cards/${esc(c.id)}/idcard.pdf?orientation=portrait&back=1&v=2" title="Two-sided CR80 badge PDF: front + patterned back (page 2 for duplex printers)">ID card</a>`
             : ""
