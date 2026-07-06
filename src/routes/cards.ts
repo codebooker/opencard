@@ -3,8 +3,8 @@ import { prisma, runWithOrg } from "../db";
 import { orgIdForHost, requestHost } from "../tenant-resolver";
 import { config } from "../config";
 import { buildVCard } from "../vcard";
-import { qrPng } from "../qr";
 import { qrSvg, resolveQrDesign } from "../qr-style";
+import { styledQrPng } from "../qr-render";
 import { geoFields } from "../geo";
 import { renderCardPage } from "../views/card";
 import { page, esc } from "../views/html";
@@ -140,13 +140,17 @@ cardsRouter.get("/:slug/vcard", async (req, res) => {
   res.send(vcf);
 });
 
-// QR PNG (for printing on badges, signatures, etc.) — plain, single color.
+// QR PNG (for printing on badges, signatures, etc.) — same styled design as
+// qr.svg, rasterized. Falls back to plain single-color if rendering fails.
 cardsRouter.get("/:slug/qr.png", async (req, res) => {
   const card = await loadCard(req.params.slug, await hostOrg(req));
   if (!card) return res.status(404).send("Not found");
   const primary = cardPrimary(card);
-  const buf = await qrPng(`${config.cardUrl}/c/${card.slug}`, primary);
+  const design = resolveQrDesign(card.qrDesign, card.location.brand.qrDesign, primary);
+  const size = Math.max(200, Math.min(2000, parseInt(String(req.query.size || ""), 10) || 600));
+  const buf = await styledQrPng(`${config.cardUrl}/c/${card.slug}`, design, primary, size);
   res.setHeader("Content-Type", "image/png");
+  res.setHeader("Cache-Control", "public, max-age=300");
   res.send(buf);
 });
 

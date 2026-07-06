@@ -1,8 +1,8 @@
 import { Router, Request } from "express";
 import { prisma, runWithOrg } from "../db";
 import { config } from "../config";
-import { qrPng } from "../qr";
 import { qrSvg, resolveQrDesign } from "../qr-style";
+import { styledQrPng } from "../qr-render";
 import { geoFields } from "../geo";
 import { orgIdForHost, requestHost } from "../tenant-resolver";
 import { resolveAssetDestination } from "../assets";
@@ -120,13 +120,16 @@ assetsRouter.post("/:slug/connect", async (req, res) => {
   );
 });
 
-// Printable QR for the asset — plain, single color.
+// Printable QR for the asset — same styled design as qr.svg, rasterized.
 assetsRouter.get("/:slug/qr.png", async (req, res) => {
   const asset = await loadAsset(req.params.slug, await hostOrg(req));
   if (!asset) return res.status(404).send("Not found");
   const primary = asset.location.primaryColor || asset.location.brand.primaryColor;
-  const buf = await qrPng(`${config.cardUrl}/a/${asset.slug}`, primary);
+  const design = resolveQrDesign(asset.qrDesign, asset.location.brand.qrDesign, primary);
+  const size = Math.max(200, Math.min(2000, parseInt(String(req.query.size || ""), 10) || 600));
+  const buf = await styledQrPng(`${config.cardUrl}/a/${asset.slug}`, design, primary, size);
   res.setHeader("Content-Type", "image/png");
+  res.setHeader("Cache-Control", "public, max-age=300");
   res.send(buf);
 });
 
