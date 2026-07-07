@@ -1,60 +1,91 @@
 # OpenCard
 
-Self-hosted, in-house digital business cards.
-Multi-brand and multi-store: each brand and each location has its own logo and
-design, cards auto-provision from Azure AD, and everything runs in Docker on your
-own infrastructure. No per-seat SaaS fees.
+OpenCard is a multi-tenant SaaS platform for digital business cards. Each person
+gets a fast, mobile-first card page (`/c/:slug`) with **Add to Contacts**, a
+**branded QR code**, and built-in **lead capture** — and every organization gets
+its own isolated workspace, branding, analytics, and billing.
 
-See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the design and feature overview.
-See **[docs/ROADMAP.md](./docs/ROADMAP.md)** for the dealership-first SaaS roadmap.
+It's built for everyone from a single professional on the Individual plan to a
+multi-location brand running hundreds of cards across many sites, with directory
+auto-provisioning and SSO. The data model is vertical-neutral, so the same
+platform serves dealerships, brokerages, agencies, franchises, and ordinary teams
+— each org just relabels the shared concepts to fit its world.
+
+See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the design deep-dive and
+**[docs/](./docs/)** for API, webhook, and compliance references. Production
+deployment and disaster recovery live in **[deploy/](./deploy/)**.
 
 ## What it does
 
-- Hosted mobile card page per employee (`/c/:slug`) with theme inherited from
-  brand → store → card.
-- **Add to Contacts** vCard download, and a **QR code** per card (`/c/:slug/qr.png`).
-- **Admin** at `/admin` to manage brands, stores, and cards, with per-brand /
-  per-store logos and colors.
-- **Analytics** (views, link clicks, contacts saved, leads) and **two-way contact
-  capture** with CSV export.
-- **Azure AD / Entra auto-provisioning** via a SCIM 2.0 endpoint — add an employee
-  to the directory and a card is created automatically in the right store.
+- **Public card pages** (`/c/:slug`) — mobile-first, themed per brand → location →
+  card, with vCard download and an accessible, no-CDN front end.
+- **Branded QR codes** — custom colors, gradients, and a center logo. A card's QR
+  points at its page; standalone QR codes can redirect anywhere you choose while
+  still recording the scan as a lead, with rough (city-level) geolocation from an
+  offline IP lookup.
+- **Lead capture & CRM** — public "connect" forms, two-way contact capture, CSV
+  export, and optional sync to external CRMs.
+- **Analytics** — views, link clicks, contacts saved, QR scans (with geo), and
+  campaign attribution.
+- **Admin workspace** (`/admin`) — manage brands, locations, cards, users,
+  billing, integrations, and analytics, with per-brand / per-location branding.
+- **Directory auto-provisioning** — Azure AD / Entra via SCIM 2.0: add someone to
+  the directory and their card is created in the right location automatically.
+- **SSO** — Azure AD OIDC for employees and per-org SAML for admins/employees.
+- **REST API & webhooks** — programmatic access to brands, locations, cards,
+  leads, and analytics; HMAC-signed event delivery.
+- **Marketing site, legal, and billing** — public landing page at the app root,
+  Terms/Privacy with signup acceptance, an accessibility widget, a contact form,
+  and Stripe-backed subscriptions.
 
-## SaaS direction: dealership-first, general underneath
+## Multi-tenancy & isolation
 
-OpenCard is moving toward a dealership-first SaaS wedge while keeping the core
-data model vertical-neutral. Internally the app still uses generic concepts like
-`Org`, `Brand`, `Location`, `Card`, and `Lead`. Each org can carry terminology
-that changes how those concepts are presented in the UI. For the dealership
-vertical, locations display as **rooftops**, lead capture can be positioned as
-customer lead capture, and the same structure can later support franchises,
-real estate brokerages, insurance agencies, and other multi-location teams.
+Every org is a hard-isolated tenant. Beyond application-level scoping, the app
+connects to Postgres as a least-privilege `opencard_app` role with **row-level
+security** enforced, so a query can only ever see its own org's rows — the app
+refuses to start in production without it. Tenants are resolved by `Host` header,
+which also powers custom domains (on-demand TLS via Caddy).
+
+## Plans
+
+Four tiers, defined in [`src/plans.ts`](./src/plans.ts) and enforced through
+`src/entitlements.ts` (feature flags + countable limits); real prices live in
+Stripe:
+
+- **Individual** — one person, one card.
+- **Team** — self-service editing, email signatures, CSV export, API.
+- **Multi Location Brand** — adds webhooks, SSO, SCIM, custom domains, CRM sync.
+- **Enterprise** — everything, at scale (talk-to-us).
+
+## Tech stack
+
+Node.js + TypeScript, Express with server-rendered HTML (no client framework),
+Prisma ORM over PostgreSQL 16, and `sharp` for QR/image rendering. Runs as a
+Docker Compose stack — Caddy (TLS + reverse proxy) in front of two web
+containers and Postgres.
 
 ## Quick start (Docker)
 
 ```bash
 cp .env.example .env
 # edit .env: set SESSION_SECRET and SCIM_TOKEN to long random strings
-# (openssl rand -hex 32), and BASE_URL to the public URL
-# (e.g. https://cards.yourco.com)
+# (openssl rand -hex 32), and BASE_URL to the public URL.
 
 docker compose up --build
 ```
 
 This starts Postgres + the app, applies the schema, seeds demo data, and serves
-on `http://localhost:3000`.
+on `http://localhost:3000`. The marketing site is at `/`, a sample card at
+`/c/...` (see `prisma/seed.ts`), and admin at `/admin`.
 
-Create your first admin account (there is no static admin token — admin login
-is a real, revocable per-user account):
+Create your first admin account (there is no static admin token — admin login is
+a real, revocable per-user account):
 
 ```bash
 # once the app container is up
 docker compose exec web node dist/scripts/make-admin.js you@yourco.com "Your Name"
 # prints a one-time password; sign in at /admin/login and change it
 ```
-
-- Admin: <http://localhost:3000/admin/login> → sign in with the account above.
-- Demo cards: `/c/john-smith`, `/c/james-chen`, `/c/max-mcgonagall`.
 
 ## Local dev (without Docker)
 
@@ -75,91 +106,59 @@ Schema changes are versioned with Prisma Migrate (committed under
 `prisma/migrations/`), not `prisma db push`.
 
 - **Production / Docker:** the container runs `prisma migrate deploy` on boot to
-  apply any pending migrations. A database created before migrations were adopted
-  is baselined automatically (the initial migration is marked applied, since its
-  tables already exist).
-- **Changing the schema:** edit `prisma/schema.prisma`, then run
-  `npx prisma migrate dev --name <change>` to generate a new migration. Commit the
-  generated folder under `prisma/migrations/`.
+  apply pending migrations. A database created before migrations were adopted is
+  baselined automatically.
+- **Changing the schema:** edit `prisma/schema.prisma`, then
+  `npx prisma migrate dev --name <change>` and commit the generated folder.
 
-## Managing brands, stores, and cards
+## Managing brands, locations, and cards
 
 In `/admin`:
 
-1. **New brand** — set the brand logo, primary color, and default layout
-   (`classic`, `banner`, or `minimal`).
-2. **+ Store** under a brand — optionally override the logo, color, and layout
-   for that location, and set its address. Give it a **store code** (e.g.
-   `MW-DT`) — that's what Azure AD maps against.
-3. **+ New card** in a store — fill in the person's details. Multi-value fields
-   (phones/emails/websites) are one per line as `Label | value`; socials as
-   `type | url`. Leave design fields blank to inherit from the store/brand.
+1. **New brand** — set the brand logo, primary color, and default layout.
+2. **+ Location** under a brand — optionally override logo, color, and layout,
+   set its address, and give it a **code** (e.g. `MW-DT`) — that's what the
+   directory maps against. (Orgs can relabel "location" as store, rooftop, etc.)
+3. **+ New card** in a location — fill in the person's details. Leave design
+   fields blank to inherit. A card's look resolves most-specific-first:
+   `card override → location → template → brand`.
 
-A card's final look resolves most-specific-first:
-`card override → store → template → brand`.
+## Branded QR codes
 
-## Azure AD / Entra auto-provisioning (SCIM)
+Design QR codes in the admin **QR Codes** section: pick foreground/background
+colors, an optional gradient, a dot style, and a center logo. Each card exposes a
+rendered PNG at `/c/:slug/qr.png`; standalone codes can target any destination
+URL and still log the scan (with city-level geo) as a lead before redirecting.
+The engine lives in `src/qr-style.ts` (SVG) and `src/qr-render.ts` (rasterization).
 
-So cards are created automatically when an employee is added to the directory.
+## Auth, SSO & provisioning
 
-1. In Entra admin center: **Enterprise applications → New application → Create
-   your own → non-gallery app**.
-2. Open the app → **Provisioning → Automatic**.
-3. **Tenant URL:** `https://cards.yourco.com/scim/v2`
-   **Secret Token:** the `SCIM_TOKEN` from your `.env`.
-4. **Test Connection**, then save. Under **Mappings**, keep the default user
-   attribute mappings (userName, name, emails, title, department, active).
-5. To route users to the right store, map a directory attribute to the SCIM
-   `costCenter` or `organization` field and set it to the store code (e.g.
-   `MW-DT`). OpenCard matches that against `Location.code`. If there's no match
-   it falls back to brand name, then to the first store, and an admin can
-   re-assign in one click.
-6. **Assign users/groups** to the app and turn provisioning **On**.
-
-When a user is assigned, Entra POSTs to `/scim/v2/Users` and OpenCard creates the
-User + Card. Deactivating/unassigning a user sets the card inactive (the public
-page returns 404).
-
-Endpoints implemented: `GET/POST /Users`, `GET/PUT/PATCH/DELETE /Users/:id`,
-`GET /ServiceProviderConfig`. Bearer-auth with `SCIM_TOKEN`.
-
-### On-prem Active Directory
-
-For on-prem AD, either (a) sync AD → Entra ID and use the SCIM path above
-(recommended for hybrid), or (b) run a scheduled LDAP→OpenCard sync job
-(roadmap, v1.1) that upserts users via the same logic. The provisioning code
-path in `src/routes/scim.ts` is reused for both.
-
-## Admin accounts
-
-Admin login is always a real, revocable, per-user account (email + password,
-scrypt-hashed, with optional TOTP MFA — required for platform/staff accounts).
-There is no static admin token. Bootstrap or recover an account from the box:
+**Admin accounts** are always real, revocable, per-user (email + password,
+scrypt-hashed, with TOTP MFA — required for platform/staff accounts). Bootstrap
+or recover one from the box:
 
 ```bash
 node dist/scripts/make-admin.js you@yourco.com "Your Name" [role]
 # default role: platform_owner. Prints a one-time password; change it after login.
 ```
 
-This requires shell access to the server, so a leaked token can't grant admin
-over the internet. For SSO, employees sign in at `/me` via Azure AD OIDC
-(`AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET`) or per-org SAML
-(below).
+**SCIM (Azure AD / Entra):** create a non-gallery Enterprise app →
+Provisioning → Automatic. Tenant URL `https://<host>/scim/v2`, secret token =
+`SCIM_TOKEN`. Map a directory attribute (e.g. `costCenter`) to the location code
+so users route to the right location; unmatched users fall back to brand, then
+the first location, and an admin can re-assign in one click. Deactivating a user
+sets their card inactive. Endpoints: `GET/POST /Users`,
+`GET/PUT/PATCH/DELETE /Users/:id`, `GET /ServiceProviderConfig` (bearer auth).
 
-## Optional SAML sign-in
-
-SAML is disabled by default. A super admin can turn it on at
-`/admin/integrations` after entering the IdP SSO URL, optional IdP issuer, and
-IdP signing certificate. The page shows the service provider Entity ID and
-Assertion Consumer Service URL to paste into the IdP. When enabled, `/me/login`
-offers SAML sign-in and maps the returned email address to either an admin
-account or the employee's card owner email.
+**SAML** is off by default; a super admin enables it per-org at
+`/admin/integrations` with the IdP SSO URL, issuer, and signing cert. **OIDC**
+(Azure AD) signs employees in at `/me` via `AZURE_TENANT_ID` /
+`AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET`.
 
 ## REST API
 
-Base URL `<BASE_URL>/api/v1`. Authenticate with `Authorization: Bearer <key>`.
-Create/revoke keys in **Admin → Integrations** (the raw key is shown once). The
-admin token also works as a bearer for convenience.
+Base URL `<BASE_URL>/api/v1`, `Authorization: Bearer <key>`. Create/revoke keys in
+**Admin → Integrations** (raw key shown once).
 
 ```
 GET    /api/v1/brands            GET /api/v1/brands/:id      POST /api/v1/brands
@@ -171,55 +170,61 @@ GET    /api/v1/leads?cardId=&since=
 GET    /api/v1/analytics?cardId=
 ```
 
-Card create/update accept JSON with `phones`/`emails`/`websites`/`socials` as
-arrays of objects (e.g. `[{"label":"Work","value":"+1 555 123 4567"}]`). Example:
-
-```bash
-curl -X POST <BASE_URL>/api/v1/cards \
-  -H "Authorization: Bearer oc_live_..." -H "Content-Type: application/json" \
-  -d '{"locationId":"...","firstName":"Jane","lastName":"Doe","title":"VP Sales",
-       "emails":[{"label":"Work","value":"jane@yourco.com"}],"ownerEmail":"jane@yourco.com"}'
-```
+Card create/update accept `phones`/`emails`/`websites`/`socials` as arrays of
+objects. Full reference: **[docs/API.md](./docs/API.md)**.
 
 ## Webhooks
 
-Subscribe URLs to events in **Admin → Integrations**. On each event we POST JSON:
-
-```json
-{ "event": "lead.captured", "createdAt": "2026-…Z", "data": { … } }
-```
-
-Events: `lead.captured`, `card.created`, `card.updated`, `card.deleted`.
-Headers include `X-OpenCard-Event` and `X-OpenCard-Signature: sha256=<hmac>` —
-verify by computing `HMAC-SHA256(rawBody, endpointSecret)` and comparing. Failed
-deliveries retry up to 3 times; recent delivery status is shown in the admin UI.
+Subscribe URLs to events in **Admin → Integrations**. Each delivery is a JSON POST
+with `X-OpenCard-Event` and `X-OpenCard-Signature: sha256=<hmac>` — verify with
+`HMAC-SHA256(rawBody, endpointSecret)`. Events: `lead.captured`, `card.created`,
+`card.updated`, `card.deleted`. Failed deliveries retry up to 3 times. Details:
+**[docs/WEBHOOKS.md](./docs/WEBHOOKS.md)**.
 
 ## Project layout
 
 ```
-prisma/schema.prisma   data model (Org→Brand→Location→Card, events, leads)
-prisma/seed.ts         demo brands/stores/cards
-src/server.ts          express bootstrap
-src/routes/cards.ts    public card page, vCard, QR, event + lead capture
-src/routes/admin.ts    admin CRUD for brands/stores/cards, analytics, leads
-src/routes/scim.ts     SCIM 2.0 provisioning for Entra/Azure AD
-src/views/             server-rendered HTML (card.ts, admin.ts, html.ts)
-src/vcard.ts           vCard 3.0 generation
-src/qr.ts              QR code generation
-src/public/styles.css  self-hosted styles (no CDN)
-docker-compose.yml     app + postgres
+prisma/schema.prisma      data model (Org→Brand→Location→Card, events, leads)
+prisma/seed.ts            demo brands/locations/cards
+src/server.ts             express bootstrap + tenant resolution
+src/routes/cards.ts       public card page, vCard, QR, event + lead capture
+src/routes/signup.ts      self-serve signup (magic link + beta access gate)
+src/routes/api.ts         REST API v1
+src/routes/scim.ts        SCIM 2.0 provisioning for Entra/Azure AD
+src/routes/admin.ts       admin router (assembles the groups below)
+src/routes/admin/*.ts     admin route groups (auth, console, cards, branding,
+                          analytics, leads, integrations, accounts, billing)
+src/views/marketing.ts    public landing page
+src/views/card.ts         public card rendering
+src/views/legal.ts        Terms of Service + Privacy Policy
+src/plans.ts              plan tiers + feature/limit definitions
+src/entitlements.ts       plan enforcement (features + limits)
+src/qr-style.ts           branded QR SVG engine (colors, gradients, logo)
+src/qr-render.ts          QR rasterization (SVG → PNG via sharp)
+src/geo.ts                offline IP → city-level geolocation
+src/stripe.ts             billing / subscriptions
+src/db.ts, db-bootstrap.ts  Prisma client + least-privilege RLS role setup
+deploy/                   production Docker Compose, Caddy, backup + migration runbooks
 ```
 
-## Security checklist before going live
+## Security
 
-- Set strong random `SESSION_SECRET` and `SCIM_TOKEN`.
-- Set `APP_DB_PASSWORD` so the app runs under the least-privilege `opencard_app`
-  role and Postgres row-level security is enforced (the app refuses to start in
-  production without it).
-- Terminate TLS in front of the app (reverse proxy) and set `BASE_URL` to https.
-- Put `/admin` behind SSO/IdP (see above).
-- Back up the Postgres volume (`db_data`).
+- Strong random `SESSION_SECRET` (also encrypts CRM tokens + webhook secrets at
+  rest) and `SCIM_TOKEN`.
+- `APP_DB_PASSWORD` set so the app runs as the least-privilege `opencard_app` role
+  with Postgres row-level security enforced (required in production).
+- TLS terminated by Caddy; `BASE_URL` on https; `/admin` behind MFA (and SSO where
+  configured).
+- Outbound integration URLs are SSRF-guarded; audit logs record
+  security-relevant actions.
+- Nightly Postgres + uploads backups, offsite (see `deploy/backup.sh` and
+  `deploy/MIGRATION.md`).
 
-## Roadmap
+## Docs & roadmap
 
-The current roadmap is tracked in **[docs/ROADMAP.md](./docs/ROADMAP.md)**.
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** — system design and data model.
+- **[docs/API.md](./docs/API.md)**, **[docs/WEBHOOKS.md](./docs/WEBHOOKS.md)**,
+  **[docs/COMPLIANCE.md](./docs/COMPLIANCE.md)**.
+- **[docs/ROADMAP.md](./docs/ROADMAP.md)** — product roadmap.
+- **[deploy/MIGRATION.md](./deploy/MIGRATION.md)** — restore / server-move runbook.
+</content>

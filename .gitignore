@@ -1,10 +1,37 @@
-node_modules
-dist
-.test-build
+# Dependencies & build output
+node_modules/
+dist/
+.test-build/
+coverage/
+
+# Environment & secrets (never commit)
 .env
 *.log
-
-# Deploy secrets / local config (never commit)
+npm-debug.log*
 deploy/.env
+deploy/backup.env
 deploy/certs/
 deploy/deploy.config
+
+# Runtime user uploads (served from a Docker volume in production)
+/uploads/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
