@@ -173,9 +173,9 @@ technical groundwork.)
    - Self-service signup at `/signup` creates an org + org_owner + first brand +
      rooftop; gated by `SIGNUPS_ENABLED` (on in dev, off in prod by default).
      **(done)**
-   - Auth: MFA is now optional (password-first; enrol/disable under
-     Admin -> Security); the ADMIN_TOKEN stays as break-glass platform access.
-     Redesigned login page. **(done)**
+   - Auth: per-user admin accounts (no static ADMIN_TOKEN); MFA self-service
+     under Admin -> Security and required for platform/staff accounts.
+     Shell-only bootstrap via `make-admin.js`. Redesigned login page. **(done)**
    - Pure authorization + host-addressing logic unit-tested. DB-backed
      cross-tenant integration tests run in CI (the local `npm test` has no DB).
      **(remaining)**

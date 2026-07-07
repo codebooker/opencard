@@ -9,6 +9,7 @@ import { campaignRouter } from "./routes/campaigns";
 import { runDueDigests } from "./reports";
 import { pruneExpiredLeads } from "./retention-prune";
 import { pruneSamlRequestIds } from "./saml-cache";
+import { withAdvisoryLock, HOURLY_TICK_LOCK } from "./joblock";
 import { adminRouter } from "./routes/admin";
 import { scimRouter } from "./routes/scim";
 import { selfRouter } from "./routes/selfservice";
@@ -189,11 +190,15 @@ app.listen(config.port, () => {
   console.log(`OpenCard listening on ${config.baseUrl} (port ${config.port})`);
 });
 
-// Manager-digest scheduler: hourly tick sends weekly digests to orgs that are due.
+// Hourly maintenance: manager digests + retention/SAML pruning. Guarded by a
+// Postgres advisory lock so with two web instances only ONE runs the tick —
+// no duplicate digest emails or double prunes (CQ-09).
 if (process.env.NODE_ENV !== "test") {
-  setInterval(() => {
-    runDueDigests().catch((e) => console.log(JSON.stringify({ msg: "digest-tick-error", error: String(e?.message || e).slice(0, 200) })));
-    pruneExpiredLeads().catch((e) => console.log(JSON.stringify({ msg: "retention-tick-error", error: String(e?.message || e).slice(0, 200) })));
-    pruneSamlRequestIds().catch((e) => console.log(JSON.stringify({ msg: "saml-prune-error", error: String(e?.message || e).slice(0, 200) })));
-  }, 60 * 60 * 1000);
+  const tick = () =>
+    withAdvisoryLock(HOURLY_TICK_LOCK, async () => {
+      await runDueDigests().catch((e) => console.log(JSON.stringify({ msg: "digest-tick-error", error: String(e?.message || e).slice(0, 200) })));
+      await pruneExpiredLeads().catch((e) => console.log(JSON.stringify({ msg: "retention-tick-error", error: String(e?.message || e).slice(0, 200) })));
+      await pruneSamlRequestIds().catch((e) => console.log(JSON.stringify({ msg: "saml-prune-error", error: String(e?.message || e).slice(0, 200) })));
+    });
+  setInterval(() => void tick(), 60 * 60 * 1000);
 }

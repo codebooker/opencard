@@ -89,6 +89,7 @@ docker exec -i opencard-db-1 pg_restore -U opencard -d opencard --clean --if-exi
 - Turn on DB-enforced RLS in production (`APP_DB_PASSWORD`).
 - Automate off-box backups + a documented, tested restore runbook.
 - Add dependency/vulnerability scanning to CI.
-- Rotate the shared PAT / origin-cert keys / break-glass `ADMIN_TOKEN` and store
-  them in a secrets manager.
+- Rotate shared secrets (`SESSION_SECRET`, `SCIM_TOKEN`, `APP_DB_PASSWORD`,
+  origin-cert keys) and store them in a secrets manager. Admin access is
+  per-user (no static token); deactivate departed staff accounts.
 - Formalize an asset inventory, risk register, and access-review cadence.

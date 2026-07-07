@@ -17,14 +17,14 @@ Every request must send a bearer token:
 Authorization: Bearer <token>
 ```
 
-Two kinds of token are accepted:
+Authenticate with a revocable API key:
 
 | Token | How to get it | Use |
 |-------|---------------|-----|
-| **API key** (`oc_live_…`) | Admin → **Integrations** → *Create API key* (super admin). Shown once; only a hash is stored. | Recommended for integrations. Revocable. |
-| **Admin token** (`ADMIN_TOKEN`) | The deployment's `ADMIN_TOKEN` env var. | Convenience / break-glass. |
+| **API key** (`oc_live_…`) | Admin → **Integrations** → *Create API key* (super admin). Shown once; only a hash is stored, scoped to that key's org + granted scopes. | The only accepted API credential. Revocable. |
 
-Requests without a valid token receive `401`.
+There is no static admin/master token. Requests without a valid API key
+receive `401`.
 
 ```bash
 curl https://cards.yourco.com/api/v1/brands \

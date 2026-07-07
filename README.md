@@ -34,8 +34,9 @@ real estate brokerages, insurance agencies, and other multi-location teams.
 
 ```bash
 cp .env.example .env
-# edit .env: set ADMIN_TOKEN and SCIM_TOKEN to long random strings,
-# and BASE_URL to the public URL (e.g. https://cards.yourco.com)
+# edit .env: set SESSION_SECRET and SCIM_TOKEN to long random strings
+# (openssl rand -hex 32), and BASE_URL to the public URL
+# (e.g. https://cards.yourco.com)
 
 docker compose up --build
 ```
@@ -43,7 +44,16 @@ docker compose up --build
 This starts Postgres + the app, applies the schema, seeds demo data, and serves
 on `http://localhost:3000`.
 
-- Admin: <http://localhost:3000/admin> → sign in with your `ADMIN_TOKEN`.
+Create your first admin account (there is no static admin token — admin login
+is a real, revocable per-user account):
+
+```bash
+# once the app container is up
+docker compose exec web node dist/scripts/make-admin.js you@yourco.com "Your Name"
+# prints a one-time password; sign in at /admin/login and change it
+```
+
+- Admin: <http://localhost:3000/admin/login> → sign in with the account above.
 - Demo cards: `/c/john-smith`, `/c/james-chen`, `/c/max-mcgonagall`.
 
 ## Local dev (without Docker)
@@ -120,13 +130,21 @@ For on-prem AD, either (a) sync AD → Entra ID and use the SCIM path above
 (roadmap, v1.1) that upserts users via the same logic. The provisioning code
 path in `src/routes/scim.ts` is reused for both.
 
-## Admin SSO (production)
+## Admin accounts
 
-The default admin login is a shared `ADMIN_TOKEN` (fine for first-run / offline /
-air-gapped). For production, put the `/admin` routes behind Azure AD OIDC:
-set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` and front the app
-with your identity-aware proxy, or extend `src/middleware/auth.ts` with an OIDC
-flow (`openid-client`). The token path remains as a break-glass fallback.
+Admin login is always a real, revocable, per-user account (email + password,
+scrypt-hashed, with optional TOTP MFA — required for platform/staff accounts).
+There is no static admin token. Bootstrap or recover an account from the box:
+
+```bash
+node dist/scripts/make-admin.js you@yourco.com "Your Name" [role]
+# default role: platform_owner. Prints a one-time password; change it after login.
+```
+
+This requires shell access to the server, so a leaked token can't grant admin
+over the internet. For SSO, employees sign in at `/me` via Azure AD OIDC
+(`AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET`) or per-org SAML
+(below).
 
 ## Optional SAML sign-in
 
@@ -194,7 +212,10 @@ docker-compose.yml     app + postgres
 
 ## Security checklist before going live
 
-- Set strong random `ADMIN_TOKEN` and `SCIM_TOKEN`.
+- Set strong random `SESSION_SECRET` and `SCIM_TOKEN`.
+- Set `APP_DB_PASSWORD` so the app runs under the least-privilege `opencard_app`
+  role and Postgres row-level security is enforced (the app refuses to start in
+  production without it).
 - Terminate TLS in front of the app (reverse proxy) and set `BASE_URL` to https.
 - Put `/admin` behind SSO/IdP (see above).
 - Back up the Postgres volume (`db_data`).
