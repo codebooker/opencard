@@ -8,6 +8,7 @@ import { assetsRouter } from "./routes/assets";
 import { campaignRouter } from "./routes/campaigns";
 import { runDueDigests } from "./reports";
 import { pruneExpiredLeads } from "./retention-prune";
+import { pruneSamlRequestIds } from "./saml-cache";
 import { adminRouter } from "./routes/admin";
 import { scimRouter } from "./routes/scim";
 import { selfRouter } from "./routes/selfservice";
@@ -193,5 +194,6 @@ if (process.env.NODE_ENV !== "test") {
   setInterval(() => {
     runDueDigests().catch((e) => console.log(JSON.stringify({ msg: "digest-tick-error", error: String(e?.message || e).slice(0, 200) })));
     pruneExpiredLeads().catch((e) => console.log(JSON.stringify({ msg: "retention-tick-error", error: String(e?.message || e).slice(0, 200) })));
+    pruneSamlRequestIds().catch((e) => console.log(JSON.stringify({ msg: "saml-prune-error", error: String(e?.message || e).slice(0, 200) })));
   }, 60 * 60 * 1000);
 }

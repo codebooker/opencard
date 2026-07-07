@@ -1,6 +1,7 @@
 import { SAML, ValidateInResponseTo, Profile } from "@node-saml/node-saml";
 import { prisma } from "./db";
 import { config } from "./config";
+import { DbSamlCacheProvider } from "./saml-cache";
 import {
   SamlSettings,
   canonicalHost,
@@ -56,10 +57,13 @@ export function buildSamlForOrg(settings: SamlSettings, host: string): SAML {
     maxAssertionAgeMs: 5 * 60 * 1000,
     wantAssertionsSigned: true,
     wantAuthnResponseSigned: false,
-    // Stateless per-request SAML instances can't share an InResponseTo cache, so
-    // we don't require it. Replay/injection protection still comes from assertion
-    // signing, audience restriction, and assertion-age limits above.
-    validateInResponseTo: ValidateInResponseTo.never,
+    // Require InResponseTo and validate it against a DB-backed, single-use cache
+    // of outbound AuthnRequest IDs (see saml-cache.ts). This gives replay
+    // protection on top of assertion signing / audience / age checks, and works
+    // across web instances. `always` also rejects unsolicited (IdP-initiated)
+    // responses, which carry no InResponseTo — OpenCard is SP-initiated only.
+    validateInResponseTo: ValidateInResponseTo.always,
+    cacheProvider: new DbSamlCacheProvider(),
   });
 }
 

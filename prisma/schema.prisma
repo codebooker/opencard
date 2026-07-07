@@ -11,9 +11,9 @@ datasource db {
 // Platform-wide settings, editable by OpenCard staff in the UI (no code
 // changes / redeploys). Single row with a fixed id.
 model PlatformConfig {
-  id              String @id @default("platform")
-  signupPlan      String @default("individual") // plan tier for self-service signups
-  signupTrialDays Int    @default(30) // trial length for self-service signups
+  id               String @id @default("platform")
+  signupPlan       String @default("individual") // plan tier for self-service signups
+  signupTrialDays  Int    @default(30) // trial length for self-service signups
   // Private-beta gate: when set, public signup requires this code/phrase.
   signupAccessCode String @default("")
 }
@@ -29,8 +29,8 @@ model Org {
   // owner confirms their address. Staff-created clients are verified at
   // creation; existing orgs are backfilled by the migration.
   // Terms-of-service acceptance recorded at self-service signup.
-  tosAcceptedAt        DateTime?
-  tosVersion           String?
+  tosAcceptedAt         DateTime?
+  tosVersion            String?
   ownerVerifiedAt       DateTime?
   // First-run onboarding checklist on the dashboard; set when dismissed.
   onboardingDismissedAt DateTime?
@@ -661,6 +661,20 @@ model ApiKey {
 // Per-org SAML SSO. One config per org (keyed by orgId). The SP entityID and ACS
 // URL are DERIVED from the org's canonical host (subdomain/custom domain), not
 // stored — so each tenant's IdP posts back to its own host.
+// Outbound SAML AuthnRequest IDs (SEC-07). node-saml stores the request ID here
+// when we redirect the user to the IdP; at the ACS we require the response's
+// InResponseTo to match an un-consumed, unexpired id, then delete it. This gives
+// both InResponseTo validation and single-use replay protection, shared across
+// web instances (the default in-memory cache can't). SP-initiated only:
+// unsolicited (IdP-initiated) responses have no InResponseTo and are rejected.
+model SamlRequestId {
+  id        String   @id // the SAML AuthnRequest ID (the cache key)
+  value     String // opaque timestamp string node-saml stores
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 model SamlConfig {
   id         String   @id @default(cuid())
   org        Org      @relation(fields: [orgId], references: [id])
