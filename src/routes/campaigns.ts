@@ -1,24 +1,26 @@
-import { Router } from "express";
+import { Router, Request } from "express";
 import { prisma, runWithOrg } from "../db";
 import { config } from "../config";
 import { campaignRedirectUrl, normalizeCampaignCode } from "../marketing";
 import { qrSvg, resolveQrDesign } from "../qr-style";
 import { geoFields } from "../geo";
+import { orgIdForHost, requestHost } from "../tenant-resolver";
 
 // Public campaign short links: /k/:code -> 302 to the landing URL with the
 // campaign's UTM params appended, counting the click (with rough location).
 export const campaignRouter = Router();
 
-async function loadCampaign(rawCode: string) {
+async function loadCampaign(rawCode: string, orgId: string | null) {
   const code = normalizeCampaignCode(rawCode);
   if (!code) return null;
   return prisma.campaign.findFirst({
-    where: { code, org: { suspended: false, ownerVerifiedAt: { not: null } } },
+    where: { code, ...(orgId ? { orgId } : {}) },
   });
 }
+const hostOrg = (req: Request) => orgIdForHost(requestHost(req));
 
 campaignRouter.get("/:code", async (req, res) => {
-  const c = await loadCampaign(req.params.code);
+  const c = await loadCampaign(req.params.code, await hostOrg(req));
   if (!c || !c.active) return res.status(404).send("Campaign link not found.");
   const ip = req.ip || req.socket.remoteAddress || "";
   runWithOrg(c.orgId, async (db) => {
@@ -45,7 +47,7 @@ campaignRouter.get("/:code", async (req, res) => {
 
 // Styled QR SVG for the campaign short link.
 campaignRouter.get("/:code/qr.svg", async (req, res) => {
-  const c = await loadCampaign(req.params.code);
+  const c = await loadCampaign(req.params.code, await hostOrg(req));
   if (!c || !c.active) return res.status(404).send("Not found");
   const design = resolveQrDesign(c.qrDesign, null, null);
   const size = parseInt(String(req.query.size || ""), 10) || 600;

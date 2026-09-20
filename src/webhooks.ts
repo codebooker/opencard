@@ -1,7 +1,7 @@
 import { prisma } from "./db";
 import { config } from "./config";
 import { signBody, buildEnvelope, deliveryHeaders, truncate, pickHeaders } from "./webhook-core";
-import { assertPublicUrl } from "./ssrf";
+import { safeFetch } from "./ssrf";
 import { readSecret } from "./secretbox";
 
 export const WEBHOOK_EVENTS = [
@@ -47,23 +47,13 @@ async function deliver(
   const signingSecret = readSecret(ep.secret) || ep.secret;
   const signature = signBody(signingSecret, body);
   const started = Date.now();
-  // Re-check at delivery time: a hostname that passed config-time validation
-  // could resolve to a private address later (DNS rebinding).
-  const safe = await assertPublicUrl(ep.url);
-  if (!safe.ok) {
-    await logDelivery({
-      ep, event, attempt, success: false, statusCode: null, durationMs: 0,
-      requestBody: body, signature, responseHeaders: null, responseBody: null,
-      error: `blocked: ${safe.error || "unsafe URL"}`,
-    });
-    return;
-  }
   try {
-    const resp = await fetch(ep.url, {
+    const resp = await safeFetch(ep.url, {
       method: "POST",
       headers: deliveryHeaders(event, signature),
       body,
       signal: AbortSignal.timeout(8000),
+      maxResponseBytes: 64_000,
     });
     const responseBody = truncate(await resp.text().catch(() => ""), 2000);
     await logDelivery({

@@ -2,7 +2,7 @@ import { prisma } from "./db";
 import { buildCrmPayload, nextSyncStatus, httpOk } from "./crmsync";
 import { hubspotProperties, hubspotEmail, HUBSPOT_CONTACTS_URL, hubspotContactByEmailUrl } from "./hubspot";
 import { salesforceBody, salesforceUrl } from "./salesforce";
-import { assertPublicUrl } from "./ssrf";
+import { safeFetch } from "./ssrf";
 import { readSecret } from "./secretbox";
 
 // DB + HTTP side of CRM sync (the pure mapping/state logic lives in crmsync.ts).
@@ -18,11 +18,12 @@ async function httpSend(
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
       method,
       headers: { "content-type": "application/json", ...extraHeaders },
       body: JSON.stringify(body),
       signal: ac.signal,
+      maxResponseBytes: 64_000,
     });
     return { code: res.status, error: httpOk(res.status) ? null : `HTTP ${res.status}` };
   } catch (e: any) {
@@ -37,11 +38,12 @@ async function httpForm(url: string, body: string, timeoutMs = 8000): Promise<{ 
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
       signal: ac.signal,
+      maxResponseBytes: 64_000,
     });
     return { code: res.status, error: httpOk(res.status) ? null : `HTTP ${res.status}` };
   } catch (e: any) {
@@ -73,14 +75,8 @@ async function attempt(
   const token = readSecret(integration.token);
   if (integration.provider === "zapier") {
     if (integration.endpoint) {
-      // Tenant-supplied URL — SSRF guard at send time (defeats DNS rebinding).
-      const safe = await assertPublicUrl(integration.endpoint);
-      if (!safe.ok) {
-        error = `blocked: ${safe.error || "unsafe URL"}`;
-      } else {
-        const payload = buildCrmPayload(lead, ctx, integration.fieldMap);
-        ({ code, error } = await httpSend(integration.endpoint, "POST", payload));
-      }
+      const payload = buildCrmPayload(lead, ctx, integration.fieldMap);
+      ({ code, error } = await httpSend(integration.endpoint, "POST", payload));
     } else {
       error = "no webhook URL configured";
     }
@@ -106,13 +102,8 @@ async function attempt(
       error = "no Salesforce Org ID (oid) configured";
     } else {
       const sfTarget = salesforceUrl(integration.endpoint);
-      const safe = await assertPublicUrl(sfTarget);
-      if (!safe.ok) {
-        error = `blocked: ${safe.error || "unsafe URL"}`;
-      } else {
-        const body = salesforceBody(lead, token, integration.fieldMap);
-        ({ code, error } = await httpForm(sfTarget, body));
-      }
+      const body = salesforceBody(lead, token, integration.fieldMap);
+      ({ code, error } = await httpForm(sfTarget, body));
     }
   } else {
     error = `provider "${integration.provider}" not yet supported`;

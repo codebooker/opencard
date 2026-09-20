@@ -9,6 +9,7 @@
  * local/dev setups working without the dedicated role.
  */
 import { prisma, APP_DB_ROLE } from "./db";
+import { TENANT_TABLES } from "./tenant-tables";
 
 async function main() {
   const pw = process.env.APP_DB_PASSWORD;
@@ -24,6 +25,9 @@ async function main() {
   }
 
   const db = process.env.POSTGRES_DB || "opencard";
+  if (!/^[A-Za-z0-9_-]+$/.test(db)) {
+    throw new Error("POSTGRES_DB must contain only [A-Za-z0-9_-] (it is interpolated into role DDL).");
+  }
 
   // Create the role if absent (LOGIN, but explicitly NOT superuser and NOT
   // allowed to bypass RLS), then (re)set its password and grants every boot so
@@ -41,21 +45,26 @@ async function main() {
     `ALTER ROLE "${APP_DB_ROLE}" WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD '${pw}';`
   );
 
-  // Least-privilege grants: connect, use the schema, and CRUD on existing tables
-  // and sequences. No DDL, no ownership. ALTER DEFAULT PRIVILEGES covers tables
-  // created by future migrations.
+  // Start from no table/sequence access on every boot, then allow CRUD only on
+  // the explicitly RLS-protected tenant tables. This prevents a new migration
+  // from accidentally exposing auth, platform, or operational tables merely by
+  // creating them. No DDL, ownership, TRUNCATE, REFERENCES, or TRIGGER grants.
+  const tenantTableSql = TENANT_TABLES.map((table) => `"${table}"`).join(", ");
   for (const stmt of [
     `GRANT CONNECT ON DATABASE "${db}" TO "${APP_DB_ROLE}";`,
     `GRANT USAGE ON SCHEMA public TO "${APP_DB_ROLE}";`,
-    `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${APP_DB_ROLE}";`,
-    `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${APP_DB_ROLE}";`,
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${APP_DB_ROLE}";`,
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO "${APP_DB_ROLE}";`,
+    `REVOKE ALL ON ALL TABLES IN SCHEMA public FROM "${APP_DB_ROLE}";`,
+    `REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM "${APP_DB_ROLE}";`,
+    `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM "${APP_DB_ROLE}";`,
+    `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM "${APP_DB_ROLE}";`,
+    `GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ${tenantTableSql} TO "${APP_DB_ROLE}";`,
   ]) {
     await prisma.$executeRawUnsafe(stmt);
   }
 
-  console.log(`db-bootstrap: role "${APP_DB_ROLE}" is provisioned with least-privilege grants (RLS enforced).`);
+  console.log(
+    `db-bootstrap: role "${APP_DB_ROLE}" is provisioned for ${TENANT_TABLES.length} RLS-protected tenant tables.`
+  );
 }
 
 main()

@@ -1,28 +1,16 @@
 import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
-const dealershipTerminology = {
-  brandSingular: "Brand",
-  brandPlural: "Brands",
-  locationSingular: "Rooftop",
-  locationPlural: "Rooftops",
-  locationCodeLabel: "Rooftop code",
-  cardSingular: "Card",
-  cardPlural: "Cards",
-  leadSingular: "Customer lead",
-  leadPlural: "Customer leads",
-};
-
 async function main() {
   // Demo/dev data (brands, cards, sample admins) is only seeded when SEED_DEMO=1.
-  // Production gets a single clean bootstrap org so the platform can function
-  // (defaultOrgId, admin-token login) while real customers self-sign-up.
+  // Production gets one clean workspace. Demo data is opt-in only.
   const seedDemo = process.env.SEED_DEMO === "1";
 
   if (!seedDemo) {
-    const existing = await prisma.org.findFirst();
-    if (!existing) {
-      await prisma.org.create({ data: { name: "OpenCard", vertical: "general" } });
+    const existing = await prisma.org.findMany({ take: 2 });
+    if (existing.length > 1) throw new Error("This installation contains multiple workspaces. Export/migrate them before running single-company OpenCard; no data was deleted.");
+    if (!existing.length) {
+      await prisma.org.create({ data: { name: process.env.COMPANY_NAME?.trim() || "My Company", vertical: "general" } });
       console.log("Seed: created clean bootstrap org (SEED_DEMO not set).");
     } else {
       console.log("Seed: org exists, nothing to do (SEED_DEMO not set).");
@@ -30,14 +18,12 @@ async function main() {
     return;
   }
 
-  // Idempotent backfill so self-service works on pre-existing demo data too.
-  const demoOwners: [string, string][] = [
-    ["john-smith", "john.smith@maplewoodrealestate.ca"],
-    ["james-chen", "james.chen@maplewoodrealestate.ca"],
-    ["max-mcgonagall", "max.m@briskmotors.com"],
-  ];
-  for (const [slug, ownerEmail] of demoOwners) {
-    await prisma.card.updateMany({ where: { slug, ownerEmail: null }, data: { ownerEmail } });
+  // Never insert demo people, accounts, or edits into an existing workspace.
+  // This also makes container restarts with SEED_DEMO=1 idempotent.
+  const existingOrg = await prisma.org.findFirst({ orderBy: { createdAt: "asc" } });
+  if (existingOrg) {
+    console.log("Seed: workspace already exists, no sample content inserted.");
+    return;
   }
 
   // Demo admin accounts (SSO-only; sign in via dev-login to test each role).
@@ -62,22 +48,14 @@ async function main() {
     if (mwDt) await ensureAdmin(orgId, "storeadmin@maplewood.ca", "location_admin", { locationId: mwDt.id });
   }
 
-  const existingOrg = await prisma.org.findFirst({ orderBy: { createdAt: "asc" } });
-  if (existingOrg) {
-    await prisma.org.updateMany({
-      where: { vertical: "general" },
-      data: { vertical: "dealership", terminology: dealershipTerminology },
-    });
-    await seedDemoAdmins(existingOrg.id);
-    console.log("Seed: org already exists, skipping (owner emails + demo admins backfilled).");
-    return;
-  }
-
   const org = await prisma.org.create({
-    data: { name: "Demo Dealer Group", vertical: "dealership", terminology: dealershipTerminology },
+    data: {
+      name: "Maplewood Group",
+      vertical: "general",
+    },
   });
 
-  // ---- Brand 1: Maplewood Real Estate (green, classic) ----
+  // ---- Brand 1: Maplewood Real Estate (green, wave) ----
   const maplewood = await prisma.brand.create({
     data: {
       orgId: org.id,
@@ -102,7 +80,7 @@ async function main() {
       orgId: org.id,
       name: "North Branch",
       code: "MW-N",
-      primaryColor: "#2563eb", // this store uses a blue accent instead of green
+      primaryColor: "#2563eb", // this office uses a blue accent instead of green
       address: { line1: "55 Yonge St", city: "Toronto", region: "ON", postal: "M2N 5V7", country: "Canada" },
     },
   });
@@ -146,52 +124,50 @@ async function main() {
     },
   });
 
-  // ---- Brand 2: Brisk Motors (purple, banner) — different design + logo ----
-  const brisk = await prisma.brand.create({
+  // ---- Brand 2: Maplewood Commercial — a related brand with its own design ----
+  const commercial = await prisma.brand.create({
     data: {
       orgId: org.id,
-      name: "Brisk Motors",
+      name: "Maplewood Commercial",
       primaryColor: "#6d5bd0",
       layout: "banner",
     },
   });
-  const briskHQ = await prisma.location.create({
+  const commercialOffice = await prisma.location.create({
     data: {
-      brandId: brisk.id,
+      brandId: commercial.id,
       orgId: org.id,
-      name: "HQ Showroom",
-      code: "BM-HQ",
-      address: { line1: "1 Speedway Blvd", city: "Austin", region: "TX", postal: "78701", country: "USA" },
+      name: "Commercial Office",
+      code: "MW-COM",
+      address: { line1: "200 Bay St", city: "Toronto", region: "ON", postal: "M5J 2J2", country: "Canada" },
     },
   });
   await prisma.card.create({
     data: {
-      locationId: briskHQ.id,
+      locationId: commercialOffice.id,
       orgId: org.id,
       slug: "max-mcgonagall",
-      ownerEmail: "max.m@briskmotors.com",
+      ownerEmail: "max.m@maplewoodrealestate.ca",
       firstName: "Max",
       lastName: "McGonagall",
       pronouns: "he/him",
-      title: "Chief Sales Officer",
-      company: "Brisk Motors",
-      bio: "I drive global sales growth and align revenue goals with company vision.",
-      phones: [{ label: "Personal", value: "+1 911 397 4687" }],
-      emails: [{ label: "Personal", value: "max.m@briskmotors.com" }],
-      websites: [{ label: "Work", value: "https://www.briskmotors.com" }],
+      title: "Commercial Leasing Director",
+      company: "Maplewood Commercial",
+      bio: "Helping businesses find practical spaces to grow.",
+      phones: [{ label: "Work", value: "+1 555 397 4687" }],
+      emails: [{ label: "Work", value: "max.m@maplewoodrealestate.ca" }],
+      websites: [{ label: "Company", value: "https://maplewoodrealestate.ca" }],
       socials: [
-        { type: "facebook", value: "https://facebook.com/briskmotors" },
-        { type: "twitter", value: "https://twitter.com/briskmotors" },
-        { type: "instagram", value: "https://instagram.com/briskmotors" },
+        { type: "linkedin", value: "https://linkedin.com/in/maxmcgonagall" },
       ],
     },
   });
 
   await seedDemoAdmins(org.id);
 
-  console.log("Seed complete: 1 org, 2 brands, 3 stores, 3 cards.");
-  console.log("  Maplewood: /c/john-smith (green), /c/james-chen (north store, blue accent)");
-  console.log("  Brisk Motors: /c/max-mcgonagall (purple, banner layout)");
+  console.log("Seed complete: 1 workspace, 2 related brands, 3 locations, 3 cards.");
+  console.log("  Maplewood Real Estate: /c/john-smith (green), /c/james-chen (north office, blue accent)");
+  console.log("  Maplewood Commercial: /c/max-mcgonagall (purple, banner layout)");
 }
 
 main()

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateOutboundUrl, assertPublicUrl } from "./ssrf";
+import { validateOutboundUrl, assertPublicUrl, safeFetch, OutboundRequestError } from "./ssrf";
 
 test("validateOutboundUrl requires https", () => {
   assert.equal(validateOutboundUrl("http://example.com/hook").ok, false);
@@ -48,4 +48,9 @@ test("assertPublicUrl rejects a hostname that resolves to loopback", async () =>
 test("assertPublicUrl passes a public IP literal without DNS", async () => {
   const r = await assertPublicUrl("https://8.8.8.8/hook");
   assert.equal(r.ok, true);
+  assert.deepEqual(r.addresses, [{ address: "8.8.8.8", family: 4 }]);
+});
+
+test("safeFetch rejects an unsafe destination before opening a request", async () => {
+  await assert.rejects(() => safeFetch("https://127.0.0.1/private"), OutboundRequestError);
 });

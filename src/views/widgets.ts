@@ -24,9 +24,9 @@ export function socialOptions(selected: string): string {
 
 export function socialRow(type = "", value = ""): string {
   return `<div class="social-row">
-    <select class="social-type">${socialOptions(type || "linkedin")}</select>
-    <input class="social-url" value="${esc(value)}" placeholder="https://..." />
-    <button type="button" class="social-remove btn secondary" title="Remove">✕</button>
+    <select class="social-type" aria-label="Social network">${socialOptions(type || "linkedin")}</select>
+    <input class="social-url" aria-label="Social profile URL" value="${esc(value)}" placeholder="https://..." />
+    <button type="button" class="social-remove btn secondary" title="Remove" aria-label="Remove social link">✕</button>
   </div>`;
 }
 
@@ -68,6 +68,7 @@ export function photoField(currentUrl?: string | null): string {
           }</p>`
         : ""
     }
+    <label for="photoFile">Upload a photo</label>
     <input type="file" id="photoFile" name="photoFile" accept="image/*" />
     <div id="cropper" class="cropper" hidden>
       <div class="crop-stage" id="cropStage"><img id="cropImg" alt="" draggable="false" /></div>
@@ -82,7 +83,7 @@ export function photoField(currentUrl?: string | null): string {
       </div>
       <p class="muted">Drag the photo to reposition, or use the arrows. Saved as a square avatar.</p>
     </div>
-    <label>…or paste a photo URL</label><input name="photoUrl" value="${esc(currentUrl || "")}" />`;
+    <label for="photoUrl">…or paste a photo URL</label><input id="photoUrl" name="photoUrl" value="${esc(currentUrl || "")}" />`;
 }
 
 export function labeledField(label: string, name: string, items: unknown, placeholder: string): string {
@@ -104,11 +105,11 @@ function labelOptions(options: string[], selected: string): string {
     .join("");
 }
 
-function labeledRow(options: string[], label: string, value: string, placeholder: string): string {
+function labeledRow(options: string[], label: string, value: string, placeholder: string, title: string): string {
   return `<div class="lr-row">
-    <select class="lr-label">${labelOptions(options, label)}</select>
-    <input class="lr-value" value="${esc(value)}" placeholder="${esc(placeholder)}" />
-    <button type="button" class="lr-remove btn secondary" title="Remove">✕</button>
+    <select class="lr-label" aria-label="${esc(title)} label">${labelOptions(options, label)}</select>
+    <input class="lr-value" aria-label="${esc(title)} value" value="${esc(value)}" placeholder="${esc(placeholder)}" />
+    <button type="button" class="lr-remove btn secondary" title="Remove" aria-label="Remove ${esc(title.toLowerCase())} entry">✕</button>
   </div>`;
 }
 
@@ -124,8 +125,8 @@ export function labeledRowsField(opts: {
   return `<label>${esc(opts.title)}</label>
     <div class="labeled-rows" data-name="${esc(opts.name)}" data-options="${esc(
     JSON.stringify(opts.options)
-  )}" data-placeholder="${esc(opts.placeholder)}">
-      ${rows.map((i) => labeledRow(opts.options, i.label, i.value, opts.placeholder)).join("")}
+  )}" data-placeholder="${esc(opts.placeholder)}" data-label="${esc(opts.title)}">
+      ${rows.map((i) => labeledRow(opts.options, i.label, i.value, opts.placeholder, opts.title)).join("")}
     </div>
     <button type="button" class="lr-add btn secondary" data-for="${esc(opts.name)}">+ Add ${esc(
     opts.title.toLowerCase()
@@ -243,9 +244,9 @@ export function socialsScript(): string {
     });
     addBtn.addEventListener('click', function(){
       var div=document.createElement('div'); div.className='social-row';
-      div.innerHTML='<select class="social-type">'+options()+'</select>'+
-        '<input class="social-url" placeholder="https://..." />'+
-        '<button type="button" class="social-remove btn secondary" title="Remove">\\u2715</button>';
+      div.innerHTML='<select class="social-type" aria-label="Social network">'+options()+'</select>'+
+        '<input class="social-url" aria-label="Social profile URL" placeholder="https://..." />'+
+        '<button type="button" class="social-remove btn secondary" title="Remove" aria-label="Remove social link">\\u2715</button>';
       rows.appendChild(div); div.querySelector('.social-url').focus();
     });
     sync();
@@ -270,11 +271,14 @@ export function labeledRowsScript(): string {
       ta.value=lines.join('\\n');
     }
     function addRow(g){
-      var list=listOf(g), ph=g.getAttribute('data-placeholder')||'';
+      var list=listOf(g), ph=g.getAttribute('data-placeholder')||'', title=g.getAttribute('data-label')||'Contact';
       var div=document.createElement('div'); div.className='lr-row';
       div.innerHTML='<select class="lr-label">'+opts(list,list[0])+'</select>'+
         '<input class="lr-value" placeholder="'+ph+'" />'+
         '<button type="button" class="lr-remove btn secondary" title="Remove">\\u2715</button>';
+      div.querySelector('.lr-label').setAttribute('aria-label', title+' label');
+      div.querySelector('.lr-value').setAttribute('aria-label', title+' value');
+      div.querySelector('.lr-remove').setAttribute('aria-label', 'Remove '+title.toLowerCase()+' entry');
       g.appendChild(div); div.querySelector('.lr-value').focus();
     }
     var groups=document.querySelectorAll('.labeled-rows');
@@ -539,7 +543,7 @@ export function qrDesignControls(current: {
         </select>
         <label>Color</label><input type="color" name="qrFill" value="${esc(fill)}" />
         <label class="chk"><input type="checkbox" name="qrGradient" value="1" ${fill2 ? "checked" : ""} /> Gradient to second color</label>
-        <input type="color" name="qrFill2" value="${esc(fill2 || "#25D1B3")}" />
+        <label>Second color</label><input type="color" name="qrFill2" value="${esc(fill2 || "#25D1B3")}" />
         <label>Background</label><input type="color" name="qrBg" value="${esc(bg)}" />
         <label class="chk"><input type="checkbox" name="qrBgTransparent" value="1" ${transparent ? "checked" : ""} /> Transparent background</label>
         <label class="chk"><input type="checkbox" name="qrLogo" value="1" ${hasLogo ? "checked" : ""} ${brandLogoUrl ? "" : "disabled"} /> Brand logo in the middle${brandLogoUrl ? "" : " (upload a logo first)"}</label>

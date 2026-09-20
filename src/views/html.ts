@@ -26,7 +26,29 @@ export function esc(s: unknown): string {
 
 // Bump when styles.css changes so browsers/CDN refetch instead of serving a
 // stale cached copy (the stylesheet URL becomes a new cache key).
-export const ASSET_VER = "20260706a";
+export const ASSET_VER = "20260720c";
+
+// Older views place a visible <label> immediately before its control. Link
+// those pairs centrally so every form surface (admin, auth, signup and /me)
+// exposes the same accessible name a sighted user sees. Repeatable controls
+// with more than one input per row provide their own aria-labels.
+export const FORM_LABEL_SCRIPT = `<script>(function(){
+  var n = 0;
+  document.querySelectorAll('form label:not([for])').forEach(function(label){
+    if (label.querySelector('input,select,textarea')) return;
+    var node = label.nextElementSibling, control = null;
+    while (node && !node.matches('label,h1,h2,h3,h4,hr')) {
+      if (node.matches('input:not([type="hidden"]),select,textarea')) { control = node; break; }
+      var nested = node.querySelectorAll('input:not([type="hidden"]),select,textarea');
+      if (nested.length === 1) { control = nested[0]; break; }
+      if (nested.length > 1) break;
+      node = node.nextElementSibling;
+    }
+    if (!control) return;
+    if (!control.id) control.id = 'oc-field-' + (++n);
+    label.htmlFor = control.id;
+  });
+})();</script>`;
 
 export function page(opts: {
   title: string;
@@ -48,6 +70,8 @@ ${opts.head || ""}
 </head>
 <body class="${opts.bodyClass || ""}">
 ${opts.body}
+<footer class="oc-source-footer"><a href="${esc(config.sourceUrl)}" rel="noopener noreferrer">OpenCard source code</a> · AGPL-3.0</footer>
+${FORM_LABEL_SCRIPT}
 ${opts.noUserway ? "" : userwayScript()}
 </body>
 </html>`;

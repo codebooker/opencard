@@ -44,6 +44,7 @@ function shell(title: string, body: string): string {
     <main class="admin" style="max-width:820px">
       ${body}
     </main>`,
+    noUserway: true,
   });
 }
 

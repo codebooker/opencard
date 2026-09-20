@@ -1,7 +1,7 @@
 import { Request } from "express";
 import { prisma } from "./db";
 import { config } from "./config";
-import { verifyEmail } from "./selfauth";
+import { verifyEmployeeIdentity } from "./selfauth";
 import { findSession, SESSION_COOKIE } from "./account";
 import { defaultOrgId } from "./tenant";
 import { Role, ROLE_LABELS, roleFlags } from "./roles";
@@ -21,8 +21,7 @@ export interface AdminPrincipal {
   staffAdmin: boolean; // may manage OpenCard staff accounts
   brandIds: string[]; // brand_admin scope
   locationIds: string[]; // location_admin scope
-  // Set when a platform (OpenCard) admin has drilled into a specific client org
-  // to manage it; their `orgId` is switched to that client while this is set.
+  // Legacy compatibility; always null in single-workspace deployments.
   actingOrgId: string | null;
 }
 
@@ -47,9 +46,13 @@ export async function getAdmin(req: Request): Promise<AdminPrincipal | null> {
     if (sess) {
       au = await prisma.adminUser.findUnique({ where: { id: sess.adminUserId }, include: { scopes: true } });
     } else {
-      const email = verifyEmail(cookies.oc_emp);
-      if (!email) return null;
-      au = await adminByEmail(email);
+      const identity = verifyEmployeeIdentity(cookies.oc_emp);
+      if (!identity) return null;
+      au = await adminByEmail(identity.email);
+      if (au) {
+        const flags = roleFlags(au.role as Role);
+        if (!flags.platform && au.orgId !== identity.orgId) return null;
+      }
     }
     if (!au || !au.active) return null;
     const role = au.role as Role;
@@ -70,22 +73,13 @@ export async function getAdmin(req: Request): Promise<AdminPrincipal | null> {
     };
   }
 
-  // Platform admins can drill into a specific client org (cookie set by the
-  // clients console). Their operating orgId switches to that client while set.
-  if (p.platform && cookies.oc_actorg) {
-    const org = await prisma.org.findUnique({ where: { id: cookies.oc_actorg }, select: { id: true } });
-    if (org) {
-      p.orgId = org.id;
-      p.actingOrgId = org.id;
-    }
-  }
   return p;
 }
 
 // True only for a platform admin on the clients console (not drilled into a
 // client). Use this — not `p.platform` — to decide "show/act across ALL orgs":
 // once acting inside a client, a platform admin must be confined to that org.
-export const seesAllOrgs = (p: AdminPrincipal) => p.platform && !p.actingOrgId;
+export const seesAllOrgs = (_p: AdminPrincipal) => false;
 
 // ---- coarse permissions ----
 export const canCreateBrand = (p: AdminPrincipal) => p.global;

@@ -1,14 +1,15 @@
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { spawn } from "child_process";
 import { Client } from "pg";
 import { prisma } from "./db";
+import { CLIENT_RESTORE_LOCK, withExclusiveAdvisoryLock } from "./joblock";
 
-// Staff-console backup & restore. Backups live in BACKUP_DIR (the host's
-// /opt/opencard/backups mounted into the container). The nightly cron owns
-// scheduled backups + offsite upload; this module adds on-demand backups and
-// PER-CLIENT restore: stage a full dump into a scratch database, then swap
-// one org's content rows in a single transaction — no other tenant touched.
+// Owner backup & restore. Backups live in BACKUP_DIR, which the Compose stack
+// mounts from the host. An optional S3-compatible target copies both files.
+// Content restore stages a dump in a scratch database and swaps workspace rows
+// in one transaction. Full disaster recovery also requires the uploads archive.
 
 export const BACKUP_DIR = process.env.BACKUP_DIR || path.join(process.cwd(), "backups");
 
@@ -59,9 +60,9 @@ function pgUrl(dbName?: string): string {
   return u.toString();
 }
 
-function run(cmd: string, args: string[]): Promise<void> {
+function run(cmd: string, args: string[], env?: NodeJS.ProcessEnv): Promise<void> {
   return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"] });
+    const p = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"], env: env || process.env });
     let err = "";
     p.stderr.on("data", (d) => (err += d.toString()));
     p.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}: ${err.slice(0, 400)}`))));
@@ -69,24 +70,64 @@ function run(cmd: string, args: string[]): Promise<void> {
   });
 }
 
-// On-demand backup: DB dump + uploads tarball, named -manual- so the nightly
-// cron's offsite/pruning logic is unaffected. Stays local until the next
-// cron run's retention sweep (manual copies age out like the rest).
-export async function runManualBackup(uploadDir: string): Promise<{ db: string; uploads: string | null }> {
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-").replace(/-(\d\d)$/, "$1");
-  const dbFile = `db-manual-${stamp}.dump`;
-  await run("pg_dump", ["-Fc", "-f", path.join(BACKUP_DIR, dbFile), "-d", pgUrl()]);
-  let upFile: string | null = null;
-  if (fs.existsSync(uploadDir)) {
-    upFile = `uploads-manual-${stamp}.tar.gz`;
-    await run("tar", ["-czf", path.join(BACKUP_DIR, upFile), "-C", uploadDir, "."]);
+export function offsiteConfigured(): boolean {
+  return !!process.env.S3_BUCKET;
+}
+
+async function copyOffsite(name: string, kind: "db" | "uploads"): Promise<void> {
+  const bucket = process.env.S3_BUCKET || "";
+  const access = process.env.AWS_ACCESS_KEY_ID || "";
+  const secret = process.env.AWS_SECRET_ACCESS_KEY || "";
+  if (!/^[a-zA-Z0-9._-]+$/.test(bucket) || !access || !secret) {
+    throw new Error("Offsite backup settings are incomplete. Check S3_BUCKET and S3 credentials.");
   }
-  return { db: dbFile, uploads: upFile };
+  const endpoint = process.env.S3_ENDPOINT || "";
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    RCLONE_CONFIG_OFFSITE_TYPE: "s3",
+    RCLONE_CONFIG_OFFSITE_PROVIDER: endpoint ? "Other" : "AWS",
+    RCLONE_CONFIG_OFFSITE_ENDPOINT: endpoint,
+    RCLONE_CONFIG_OFFSITE_REGION: process.env.S3_REGION || "",
+    RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID: access,
+    RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY: secret,
+    RCLONE_CONFIG_OFFSITE_ENV_AUTH: "false",
+  };
+  await run("rclone", ["copyto", path.join(BACKUP_DIR, name), `offsite:${bucket}/${kind}/${name}`, "--no-traverse"], env);
+}
+
+// On-demand backup: DB dump + uploads tarball. Files are kept locally even if
+// an offsite copy fails, so an owner can retry without losing the snapshot.
+export async function runManualBackup(uploadDir: string): Promise<{ db: string; uploads: string; offsite: boolean }> {
+  if (!fs.existsSync(uploadDir)) throw new Error("Uploads directory is missing; refusing an incomplete backup.");
+  fs.mkdirSync(BACKUP_DIR, { recursive: true, mode: 0o700 });
+  fs.chmodSync(BACKUP_DIR, 0o700);
+  const stamp = new Date().toISOString().replace(/\D/g, "") + crypto.randomBytes(3).toString("hex");
+  const dbFile = `db-manual-${stamp}.dump`;
+  const upFile = `uploads-manual-${stamp}.tar.gz`;
+  const dbPath = path.join(BACKUP_DIR, dbFile);
+  const uploadsPath = path.join(BACKUP_DIR, upFile);
+  // Reserve both targets as owner-only files before pg_dump/tar opens them.
+  const reserved: string[] = [];
+  try {
+    for (const target of [dbPath, uploadsPath]) {
+      fs.closeSync(fs.openSync(target, "wx", 0o600));
+      reserved.push(target);
+    }
+    await run("pg_dump", ["-Fc", "-f", dbPath, "-d", pgUrl()]);
+    await run("tar", ["-czf", uploadsPath, "-C", uploadDir, "."]);
+  } catch (error) {
+    for (const target of reserved) fs.unlinkSync(target);
+    throw error;
+  }
+  if (offsiteConfigured()) {
+    await copyOffsite(dbFile, "db");
+    await copyOffsite(upFile, "uploads");
+  }
+  return { db: dbFile, uploads: upFile, offsite: offsiteConfigured() };
 }
 
 // Content tables owned by an org, parent-first. Deliberately NOT restored:
-// Org (plan/billing/suspension stay current), AdminUser/AdminSession/AuthToken
+// Org (workspace settings stay current), AdminUser/AdminSession/AuthToken
 // (never resurrect old credentials), AuditLog (history is append-only).
 export const ORG_CONTENT_TABLES = [
   "Brand",
@@ -142,7 +183,7 @@ export async function restoreClientToBackup(
 
     // The org must exist in the backup — otherwise this would just erase it.
     const inDump = await stage.query(`SELECT 1 FROM "Org" WHERE id = $1`, [orgId]);
-    if (inDump.rowCount === 0) throw new Error("This client does not exist in the selected backup.");
+    if (inDump.rowCount === 0) throw new Error("This workspace does not exist in the selected backup.");
 
     // Live columns per table, so dumps from older schema versions still load
     // (columns added since the dump fall back to their defaults).
@@ -215,16 +256,14 @@ export function humanSize(n: number): string {
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-// Guard: the app must never restore while another restore is in flight.
-let restoreLock = false;
+// Guard across app instances: an in-memory boolean cannot protect a
+// destructive restore when multiple web processes share the database.
 export async function withRestoreLock<T>(fn: () => Promise<T>): Promise<T> {
-  if (restoreLock) throw new Error("Another restore is already running — try again in a minute.");
-  restoreLock = true;
-  try {
-    return await fn();
-  } finally {
-    restoreLock = false;
-  }
+  return withExclusiveAdvisoryLock(
+    CLIENT_RESTORE_LOCK,
+    fn,
+    "Another restore is already running — try again in a minute."
+  );
 }
 
 export { prisma };

@@ -38,5 +38,5 @@ test("raw tokens are long, url-safe, and unique", () => {
 test("token TTLs are sane", () => {
   assert.equal(TOKEN_TTL_MS.reset, 60 * 60 * 1000);
   assert.ok(TOKEN_TTL_MS.invite >= 24 * 60 * 60 * 1000);
-  assert.ok(TOKEN_TTL_MS.verify >= 24 * 60 * 60 * 1000);
+  assert.deepEqual(Object.keys(TOKEN_TTL_MS).sort(), ["invite", "reset"]);
 });

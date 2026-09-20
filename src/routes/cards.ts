@@ -10,12 +10,11 @@ import { renderCardPage } from "../views/card";
 import { page, esc } from "../views/html";
 import { emitEvent, leadPayload } from "../webhooks";
 import { parseUtm } from "../attribution";
-import { assembleLead } from "../leadform";
+import { assembleLead, defaultLeadFieldsFor, leadSubmissionError, resolveLeadFields } from "../leadform";
 import { notifyLead } from "../notify";
 import { syncLeadToCrm } from "../crmsync-dispatch";
 import { orgAnalyticsHead } from "../marketing-tags";
 import { appleWalletEnabled, googleWalletEnabled } from "../config";
-import { isCardLayout } from "../layouts";
 import { buildGoogleGenericObject, googleSaveClaims, googleSaveUrl } from "../wallet";
 import { signGoogleJwt } from "../wallet-sign";
 import { findDuplicate } from "../leadstatus";
@@ -36,8 +35,7 @@ function clientIp(req: Request): string {
 // before any tenant context exists.
 async function loadCard(slug: string, orgId: string | null) {
   return prisma.card.findFirst({
-    // org.suspended gates every public surface for a suspended client.
-    where: { slug, active: true, org: { suspended: false, ownerVerifiedAt: { not: null } }, ...(orgId ? { orgId } : {}) },
+    where: { slug, active: true, ...(orgId ? { orgId } : {}) },
     include: { location: { include: { brand: true } }, template: true, dept: true, org: { select: { vertical: true } } },
   });
 }
@@ -54,7 +52,7 @@ cardsRouter.get("/:slug", async (req, res) => {
   if (!card) {
     // Turnover: a deactivated card can redirect scanned NFC/QR visitors onward.
     const dead = await prisma.card.findFirst({
-      where: { slug: req.params.slug, active: false, org: { suspended: false, ownerVerifiedAt: { not: null } }, ...(orgId ? { orgId } : {}) },
+      where: { slug: req.params.slug, active: false, ...(orgId ? { orgId } : {}) },
       select: { redirectUrl: true },
     });
     if (dead?.redirectUrl) return res.redirect(302, dead.redirectUrl);
@@ -73,17 +71,6 @@ cardsRouter.get("/:slug", async (req, res) => {
       },
     })
   );
-
-  // Non-destructive preview overrides (do NOT change saved data):
-  //   /c/:slug?layout=wave&photo=<url>&logo=<url>
-  const previewLayout = String(req.query.layout || "");
-  if (isCardLayout(previewLayout)) {
-    (card as any).layout = previewLayout;
-  }
-  const previewPhoto = String(req.query.photo || "");
-  if (/^https:\/\//.test(previewPhoto)) (card as any).photoUrl = previewPhoto;
-  const previewLogo = String(req.query.logo || "");
-  if (/^https:\/\//.test(previewLogo)) (card as any).logoUrl = previewLogo;
 
   const primary = cardPrimary(card);
   const design = resolveQrDesign(card.qrDesign, card.location.brand.qrDesign, primary);
@@ -171,7 +158,7 @@ cardsRouter.get("/:slug/qr.svg", async (req, res) => {
 cardsRouter.post("/:slug/event", async (req, res) => {
   const orgId = await hostOrg(req);
   const card = await prisma.card.findFirst({
-    where: { slug: req.params.slug, active: true, org: { suspended: false, ownerVerifiedAt: { not: null } }, ...(orgId ? { orgId } : {}) },
+    where: { slug: req.params.slug, active: true, ...(orgId ? { orgId } : {}) },
     select: { id: true, orgId: true },
   });
   if (!card) return res.status(204).end();
@@ -208,7 +195,13 @@ cardsRouter.post("/:slug/connect", async (req, res) => {
   const card = await loadCard(req.params.slug, await hostOrg(req));
   if (!card) return res.status(404).send("Not found");
   const b = req.body || {};
-  if (!b.name) return res.status(400).send("Name required");
+  const leadFields = resolveLeadFields(
+    card.template?.leadFields,
+    card.location.brand.leadFields,
+    defaultLeadFieldsFor(card.org.vertical)
+  );
+  const validationError = leadSubmissionError(b, leadFields);
+  if (validationError) return res.status(400).send(validationError);
   const data = assembleLead(b, req.headers["user-agent"] as string);
   const lead = await runWithOrg(card.orgId, async (db) => {
     // Duplicate detection: match a recent lead on this card by email/phone.

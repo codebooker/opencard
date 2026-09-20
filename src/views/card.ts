@@ -61,6 +61,18 @@ const SOCIAL_ICONS: Record<string, string> = {
   website: "🌐",
 };
 
+const SOCIAL_LABELS: Record<string, string> = {
+  linkedin: "LinkedIn",
+  twitter: "X (Twitter)",
+  x: "X",
+  instagram: "Instagram",
+  facebook: "Facebook",
+  github: "GitHub",
+  youtube: "YouTube",
+  whatsapp: "WhatsApp",
+  website: "Website",
+};
+
 function contactRow(icon: string, label: string, value: string, href: string, dataAttr: string) {
   return `<a class="row" href="${esc(href)}" data-track="${esc(dataAttr)}">
     <span class="row-ic">${icon}</span>
@@ -126,10 +138,15 @@ export function renderCardPage(
   const socialHtml = socialLinks.length
     ? `<div class="socials">${socialLinks
         .map(
-          (s) =>
-            `<a class="social" href="${esc(s.href)}" data-track="click:social:${esc(
+          (s) => {
+            const type = s.type.toLowerCase();
+            const label = SOCIAL_LABELS[type] || s.type;
+            return `<a class="social" href="${esc(s.href)}" data-track="click:social:${esc(
               s.type
-            )}" title="${esc(s.type)}">${esc(SOCIAL_ICONS[s.type.toLowerCase()] || s.type[0] || "•")}</a>`
+            )}" title="${esc(label)}" aria-label="${esc(label)}" target="_blank" rel="noopener">${esc(
+              SOCIAL_ICONS[type] || s.type[0] || "•"
+            )}</a>`;
+          }
         )
         .join("")}</div>`
     : "";
@@ -240,17 +257,16 @@ export function renderCardPage(
 
   ${
     leadCapture
-      ? `<button class="connect-toggle" onclick="document.getElementById('connect').classList.toggle('open')">
-    Share your details back
-  </button>
-  <section id="connect" class="connect">
+      ? `<details class="connect-disclosure">
+  <summary class="connect-toggle">Share your details back</summary>
+  <section class="connect">
     ${renderLeadForm({
       action: `${esc(baseUrl)}/c/${esc(card.slug)}/connect`,
       fields: leadFieldSet,
       consentText,
       attribution,
     })}
-  </section>`
+  </section></details>`
       : ""
   }
 

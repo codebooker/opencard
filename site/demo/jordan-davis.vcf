@@ -1,0 +1,10 @@
+BEGIN:VCARD
+VERSION:3.0
+N:Davis;Jordan;;;
+FN:Jordan Davis
+ORG:Northline Studio
+TITLE:Creative Director
+EMAIL;TYPE=WORK:jordan@northline.example
+URL:https://github.com/codebooker/opencard
+NOTE:Fictional sample contact from the OpenCard project demo.
+END:VCARD

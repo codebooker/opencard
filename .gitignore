@@ -15,6 +15,8 @@ deploy/deploy.config
 
 # Runtime user uploads (served from a Docker volume in production)
 /uploads/
+/backups/
+*.dump
 
 # macOS
 .DS_Store

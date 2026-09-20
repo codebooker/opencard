@@ -18,14 +18,13 @@ type Jwks = {
 let metadataCache: OpenIdMetadata | null = null;
 let jwksCache: Jwks | null = null;
 
-// Signed (HMAC) cookie holding the signed-in employee's email. No DB session needed.
-export function signEmail(email: string): string {
-  const payload = Buffer.from(email.toLowerCase()).toString("base64url");
+function signPayload(value: string): string {
+  const payload = Buffer.from(value).toString("base64url");
   const sig = crypto.createHmac("sha256", config.sessionSecret).update(payload).digest("base64url");
   return `${payload}.${sig}`;
 }
 
-export function verifyEmail(token?: string): string | null {
+function verifyPayload(token?: string): string | null {
   if (!token) return null;
   const [payload, sig] = token.split(".");
   if (!payload || !sig) return null;
@@ -34,6 +33,98 @@ export function verifyEmail(token?: string): string | null {
   const b = Buffer.from(expect);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   return Buffer.from(payload, "base64url").toString("utf8");
+}
+
+// Small signed value used by the password/MFA flow. Employee SSO sessions use
+// the tenant-bound identity below so a cookie issued for one workspace cannot
+// be reused to select another workspace merely by changing hosts.
+export function signEmail(email: string, now = Date.now()): string {
+  return signPayload(
+    JSON.stringify({ v: 1, type: "email", email: email.toLowerCase(), expiresAt: now + 5 * 60 * 1000 })
+  );
+}
+
+export function verifyEmail(token?: string, now = Date.now()): string | null {
+  const value = verifyPayload(token);
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed?.v === 1 &&
+      parsed?.type === "email" &&
+      typeof parsed?.email === "string" &&
+      /^[^@\s{}"']+@[^@\s{}"']+$/.test(parsed.email) &&
+      typeof parsed?.expiresAt === "number" &&
+      parsed.expiresAt >= now
+      ? parsed.email.toLowerCase()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export type EmployeeIdentity = { email: string; orgId: string };
+
+export function signEmployeeIdentity(email: string, orgId: string, now = Date.now()): string {
+  return signPayload(
+    JSON.stringify({
+      v: 1,
+      type: "employee",
+      email: email.toLowerCase(),
+      orgId,
+      expiresAt: now + 12 * 60 * 60 * 1000,
+    })
+  );
+}
+
+export function verifyEmployeeIdentity(token?: string, now = Date.now()): EmployeeIdentity | null {
+  const value = verifyPayload(token);
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (
+      parsed?.v !== 1 ||
+      parsed?.type !== "employee" ||
+      typeof parsed?.email !== "string" ||
+      !parsed.email.includes("@") ||
+      typeof parsed?.orgId !== "string" ||
+      !parsed.orgId ||
+      typeof parsed?.expiresAt !== "number" ||
+      parsed.expiresAt < now
+    ) {
+      return null;
+    }
+    return { email: parsed.email.toLowerCase(), orgId: parsed.orgId };
+  } catch {
+    return null;
+  }
+}
+
+// The OIDC authorization round-trip always returns to APP_URL. This short-lived
+// signed context remembers which branded workspace initiated the flow without
+// trusting a query string at the callback.
+export function signOidcContext(orgId: string, now = Date.now()): string {
+  return signPayload(JSON.stringify({ v: 1, type: "oidc", orgId, expiresAt: now + 10 * 60 * 1000 }));
+}
+
+export function verifyOidcContext(token?: string, now = Date.now()): string | null {
+  const value = verifyPayload(token);
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (
+      parsed?.v !== 1 ||
+      parsed?.type !== "oidc" ||
+      typeof parsed?.orgId !== "string" ||
+      !parsed.orgId ||
+      typeof parsed?.expiresAt !== "number" ||
+      parsed.expiresAt < now
+    ) {
+      return null;
+    }
+    return parsed.orgId;
+  } catch {
+    return null;
+  }
 }
 
 export const oidcEnabled = (): boolean =>
@@ -65,8 +156,8 @@ async function openIdMetadata(): Promise<OpenIdMetadata> {
   return metadataCache;
 }
 
-async function jwks(): Promise<Jwks> {
-  if (jwksCache) return jwksCache;
+async function jwks(forceRefresh = false): Promise<Jwks> {
+  if (jwksCache && !forceRefresh) return jwksCache;
   const meta = await openIdMetadata();
   const resp = await fetch(meta.jwks_uri, { signal: AbortSignal.timeout(8000) });
   if (!resp.ok) throw new Error("Unable to load OpenID signing keys.");
@@ -86,8 +177,14 @@ async function verifyIdToken(idToken: string, expectedNonce: string): Promise<an
   const claims = decodeBase64UrlJson(encodedPayload);
   if (header.alg !== "RS256" || !header.kid) return null;
 
-  const keys = await jwks();
-  const jwk = keys.keys.find((k) => k.kid === header.kid && k.kty === "RSA");
+  let keys = await jwks();
+  let jwk = keys.keys.find((k) => k.kid === header.kid && k.kty === "RSA");
+  // Entra rotates signing keys. Refresh once on an unknown kid so a warm app
+  // process does not reject every login until its next restart.
+  if (!jwk) {
+    keys = await jwks(true);
+    jwk = keys.keys.find((k) => k.kid === header.kid && k.kty === "RSA");
+  }
   if (!jwk) return null;
 
   const verifier = crypto.createVerify("RSA-SHA256");
@@ -120,7 +217,12 @@ export async function exchangeCode(code: string, expectedNonce: string): Promise
   });
   const resp = await fetch(
     `https://login.microsoftonline.com/${config.azure.tenantId}/oauth2/v2.0/token`,
-    { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body }
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      signal: AbortSignal.timeout(8000),
+    }
   );
   if (!resp.ok) return null;
   const json: any = await resp.json();

@@ -50,15 +50,16 @@ export function renderAssetLanding(asset: any, baseUrl: string, attribution: Lea
           .join("")}</div>`
       : ""
   }
-  <button class="connect-toggle" onclick="document.getElementById('connect').classList.toggle('open')">Get in touch</button>
-  <section id="connect" class="connect">
+  <details class="connect-disclosure">
+  <summary class="connect-toggle">Get in touch</summary>
+  <section class="connect">
     ${renderLeadForm({
       action: `${esc(baseUrl)}/a/${esc(asset.slug)}/connect`,
       fields: leadFieldSet,
       consentText,
       attribution,
     })}
-  </section>
+  </section></details>
   ${loc.hideCardFooter ? "" : `<footer class="brand">${esc(loc.brand?.name || "")} · ${esc(loc.name)}</footer>`}
 </main>
 ${leadRefScript}`;

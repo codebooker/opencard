@@ -29,7 +29,7 @@ test("misconfigured when it points somewhere else", () => {
 });
 
 test("cnameInstruction returns the exact record, host normalized", () => {
-  assert.deepEqual(cnameInstruction("Cards.MullinaxFord.com"), {
+  assert.deepEqual(cnameInstruction("Cards.MullinaxFord.com", expected.cnameTarget), {
     type: "CNAME",
     name: "cards.mullinaxford.com",
     value: "tenants.opencard.id",

@@ -56,7 +56,6 @@ export function loginPage(error?: string, info?: string, branding?: LoginBrandin
         <a class="btn secondary auth-sso" href="/me/login">Sign in with SSO</a>`
             : ""
         }
-        ${branding ? "" : `<p class="auth-foot">New here? <a href="/signup">Create an account</a></p>`}
       </div>
     </div>`,
   });
@@ -148,7 +147,8 @@ export function mfaPage(error?: string): string {
         </div>
         ${error ? `<p class="auth-error">${esc(error)}</p>` : ""}
         <form method="POST" action="/admin/login/mfa" class="auth-form">
-          <input class="auth-code" name="code" maxlength="12" placeholder="••••••" autocomplete="one-time-code" autofocus />
+          <label for="mfa-code">Authenticator or recovery code</label>
+          <input id="mfa-code" class="auth-code" name="code" maxlength="12" placeholder="••••••" autocomplete="one-time-code" autofocus />
           <button class="btn auth-submit" type="submit">Verify</button>
         </form>
         <p class="auth-foot" style="margin-top:12px;font-size:13px">Lost your device? Enter one of your recovery codes instead.</p>

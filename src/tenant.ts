@@ -2,19 +2,16 @@ import { prisma } from "./db";
 
 // Tenant (Org) resolution.
 //
-// Phase 1 increment 1: the data model is now fully org-scoped (every tenant-owned
-// row carries orgId). There is still a single org per deployment, so the "current
-// org" is resolved here from that single org. Later increments resolve the org
-// from the request (subdomain/custom domain, the admin's org, the API key's org,
-// or a tenant-specific SCIM token) — callers should move to those as they land.
+// Org IDs remain in the data model for ownership and database row-level
+// security, but a self-hosted installation has exactly one workspace.
 
 let cachedOrgId: string | null = null;
 
 export async function defaultOrgId(): Promise<string> {
   if (cachedOrgId) return cachedOrgId;
-  const org = await prisma.org.findFirst({ orderBy: { createdAt: "asc" }, select: { id: true } });
-  if (!org) throw new Error("No org found — run the seed first.");
-  cachedOrgId = org.id;
+  const orgs = await prisma.org.findMany({ take: 2, select: { id: true } });
+  if (orgs.length !== 1) throw new Error(`Expected exactly one workspace; found ${orgs.length}. Run the seed for a new installation, or migrate multi-company data before starting.`);
+  cachedOrgId = orgs[0].id;
   return cachedOrgId;
 }
 

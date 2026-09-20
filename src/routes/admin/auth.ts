@@ -2,7 +2,7 @@
 import {
   Router, SESSION_COOKIE, SESSION_TTL_MS, authNoticePage, clearCookieOptions, config, consumeRecoveryCode, consumeToken,
   cookieOptions, createSession, defaultOrgId, findSession, forgotPage, hashPassword, invitePage, issueToken,
-  loginBrandingForHost, loginPage, mfaPage, peekToken, prisma, recordAudit, reqIp, requestHost,
+  loginBrandingForHost, loginPage, mfaPage, orgIdForHost, peekToken, prisma, recordAudit, reqIp, requestHost,
   resetPage, revokeAllSessions, revokeSession, sendMail, signEmail, verifyEmail, verifyPassword, verifyTotp,
 } from "./context";
 
@@ -37,8 +37,10 @@ adminRouter.post("/login", async (req, res) => {
   const email = String(req.body?.email || "").toLowerCase().trim();
   const password = String(req.body?.password || "");
   const au = await prisma.adminUser.findUnique({ where: { email } });
-  if (!au || !au.active || !verifyPassword(password, au.passwordHash)) {
-    recordAudit({ orgId: await defaultOrgId(), actor: { email }, action: "login.failed", ip: reqIp(req) });
+  const hostOrgId = await orgIdForHost(requestHost(req));
+  const wrongBrandedWorkspace = !!(hostOrgId && au?.orgId && au.orgId !== hostOrgId);
+  if (!au || !au.active || wrongBrandedWorkspace || !verifyPassword(password, au.passwordHash)) {
+    recordAudit({ orgId: hostOrgId ?? au?.orgId ?? (await defaultOrgId()), actor: { email }, action: "login.failed", ip: reqIp(req) });
     return res.status(401).send(loginPage("Invalid email or password.", undefined, await brandingFor(req)));
   }
   if (au.mfaEnabled && au.mfaSecret) {
@@ -124,16 +126,6 @@ adminRouter.post("/reset", async (req, res) => {
   const revoked = await revokeAllSessions(au.id);
   recordAudit({ orgId: au.orgId ?? (await defaultOrgId()), actor: { email: au.email, role: au.role }, action: "password.reset", summary: `${revoked} session(s) signed out`, ip: reqIp(req) });
   res.send(authNoticePage("Password updated", "Your password has been changed and other sessions were signed out.", { href: "/admin/login", label: "Sign in" }));
-});
-
-// ---------- signup email verification (pre-auth) ----------
-adminRouter.get("/verify", async (req, res) => {
-  const t = await consumeToken("verify", String(req.query.token || ""));
-  if (!t) return res.status(400).send(authNoticePage("Link expired", "This verification link is invalid or has expired. Sign in and use “Resend verification email”.", { href: "/admin/login", label: "Sign in" }));
-  await prisma.adminUser.updateMany({ where: { email: t.email }, data: { emailVerifiedAt: new Date() } });
-  if (t.orgId) await prisma.org.updateMany({ where: { id: t.orgId, ownerVerifiedAt: null }, data: { ownerVerifiedAt: new Date() } });
-  recordAudit({ orgId: t.orgId ?? (await defaultOrgId()), actor: { email: t.email }, action: "signup.verified", ip: reqIp(req) });
-  res.send(authNoticePage("Email verified", "Your workspace is live — cards and lead capture are now public.", { href: "/admin/login", label: "Sign in" }));
 });
 
 // ---------- admin invite acceptance (pre-auth) ----------

@@ -1,9 +1,10 @@
 // Admin route group: cards (split from admin.ts, CQ-05).
 import {
-  Router, Prisma, asArray, buildIdCardPdf, buildSignatureModel, canAdd, cardPayload, clean,
+  Router, Prisma, asArray, buildIdCardPdf, buildSignatureModel, cardPayload, clean,
   config, ctasFromJson, currentTerminology, emitEvent, forbidden, limitReached, mergeCtas, offboardCardUpdate,
   page, parseAddress, parseLabeled, parseSocials, prisma, redirectTargetUrl, renderSignatureHtml, renderSignatureText,
   replacementCardData, reqAdmin, rooftopCtas, signatureBlock, uniqueSlug, upload, uploadedUrl,
+  isOrgLimitReached, withOrgLimit,
   accessibleCardIds,
 } from "./context";
 import { RBAC } from "./context";
@@ -23,8 +24,7 @@ adminRouter.get("/cards", async (req, res) => {
     where: { locationId },
     orderBy: { lastName: "asc" },
   });
-  const cardsOrg = await prisma.org.findUnique({ where: { id: loc.orgId }, select: { idCardsEnabled: true } });
-  res.send(V.cardList(loc.name, locationId, cards, t, !!cardsOrg?.idCardsEnabled));
+  res.send(V.cardList(loc.name, locationId, cards, t, true));
 });
 
 function brandFields(brand: { selfEditFields: unknown } | null): string[] | undefined {
@@ -68,7 +68,6 @@ adminRouter.get("/cards/new", async (req, res) => {
   if (!loc) return res.status(404).send(`${t.locationSingular} not found`);
   const templates = await prisma.template.findMany({ where: { brandId: loc.brandId } });
   const departments = await prisma.department.findMany({ where: { locationId }, orderBy: { name: "asc" } });
-  const newCardOrg = await prisma.org.findUnique({ where: { id: loc.orgId }, select: { idCardsEnabled: true } });
   res.send(
     V.cardForm({
       locationId,
@@ -77,7 +76,7 @@ adminRouter.get("/cards/new", async (req, res) => {
       brandSelfFields: brandFields(loc.brand),
       terminology: t,
       baseDesign: baseDesign(loc),
-      idCards: !!newCardOrg?.idCardsEnabled,
+      idCards: true,
     })
   );
 });
@@ -104,7 +103,7 @@ adminRouter.get("/cards/:id/edit", async (req, res) => {
       brandSelfFields: brandFields(card.location.brand),
       terminology: t,
       baseDesign: baseDesign(card.location),
-      idCards: !!(await prisma.org.findUnique({ where: { id: card.orgId }, select: { idCardsEnabled: true } }))?.idCardsEnabled,
+      idCards: true,
     })
   );
 });
@@ -176,16 +175,23 @@ adminRouter.post("/cards", cardUploads, async (req, res) => {
   const p = reqAdmin(req);
   const b = req.body;
   if (!(await RBAC.canAccessLocation(p, b.locationId))) return forbidden(res);
-  if (!(await canAdd(p.orgId, "cards"))) return limitReached(res, "card");
   const loc = await prisma.location.findUnique({ where: { id: b.locationId } });
   if (!loc) return res.status(404).send("Location not found");
   const slug = await uniqueSlug(b.firstName, b.lastName);
   const data = withCardUploads(req);
   data.templateId = await allowedTemplateId(clean(b.templateId), loc.brandId);
   await applyDepartment(data, b, b.locationId);
-  const card = await prisma.card.create({
-    data: { locationId: b.locationId, orgId: loc.orgId, slug, ...data },
-  });
+  let card;
+  try {
+    card = await withOrgLimit(p.orgId, "cards", () =>
+      prisma.card.create({
+        data: { locationId: b.locationId, orgId: loc.orgId, slug, ...data },
+      })
+    );
+  } catch (e) {
+    if (isOrgLimitReached(e)) return limitReached(res, "card");
+    throw e;
+  }
   emitEvent(card.orgId, "card.created", cardPayload(card));
   res.redirect(`/admin/cards?locationId=${b.locationId}`);
 });
@@ -288,16 +294,24 @@ adminRouter.post("/cards/:id/turnover", async (req, res) => {
       const data: any = replacementCardData(card);
       if (data.selfEditFields == null) delete data.selfEditFields;
       const slug = await uniqueSlug(first || "new", last || "hire");
-      const replacement = await prisma.card.create({
-        data: {
-          orgId: card.orgId,
-          slug,
-          firstName: first || "New",
-          lastName: last || "Hire",
-          ownerEmail: clean(b.newOwnerEmail),
-          ...data,
-        },
-      });
+      let replacement;
+      try {
+        replacement = await withOrgLimit(card.orgId, "cards", () =>
+          prisma.card.create({
+            data: {
+              orgId: card.orgId,
+              slug,
+              firstName: first || "New",
+              lastName: last || "Hire",
+              ownerEmail: clean(b.newOwnerEmail),
+              ...data,
+            },
+          })
+        );
+      } catch (e) {
+        if (isOrgLimitReached(e)) return limitReached(res, "card");
+        throw e;
+      }
       emitEvent(replacement.orgId, "card.created", cardPayload(replacement));
     }
   }
@@ -314,11 +328,6 @@ adminRouter.get("/cards/:id/idcard.pdf", async (req, res) => {
   });
   if (!card) return res.status(404).send("Not found");
   if (!(await RBAC.canAccessLocation(reqAdmin(req), card.locationId))) return forbidden(res);
-  // Paid add-on: staff enable ID card printing per client (Edit client page).
-  const idOrg = await prisma.org.findUnique({ where: { id: card.orgId }, select: { idCardsEnabled: true } });
-  if (!idOrg?.idCardsEnabled) {
-    return res.status(403).send("ID card printing is an add-on that isn't enabled for this workspace. OpenCard staff can enable it on the Edit client page.");
-  }
   const orientation = req.query.orientation === "portrait" ? "portrait" : "landscape";
   const withBack = req.query.back === "1";
   const brandBack = (card.location.brand as any).idCardBack === "triangles" ? "triangles" : "cubes";

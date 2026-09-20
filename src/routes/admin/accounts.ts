@@ -1,8 +1,8 @@
 // Admin route group: accounts (split from admin.ts, CQ-05).
 import {
-  Router, PLATFORM_ROLES_ALL, Prisma, asArray, assignableStaffRoles, audit, canAdd, canManageStaffTarget,
+  Router, PLATFORM_ROLES_ALL, Prisma, asArray, audit,
   clean, config, esc, forbidden, hashPassword, isPlatformRole, issueToken, limitReached,
-  page, prisma, reqAdmin, revokeAllSessions, sendMail, upload,
+  page, prisma, reqAdmin, revokeAllSessions, sendMail, upload, isOrgLimitReached, withOrgLimit,
 } from "./context";
 import { RBAC } from "./context";
 import { V } from "./context";
@@ -78,7 +78,6 @@ adminRouter.post("/admins", async (req, res) => {
   const b = req.body;
   const email = String(b.email || "").toLowerCase().trim();
   if (!email || !b.role) return res.redirect("/admin/admins/new");
-  if (!(await canAdd(p.orgId, "admins"))) return limitReached(res, "admin");
   const data: any = {
     email,
     name: clean(b.name),
@@ -87,7 +86,12 @@ adminRouter.post("/admins", async (req, res) => {
     scopes: { create: scopeRowsFromBody(b) },
   };
   if (b.password) data.passwordHash = hashPassword(String(b.password));
-  await prisma.adminUser.create({ data });
+  try {
+    await withOrgLimit(p.orgId, "admins", () => prisma.adminUser.create({ data }));
+  } catch (e) {
+    if (isOrgLimitReached(e)) return limitReached(res, "admin");
+    throw e;
+  }
   audit(req, p, "admin.create", { targetType: "AdminUser", summary: `${email} (${data.role})` });
   // No password typed + invite requested: email a set-password link instead.
   if (!b.password && b.sendInvite) {
@@ -136,82 +140,6 @@ adminRouter.post("/admins/:id/delete", async (req, res) => {
   await prisma.adminUser.delete({ where: { id: target.id } });
   audit(req, p, "admin.delete", { targetType: "AdminUser", targetId: target.id, summary: target.email });
   res.redirect("/admin/admins");
-});
-
-// ---------- OpenCard staff (platform accounts; owner/admin only) ----------
-// A staff target this actor may manage (must be a platform account + within tier).
-async function manageableStaff(p: RBAC.AdminPrincipal, id: string) {
-  const s = await prisma.adminUser.findUnique({ where: { id } });
-  if (!s || !isPlatformRole(s.role) || !canManageStaffTarget(p.role, s.role)) return null;
-  return s;
-}
-
-adminRouter.get("/staff", async (req, res) => {
-  const p = reqAdmin(req);
-  if (!p.staffAdmin) return forbidden(res);
-  const staff = await prisma.adminUser.findMany({
-    where: { role: { in: PLATFORM_ROLES_ALL } },
-    orderBy: { createdAt: "asc" },
-  });
-  res.send(V.staffListView(staff, p));
-});
-
-adminRouter.get("/staff/new", (req, res) => {
-  const p = reqAdmin(req);
-  if (!p.staffAdmin) return forbidden(res);
-  res.send(V.staffForm(assignableStaffRoles(p.role)));
-});
-
-adminRouter.post("/staff", async (req, res) => {
-  const p = reqAdmin(req);
-  if (!p.staffAdmin) return forbidden(res);
-  const b = req.body;
-  const email = String(b.email || "").toLowerCase().trim();
-  const allowed = assignableStaffRoles(p.role);
-  if (!email || !allowed.includes(b.role)) return res.redirect("/admin/staff/new");
-  const data: any = { email, name: clean(b.name), role: b.role, orgId: null };
-  if (b.password) data.passwordHash = hashPassword(String(b.password));
-  await prisma.adminUser.create({ data });
-  audit(req, p, "staff.create", { targetType: "AdminUser", summary: `${email} (${b.role})` });
-  res.redirect("/admin/staff");
-});
-
-adminRouter.get("/staff/:id/edit", async (req, res) => {
-  const p = reqAdmin(req);
-  if (!p.staffAdmin) return forbidden(res);
-  const s = await manageableStaff(p, req.params.id);
-  if (!s) return forbidden(res);
-  res.send(V.staffForm(assignableStaffRoles(p.role), s));
-});
-
-adminRouter.post("/staff/:id", async (req, res) => {
-  const p = reqAdmin(req);
-  if (!p.staffAdmin) return forbidden(res);
-  const s = await manageableStaff(p, req.params.id);
-  if (!s) return forbidden(res);
-  const b = req.body;
-  const data: any = { name: clean(b.name), active: !!b.active };
-  if (assignableStaffRoles(p.role).includes(b.role)) data.role = b.role; // only grant assignable tiers
-  if (b.password) data.passwordHash = hashPassword(String(b.password));
-  if (b.resetMfa) {
-    data.mfaEnabled = false;
-    data.mfaSecret = null;
-    data.recoveryCodes = Prisma.DbNull;
-  }
-  await prisma.adminUser.update({ where: { id: s.id }, data });
-  if (b.password || !b.active) await revokeAllSessions(s.id);
-  res.redirect("/admin/staff");
-});
-
-adminRouter.post("/staff/:id/delete", async (req, res) => {
-  const p = reqAdmin(req);
-  if (!p.staffAdmin) return forbidden(res);
-  const s = await manageableStaff(p, req.params.id);
-  if (!s) return forbidden(res);
-  if (p.email && s.email === p.email) return res.status(400).send("You can't delete your own account.");
-  await prisma.adminUser.delete({ where: { id: s.id } });
-  audit(req, p, "staff.delete", { targetType: "AdminUser", targetId: s.id, summary: s.email });
-  res.redirect("/admin/staff");
 });
 
 // Friendly handling for upload errors (wrong type / too large) — instead of a

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07172b">
+  <meta name="description" content="OpenCard is an AGPL-3.0 self-hosted digital business card application for one company. Docker Compose, PostgreSQL, cardholder editing, QR codes, leads, and backups.">
+  <title>OpenCard — self-hosted digital business cards</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=5">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><div class="container header-inner">
+    <a class="wordmark" href="/" aria-label="OpenCard home"><img src="/brand-mark.svg" alt="" width="39" height="31">OpenCard</a>
+    <nav aria-label="Main navigation"><a href="#screenshots">Screenshots</a><a href="#scope">Scope</a><a href="https://github.com/codebooker/opencard/blob/main/deploy/README.md">Install docs</a><a href="/demo/">Live demo</a></nav>
+    <a class="header-github" href="https://github.com/codebooker/opencard">GitHub ↗</a>
+  </div></header>
+
+  <main id="main">
+    <section class="hero container" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <div class="project-meta"><a class="license-tag" href="https://github.com/codebooker/opencard/blob/main/LICENSE">AGPL-3.0-only</a><a href="https://github.com/codebooker/opencard/actions/workflows/ci.yml">CI: typecheck + tests ↗</a><span>One company per installation</span></div>
+        <h1 id="hero-title">Digital business cards for a company to host itself.</h1>
+        <p>OpenCard serves shareable cards and gives your team an admin dashboard for designs, people, QR codes, leads, and backups. It runs on your server and your domain.</p>
+        <div class="hero-links"><a class="primary-link" href="/demo/">View the live demo card ↗</a><a href="https://github.com/codebooker/opencard#readme">Read the README ↗</a></div>
+      </div>
+      <aside class="quickstart" aria-label="Docker quick start">
+        <div class="quickstart-head"><strong>Run it with Docker Compose</strong><a href="https://github.com/codebooker/opencard/blob/main/deploy/README.md">Full install guide ↗</a></div>
+        <pre><code>git clone https://github.com/codebooker/opencard.git
+cd opencard
+cp .env.example .env
+<span class="code-comment"># Set 3 distinct secrets and COMPANY_NAME in .env</span>
+docker compose up -d --build
+docker compose exec web node \
+  dist/scripts/make-admin.js you@example.com</code></pre>
+        <p>Requires Docker Compose v2. The stack includes PostgreSQL 16; public installs need a hostname and HTTPS proxy.</p>
+      </aside>
+    </section>
+
+    <section class="screenshots-section" id="screenshots" aria-labelledby="screenshots-title"><div class="container">
+      <div class="section-heading"><div><h2 id="screenshots-title">Inside the app</h2><p>Actual screens from a disposable Docker install with sample data. Click to inspect at full size.</p></div><a href="https://github.com/codebooker/opencard/blob/main/ARCHITECTURE.md">Architecture ↗</a></div>
+      <div class="screenshot-grid">
+        <figure><a href="/screenshots/dashboard.webp?v=2" target="_blank" rel="noopener"><img src="/screenshots/dashboard.webp?v=2" width="1470" height="716" alt="OpenCard dashboard showing two related brands, their locations, workspace tools, and card counts" loading="lazy" decoding="async"></a><figcaption>Dashboard · brands, locations, and operations</figcaption></figure>
+        <figure><a href="/screenshots/card-editor.webp?v=2" target="_blank" rel="noopener"><img src="/screenshots/card-editor.webp?v=2" width="1470" height="716" alt="Card editor with identity fields and a live wave-layout preview" loading="lazy" decoding="async"></a><figcaption>Card editor · live preview while editing</figcaption></figure>
+        <figure><a href="/screenshots/self-service.webp" target="_blank" rel="noopener"><img src="/screenshots/self-service.webp" width="1470" height="716" alt="Employee self-service page showing editable fields, profile photo upload, and the public card link" loading="lazy" decoding="async"></a><figcaption>Employee view · edit only fields the admin permits</figcaption></figure>
+        <figure><a href="/screenshots/backups.webp?v=2" target="_blank" rel="noopener"><img src="/screenshots/backups.webp?v=2" width="1470" height="716" alt="Backups page listing database and upload snapshots with workspace restore controls" loading="lazy" decoding="async"></a><figcaption>Backups · database and uploads snapshots</figcaption></figure>
+      </div>
+    </div></section>
+
+    <section class="facts container" id="features" aria-labelledby="facts-title"><h2 id="facts-title">What ships</h2><div class="facts-grid">
+      <div><h3>Cards</h3><p>Public card URLs, vCard downloads, QR images, printable ID badges, brand templates, and cardholder editing at <code>/me</code> with admin-controlled fields.</p></div>
+      <div><h3>Operations</h3><p>Lead capture, card and QR analytics, audit history, local snapshots, full database/upload backups, and optional S3-compatible offsite copies.</p></div>
+      <div><h3>Integrations</h3><p>Microsoft Entra OIDC, SAML, SCIM, CSV and directory import, API keys, webhooks, and CRM connections. Provider credentials are optional for core cards.</p></div>
+    </div></section>
+
+    <section class="scope-section" id="scope" aria-labelledby="scope-title"><div class="container scope-grid">
+      <div><h2 id="scope-title">Scope and non-goals</h2><p>OpenCard is free software you operate. It is not a hosted account at opencard.id.</p></div>
+      <ul>
+        <li><strong>One business per installation.</strong> Brands and locations live inside that business; this is not a multi-customer SaaS platform.</li>
+        <li><strong>No billing or card quotas.</strong> The app does not require a license server or paid plan to create cards.</li>
+        <li><strong>You run the infrastructure.</strong> HTTPS, updates, monitoring, and tested disaster recovery are the operator’s responsibility.</li>
+        <li><strong>Integrations are opt-in.</strong> SSO, directory sync, CRM, email, and offsite storage need your own provider accounts and configuration.</li>
+      </ul>
+    </div></section>
+
+    <section class="resources container" aria-label="Requirements and project links">
+      <div><h2>Requirements</h2><p>Docker with Compose v2. The supplied stack uses PostgreSQL 16 and Node.js 24. For internet access, configure a hostname and HTTPS reverse proxy; an optional Caddy profile is included.</p><p>No published RAM or architecture support matrix yet—test against your target machine before production use.</p></div>
+      <div><h2>Project files</h2><div class="resource-links"><a href="https://github.com/codebooker/opencard#readme">README ↗</a><a href="https://github.com/codebooker/opencard/blob/main/deploy/README.md">Deployment and restore ↗</a><a href="https://github.com/codebooker/opencard/blob/main/ARCHITECTURE.md">Architecture ↗</a><a href="https://github.com/codebooker/opencard/blob/main/CHANGELOG.md">Changelog ↗</a><a href="https://github.com/codebooker/opencard/issues">Issues ↗</a></div></div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><div class="container footer-inner"><span>OpenCard · AGPL-3.0-only</span><span>Source, issues, and contributions on <a href="https://github.com/codebooker/opencard">GitHub ↗</a></span></div></footer>
+</body>
+</html>

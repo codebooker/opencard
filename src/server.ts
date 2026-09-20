@@ -2,27 +2,25 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import path from "path";
 import { config } from "./config";
-import { rlsEnforced } from "./db";
+import { prisma, rlsEnforced } from "./db";
 import { cardsRouter } from "./routes/cards";
 import { assetsRouter } from "./routes/assets";
 import { campaignRouter } from "./routes/campaigns";
 import { runDueDigests } from "./reports";
 import { pruneExpiredLeads } from "./retention-prune";
 import { pruneSamlRequestIds } from "./saml-cache";
+import { pruneRateLimitBuckets } from "./rate-limit-store";
+import { pruneWebhookDeliveries } from "./webhook-retention";
 import { withAdvisoryLock, HOURLY_TICK_LOCK } from "./joblock";
 import { adminRouter } from "./routes/admin";
 import { scimRouter } from "./routes/scim";
 import { selfRouter } from "./routes/selfservice";
-import { signupRouter } from "./routes/signup";
 import { apiRouter } from "./routes/api";
 import { previewRouter } from "./routes/preview";
-import { marketingPage } from "./views/marketing";
-import { termsPage, privacyPage } from "./views/legal";
-import { sendMail } from "./notify";
-import { handleStripeWebhook } from "./stripe";
 import { qrPng } from "./qr";
 import { isDomainApproved, domainKindForHost, requestHost } from "./tenant-resolver";
 import { uploadDir } from "./upload";
+import { defaultOrgId } from "./tenant";
 import {
   securityHeaders,
   requestLogger,
@@ -54,10 +52,6 @@ app.disable("x-powered-by");
 app.use(requestLogger);
 app.use(securityHeaders);
 
-// Stripe webhook must see the raw request body to verify the signature, so it is
-// registered before the JSON body parser (and before CSRF, which it is exempt from).
-app.post("/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
-
 // SCIM sends application/scim+json; admin forms send urlencoded; beacons send text/plain.
 app.use(express.json({ type: ["application/json", "application/scim+json"], limit: "1mb" }));
 app.use(express.text({ type: ["text/plain"], limit: "256kb" }));
@@ -82,8 +76,6 @@ app.use("/me/devlogin", loginLimiter);
 app.use("/admin/forgot", rateLimit({ name: "forgot", windowMs: 15 * 60_000, max: 5, methods: ["POST"] }));
 app.use("/admin/reset", loginLimiter);
 app.use("/admin/invite", loginLimiter);
-// Signup creates resources; keep it tightly throttled.
-app.use("/signup", rateLimit({ name: "signup", windowMs: 60 * 60_000, max: 10, methods: ["POST"] }));
 
 // Static assets (styles.css). Works in dev (src/public) and prod (dist/public).
 app.use(express.static(path.join(__dirname, "public")));
@@ -102,6 +94,14 @@ app.use(
 );
 
 app.get("/healthz", (_req, res) => res.json({ ok: true, rlsEnforced }));
+app.get("/readyz", async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ ok: true, database: "ready", rlsEnforced });
+  } catch {
+    res.status(503).json({ ok: false, database: "unavailable", rlsEnforced });
+  }
+});
 
 // Generic QR image for an arbitrary https URL. Used by email signatures to render
 // a campaign QR (auto-generated from the campaign banner link). Public + cached.
@@ -129,53 +129,16 @@ app.get("/tls/authorize", async (req, res) => {
   res.status(ok ? 200 : 403).end();
 });
 
-// The root of a registered client custom domain lands on that client's portal
-// (employee vs admin); both surfaces stay reachable by path. Unregistered
-// hosts (the platform's own domain) get the public marketing site.
+// The deployment belongs to one company. Branded employee domains land on
+// self-service; the default host opens the admin dashboard.
 app.get("/", async (req, res) => {
   const kind = await domainKindForHost(requestHost(req));
-  if (kind) return res.redirect(kind === "user" ? "/me" : "/admin");
-  res.type("html").send(marketingPage());
+  res.redirect(kind === "user" ? "/me" : "/admin");
 });
-
-// Public legal pages (linked from the marketing footer and signup).
-app.get("/terms", (_req, res) => res.type("html").send(termsPage()));
-app.get("/privacy", (_req, res) => res.type("html").send(privacyPage()));
-
-// Marketing contact form -> contact@opencard.id. Rate-limited; the hidden
-// "website" field is a honeypot (bots fill it, humans never see it).
-app.post(
-  "/contact",
-  rateLimit({ name: "contact", windowMs: 60 * 60_000, max: 5, methods: ["POST"] }),
-  async (req, res) => {
-    const b = req.body || {};
-    const name = String(b.name || "").trim().slice(0, 120);
-    const email = String(b.email || "").trim().slice(0, 200);
-    const company = String(b.company || "").trim().slice(0, 160);
-    const message = String(b.message || "").trim().slice(0, 4000);
-    const trap = String(b.website || "").trim();
-    const wantsJson = (req.headers.accept || "").includes("application/json");
-    const fail = (msg: string) =>
-      wantsJson ? res.status(400).json({ ok: false, error: msg }) : res.status(400).send(msg);
-    if (trap) return wantsJson ? res.json({ ok: true }) : res.redirect("/"); // silently drop bots
-    if (!name || !message) return fail("Name and message are required.");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail("Enter a valid email address.");
-    await sendMail(
-      ["contact@opencard.id"],
-      `Website contact: ${name}${company ? ` (${company})` : ""}`,
-      `From: ${name} <${email}>${company ? `\nCompany: ${company}` : ""}\n\n${message}\n\n—\nSent from the opencard.id contact form. Reply to: ${email}`
-    );
-    if (wantsJson) return res.json({ ok: true });
-    res
-      .type("html")
-      .send(marketingPage()); // non-JS fallback lands back on the page
-  }
-);
 
 app.use("/scim/v2", scimLimiter, scimRouter);
 app.use("/api/v1", apiLimiter, apiRouter);
 app.use("/preview", previewRouter);
-app.use("/signup", signupRouter);
 app.use("/admin", adminRouter);
 app.use("/me", selfRouter);
 app.use("/c", leadLimiter, cardsRouter);
@@ -185,9 +148,11 @@ app.use("/k", leadLimiter, campaignRouter);
 app.use(notFound);
 app.use(errorHandler);
 
-app.listen(config.port, () => {
-  // eslint-disable-next-line no-console
+defaultOrgId().then(() => app.listen(config.port, () => {
   console.log(`OpenCard listening on ${config.baseUrl} (port ${config.port})`);
+})).catch((error) => {
+  console.error("OpenCard startup failed:", error);
+  process.exit(1);
 });
 
 // Hourly maintenance: manager digests + retention/SAML pruning. Guarded by a
@@ -199,6 +164,10 @@ if (process.env.NODE_ENV !== "test") {
       await runDueDigests().catch((e) => console.log(JSON.stringify({ msg: "digest-tick-error", error: String(e?.message || e).slice(0, 200) })));
       await pruneExpiredLeads().catch((e) => console.log(JSON.stringify({ msg: "retention-tick-error", error: String(e?.message || e).slice(0, 200) })));
       await pruneSamlRequestIds().catch((e) => console.log(JSON.stringify({ msg: "saml-prune-error", error: String(e?.message || e).slice(0, 200) })));
+      await pruneRateLimitBuckets().catch((e) => console.log(JSON.stringify({ msg: "ratelimit-prune-error", error: String(e?.message || e).slice(0, 200) })));
+      await pruneWebhookDeliveries(config.webhookDeliveryRetentionDays).catch((e) =>
+        console.log(JSON.stringify({ msg: "webhook-retention-error", error: String(e?.message || e).slice(0, 200) }))
+      );
     });
   setInterval(() => void tick(), 60 * 60 * 1000);
 }

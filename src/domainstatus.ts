@@ -2,9 +2,9 @@
 // logic that turns a DNS lookup result into a client-friendly status, plus the
 // exact record the client must create.
 
-// The host clients CNAME their domain to (an A record for this points at the
-// server). Overridable per deploy.
-export const CNAME_TARGET = process.env.TENANTS_CNAME_TARGET || "tenants.opencard.id";
+// Branded login hosts CNAME to this installation's primary host.
+export const CNAME_TARGET = process.env.TENANTS_CNAME_TARGET ||
+  new URL(process.env.APP_URL || process.env.BASE_URL || "http://localhost:3000").hostname;
 
 export type DnsResolved = { cnames: string[]; addrs: string[] };
 export type DomainExpectation = { cnameTarget: string; ips: string[] };

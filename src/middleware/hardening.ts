@@ -1,6 +1,11 @@
 import { Request, Response, NextFunction } from "express";
 import { config } from "../config";
 import { notFoundPage } from "../views/notfound";
+import {
+  memoryRateLimitStore,
+  RateLimitStore,
+  sharedRateLimitStore,
+} from "../rate-limit-store";
 
 // Client IP for rate-limit keys and logs. Relies on Express's `trust proxy`
 // (set to the proxy hop count in server.ts) rather than reading X-Forwarded-For
@@ -62,7 +67,7 @@ export function securityHeaders(_req: Request, res: Response, next: NextFunction
 }
 
 // ---------- Request logging ----------
-const NOISY = (p: string) => p === "/healthz" || p === "/styles.css" || p.startsWith("/uploads");
+const NOISY = (p: string) => p === "/healthz" || p === "/readyz" || p === "/styles.css" || p.startsWith("/uploads");
 
 export function requestLogger(req: Request, res: Response, next: NextFunction): void {
   const start = Date.now();
@@ -81,37 +86,40 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
   next();
 }
 
-// ---------- Rate limiting (in-memory, per IP) ----------
-type Bucket = { count: number; reset: number };
-
+// ---------- Rate limiting (shared PostgreSQL store, per IP) ----------
 export function rateLimit(opts: {
   name: string;
   windowMs: number;
   max: number;
   methods?: string[];
   match?: (req: Request) => boolean;
+  store?: RateLimitStore;
 }) {
-  const hits = new Map<string, Bucket>();
-  const sweep = setInterval(() => {
-    const now = Date.now();
-    for (const [k, b] of hits) if (b.reset < now) hits.delete(k);
-  }, opts.windowMs);
-  if (typeof sweep.unref === "function") sweep.unref();
+  const store = opts.store ?? sharedRateLimitStore;
+  const fallback = memoryRateLimitStore();
+  let lastStoreWarning = 0;
 
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     if (opts.methods && !opts.methods.includes(req.method)) return next();
     if (opts.match && !opts.match(req)) return next();
-    const key = clientIp(req);
+    const ip = clientIp(req);
+    const key = `${opts.name}:${ip}`;
     const now = Date.now();
-    let b = hits.get(key);
-    if (!b || b.reset < now) {
-      b = { count: 0, reset: now + opts.windowMs };
-      hits.set(key, b);
+    let bucket;
+    try {
+      bucket = await store.hit(key, opts.windowMs);
+    } catch (error: any) {
+      // Most rate-limited routes need the database anyway. Still retain local
+      // protection during a transient store failure instead of failing open.
+      bucket = await fallback.hit(key, opts.windowMs);
+      if (now - lastStoreWarning > 60_000) {
+        lastStoreWarning = now;
+        log({ lvl: "error", event: "rate_limit_store_error", error: String(error?.message || error).slice(0, 200) });
+      }
     }
-    b.count++;
-    if (b.count > opts.max) {
-      res.setHeader("Retry-After", String(Math.ceil((b.reset - now) / 1000)));
-      log({ lvl: "warn", event: "rate_limited", limiter: opts.name, ip: key, path: req.originalUrl.split("?")[0] });
+    if (bucket.count > opts.max) {
+      res.setHeader("Retry-After", String(Math.max(1, Math.ceil((bucket.reset - now) / 1000))));
+      log({ lvl: "warn", event: "rate_limited", limiter: opts.name, ip, path: req.originalUrl.split("?")[0] });
       return res.status(429).send("Too many requests — please slow down and try again shortly.");
     }
     next();
@@ -141,15 +149,21 @@ export function csrfGuard(req: Request, res: Response, next: NextFunction) {
   if (!guarded || EXEMPT.has(path)) return next();
 
   const expected = hostOf(config.baseUrl);
+  // Host-only session cookies make the request's own host a valid same-origin
+  // target as well. This supports registered branded domains without accepting
+  // an Origin from a different site.
+  const requestHost = String(req.headers.host || "").trim().toLowerCase();
   const origin = hostOf(req.headers.origin as string | undefined);
   const referer = hostOf(req.headers.referer as string | undefined);
   const claimed = origin ?? referer;
 
   if (claimed === null) {
-    // No Origin/Referer (some privacy setups strip them); SameSite=Lax still applies.
-    return next();
+    // Cookie-authenticated mutations must prove their source. SameSite=Lax is
+    // not sufficient by itself because sibling tenant subdomains are same-site.
+    log({ lvl: "warn", event: "csrf_blocked", path, origin, referer, ip: clientIp(req), reason: "missing_source" });
+    return res.status(403).send("Blocked: request source could not be verified (CSRF protection).");
   }
-  if (claimed === expected) return next();
+  if (claimed === expected || (!!requestHost && claimed.toLowerCase() === requestHost)) return next();
 
   log({ lvl: "warn", event: "csrf_blocked", path, origin, referer, ip: clientIp(req) });
   return res.status(403).send("Blocked: cross-origin request rejected (CSRF protection).");

@@ -7,36 +7,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Top-level tenant: your company / this deployment.
-// Platform-wide settings, editable by OpenCard staff in the UI (no code
-// changes / redeploys). Single row with a fixed id.
-model PlatformConfig {
-  id               String @id @default("platform")
-  signupPlan       String @default("individual") // plan tier for self-service signups
-  signupTrialDays  Int    @default(30) // trial length for self-service signups
-  // Private-beta gate: when set, public signup requires this code/phrase.
-  signupAccessCode String @default("")
+// Shared fixed-window request counters. Production runs more than one web
+// process, so security-sensitive rate limits cannot live only in process memory.
+// Rows are short-lived and pruned by the hourly maintenance job.
+model RateLimitBucket {
+  key       String   @id
+  count     Int
+  resetAt   DateTime
+  updatedAt DateTime @updatedAt
+
+  @@index([resetAt])
 }
 
 model Org {
   id                    String            @id @default(cuid())
   name                  String
   vertical              String            @default("general")
-  // Platform-staff kill switch: blocks admin access, self-service, the API,
-  // and all public surfaces (cards, assets, campaign links) for this org.
-  suspended             Boolean           @default(false)
-  // Self-signup email verification gate: public surfaces stay dark until the
-  // owner confirms their address. Staff-created clients are verified at
-  // creation; existing orgs are backfilled by the migration.
-  // Terms-of-service acceptance recorded at self-service signup.
-  tosAcceptedAt         DateTime?
-  tosVersion            String?
-  ownerVerifiedAt       DateTime?
   // First-run onboarding checklist on the dashboard; set when dismissed.
   onboardingDismissedAt DateTime?
-  // Paid add-on: printable CR80 ID badges (front + patterned back). Staff
-  // turn it on per client alongside the plan.
-  idCardsEnabled        Boolean           @default(false)
   // Tenant addressing. `subdomain` is the label under the platform domain
   // (e.g. "acme" -> acme.opencard.id); `customDomain` is a fully-qualified host
   // the customer points at us (e.g. cards.acmecorp.com). Both are optional and
@@ -57,21 +45,6 @@ model Org {
   // Data-retention policy (Phase 9.3): auto-delete leads older than N days.
   // null / 0 = keep forever.
   leadRetentionDays     Int?
-  // Billing / plan state. `plan` keys into src/plans.ts. Stripe ids are set once
-  // hosted checkout is wired; until then plans are assigned by a platform owner.
-  plan                  String            @default("individual")
-  // Per-client seat (user/card) allowance set by OpenCard staff. null = use the
-  // plan's card limit; -1 = unlimited (billed per seat); else a hard cap.
-  seatLimit             Int?
-  // How this tenant is billed: standard (Stripe), demo (time-limited free comp,
-  // then must subscribe), or free (permanent comp — friends/family).
-  billingMode           String            @default("standard") // standard | demo | free
-  subscriptionStatus    String            @default("trialing") // trialing | active | past_due | canceled
-  trialEndsAt           DateTime?
-  currentPeriodEnd      DateTime?
-  cancelAtPeriodEnd     Boolean           @default(false)
-  stripeCustomerId      String?           @unique
-  stripeSubscriptionId  String?           @unique
   // Per-tenant SCIM bearer token (only the SHA-256 hash is stored). Lets each
   // customer's IdP provision into their own org.
   scimTokenHash         String?           @unique
@@ -128,7 +101,7 @@ model AuditLog {
   orgId      String
   actorEmail String? // who performed it (null = system / break-glass token)
   actorRole  String?
-  action     String // e.g. login.success, admin.create, integration.create, billing.plan
+  action     String // e.g. login.success, admin.create, integration.create
   targetType String?
   targetId   String?
   summary    String?
@@ -207,8 +180,8 @@ model CrmSyncLog {
 // A hostname a client points at us (via CNAME) for a branded login. Maps a host
 // to a tenant scope: a brand (brand-wide branded login) or a specific rooftop
 // (location override). `approved` gates on-demand TLS certificate issuance so we
-// only auto-issue certs for hosts an admin has registered. Not RLS-scoped: it is
-// routing metadata resolved before authentication (like Org/AdminUser).
+// only auto-issue certs for hosts an admin has registered. Pre-auth routing uses
+// the owner client, while tenant-side access remains protected by orgId RLS.
 model TenantDomain {
   id          String    @id @default(cuid())
   host        String    @unique // fully-qualified, lowercased (e.g. cards.mullinaxford.com)
@@ -402,10 +375,10 @@ model User {
   locationId    String
   org           Org      @relation(fields: [orgId], references: [id])
   orgId         String
-  email         String   @unique
+  email         String
   displayName   String
-  externalId    String?  @unique // SCIM externalId / AD objectId
-  scimId        String?  @unique
+  externalId    String? // SCIM externalId / AD objectId
+  scimId        String?
   // Which automated path created this user: "scim" | "import" | "jit".
   // Null = created by an admin by hand. Drives the sync health dashboard.
   provisionedBy String?
@@ -413,6 +386,9 @@ model User {
   card          Card?
   createdAt     DateTime @default(now())
 
+  @@unique([orgId, email])
+  @@unique([orgId, externalId])
+  @@unique([orgId, scimId])
   @@index([orgId])
 }
 

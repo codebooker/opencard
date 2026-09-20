@@ -6,6 +6,7 @@ import {
   assembleLead,
   DEFAULT_LEAD_FIELDS,
   DEFAULT_CONSENT_TEXT,
+  leadSubmissionError,
 } from "./leadform";
 
 test("resolveLeadFields: template wins, then brand, then defaults", () => {
@@ -62,4 +63,17 @@ test("assembleLead: unchecked boxes false, missing optionals null", () => {
   assert.equal(lead.consent, false);
   assert.equal(lead.email, null);
   assert.equal(lead.device, "unknown");
+});
+
+test("lead validation rejects whitespace names, malformed email, and missing configured consent", () => {
+  assert.equal(leadSubmissionError({ name: "   " }), "Name required");
+  assert.equal(leadSubmissionError({ name: "Pat", email: "not-an-email" }), "Enter a valid email address");
+  assert.equal(leadSubmissionError({ name: "Pat" }, ["consent"]), "Consent is required");
+  assert.equal(leadSubmissionError({ name: " Pat ", email: "pat@example.com", consent: "1" }, ["consent"]), null);
+});
+
+test("assembleLead trims submitted text fields", () => {
+  const lead = assembleLead({ name: "  Pat Prospect  ", email: " pat@example.com " }, "");
+  assert.equal(lead.name, "Pat Prospect");
+  assert.equal(lead.email, "pat@example.com");
 });

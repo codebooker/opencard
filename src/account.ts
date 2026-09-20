@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { prisma } from "./db";
 
 // Account lifecycle primitives: revocable admin sessions, single-use auth
-// tokens (password reset / invite / email verification), and MFA recovery
+// tokens (password reset / invite), and MFA recovery
 // codes. Raw secrets never touch the database — only SHA-256 hashes.
 
 export const sha256hex = (s: string): string => crypto.createHash("sha256").update(s).digest("hex");
@@ -12,13 +12,11 @@ export function newRawToken(): string {
 }
 
 // ---------- single-use auth tokens ----------
-export type TokenKind = "reset" | "invite" | "verify" | "signup";
+export type TokenKind = "reset" | "invite";
 
 export const TOKEN_TTL_MS: Record<TokenKind, number> = {
   reset: 60 * 60 * 1000, // 1 hour
   invite: 7 * 24 * 60 * 60 * 1000, // 7 days
-  verify: 7 * 24 * 60 * 60 * 1000, // 7 days
-  signup: 24 * 60 * 60 * 1000, // 24 hours — magic link to start an account
 };
 
 export async function issueToken(kind: TokenKind, email: string, orgId?: string | null): Promise<string> {
@@ -42,18 +40,18 @@ export async function issueToken(kind: TokenKind, email: string, orgId?: string 
 }
 
 // Validate without consuming (for rendering the set-password form).
-export async function peekToken(kind: TokenKind, raw: string) {
+export async function peekToken(kind: TokenKind, raw: string, db: any = prisma) {
   if (!raw) return null;
-  const t = await prisma.authToken.findUnique({ where: { tokenHash: sha256hex(raw) } });
+  const t = await db.authToken.findUnique({ where: { tokenHash: sha256hex(raw) } });
   if (!t || t.kind !== kind || t.usedAt || t.expiresAt.getTime() < Date.now()) return null;
   return t;
 }
 
 // Validate and mark used (single use).
-export async function consumeToken(kind: TokenKind, raw: string) {
-  const t = await peekToken(kind, raw);
+export async function consumeToken(kind: TokenKind, raw: string, db: any = prisma) {
+  const t = await peekToken(kind, raw, db);
   if (!t) return null;
-  const updated = await prisma.authToken.updateMany({
+  const updated = await db.authToken.updateMany({
     where: { id: t.id, usedAt: null },
     data: { usedAt: new Date() },
   });

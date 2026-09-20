@@ -19,11 +19,13 @@ export async function computeOrgAnalytics(orgId: string, rangeKey: unknown) {
   const cardIds = cards.map((c) => c.id);
   const whereEvents = { cardId: { in: cardIds }, ...(since ? { createdAt: { gte: since } } : {}) };
   const leadWhere = { orgId, ...(since ? { createdAt: { gte: since } } : {}) };
-  const [grouped, viewsByCard, leadsInRange, scanAgg, leadCount] = await Promise.all([
+  const [grouped, viewsByCard, leadsInRange, assetScans, leadCount] = await Promise.all([
     prisma.analyticsEvent.groupBy({ by: ["type"], where: whereEvents, _count: { _all: true } }),
     prisma.analyticsEvent.groupBy({ by: ["cardId"], where: { type: "view", ...whereEvents }, _count: { _all: true } }),
     prisma.lead.findMany({ where: leadWhere, select: { cardId: true, assetId: true, status: true, campaign: true, utmCampaign: true, utmSource: true } }),
-    prisma.asset.aggregate({ where: { orgId }, _sum: { scanCount: true } }),
+    prisma.analyticsEvent.count({
+      where: { orgId, type: "scan", ...(since ? { createdAt: { gte: since } } : {}) },
+    }),
     prisma.lead.count({ where: leadWhere }),
   ]);
   const totals: Record<string, number> = {};
@@ -66,7 +68,7 @@ export async function computeOrgAnalytics(orgId: string, rangeKey: unknown) {
     totals,
     leadCount,
     conversion: conversionPct(leadCount, totals.view || 0),
-    assetScans: scanAgg._sum.scanCount || 0,
+    assetScans,
     leaderboard: sortLeaderboard(locations.map((l) => ({ id: l.id, name: l.name, views: per.get(l.id)!.views, leads: per.get(l.id)!.leads }))),
     funnel: buildFunnel(statusCounts),
     sources: topGroups(sourceCounts, 50),
@@ -85,7 +87,7 @@ export function analyticsCsv(orgName: string, data: Awaited<ReturnType<typeof co
   rows.push(["Card views", data.totals.view || 0]);
   rows.push(["Contacts saved", data.totals.vcard || 0]);
   rows.push(["Link clicks", data.totals.click || 0]);
-  rows.push(["QR asset scans (all-time)", data.assetScans]);
+  rows.push(["QR asset scans", data.assetScans]);
   rows.push(["Leads captured", data.leadCount]);
   rows.push(["View to lead rate (%)", data.conversion]);
   rows.push([]);
@@ -136,9 +138,14 @@ export async function runDueDigests(now: Date = new Date()): Promise<number> {
   for (const o of orgs) {
     if (!digestDue(o.digestCadence, o.digestLastSentAt, now)) continue;
     if (!parseDigestEmails(o.digestEmails).length) continue;
-    await sendDigest(o.id).catch(() => {});
-    await prisma.org.update({ where: { id: o.id }, data: { digestLastSentAt: now } });
-    sent++;
+    const result = await sendDigest(o.id).catch(() => null);
+    // sendMail reports failures as a result instead of throwing. Only advance
+    // the cadence after SMTP accepted the message; otherwise the next scheduler
+    // tick retries instead of suppressing delivery for another week.
+    if (result?.delivered === "smtp") {
+      await prisma.org.update({ where: { id: o.id }, data: { digestLastSentAt: now } });
+      sent++;
+    }
   }
   return sent;
 }

@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 // test needs no live database — modeling pg_try_advisory_xact_lock as a simple
 // held-keys set, released when the transaction callback returns.
 
-import { withAdvisoryLock } from "./joblock";
+import { withAdvisoryLock, withExclusiveAdvisoryLock } from "./joblock";
 import { prisma } from "./db";
 
 function installTxStub() {
@@ -81,6 +81,24 @@ test("the lock is released after running, so a later call runs again", async () 
     assert.equal(await withAdvisoryLock(7, job), true);
     assert.equal(await withAdvisoryLock(7, job), true); // sequential, lock free again
     assert.equal(ran, 2);
+  } finally {
+    restore();
+  }
+});
+
+test("exclusive lock rejects a concurrent destructive operation", async () => {
+  const restore = installTxStub();
+  try {
+    let release!: () => void;
+    const held = withExclusiveAdvisoryLock(99, () => new Promise<void>((resolve) => { release = resolve; }));
+    // Let the first transaction acquire the lock before the second tries.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await assert.rejects(
+      () => withExclusiveAdvisoryLock(99, async () => {}, "busy"),
+      /busy/
+    );
+    release();
+    await held;
   } finally {
     restore();
   }

@@ -1,46 +1,17 @@
 // Admin route group: console (split from admin.ts, CQ-05).
 import {
-  Router, CsvTarget, DEFAULT_PLAN, applyImport, audit, clean, clearCookieOptions, config,
-  cookieOptions, credsForOrg, currentTerminology, deleteDirectoryConfig, directoryConfigSummary, esc, filterByDepartment, forbidden,
-  getPlatformConfig, guessMapping, humanSize, isConsole, isPlanKey, isVertical, listBackups, listDirectoryUsers,
-  mapCsvRow, mapGraphUser, multer, onlySelected, page, parseCsv, parseSeatLimit, planCandidates,
-  planImport, prisma, purgeOrgData, reqAdmin, restoreClientToBackup, runManualBackup, runWithOrg, saveDirectoryConfig,
-  searchGroups, testGraphCreds, updatePlatformConfig, upload, uploadDir, withRestoreLock,
+  Router, CsvTarget, applyImport, audit, clean, credsForOrg, currentTerminology,
+  deleteDirectoryConfig, directoryConfigSummary, filterByDepartment, forbidden,
+  guessMapping, humanSize, listBackups, listDirectoryUsers, mapCsvRow, mapGraphUser,
+  multer, offsiteConfigured, onlySelected, parseCsv, planCandidates, planImport, prisma, reqAdmin,
+  restoreClientToBackup, runManualBackup, runWithOrg, saveDirectoryConfig,
+  searchGroups, testGraphCreds, uploadDir, withRestoreLock,
 } from "./context";
 import { RBAC } from "./context";
 import { V } from "./context";
 
 export function registerConsoleRoutes(router: Router) {
   const adminRouter = router;
-
-// ---------- dashboard ----------
-// OpenCard staff console: list every client workspace. Drill in to manage one.
-adminRouter.get("/clients", async (req, res) => {
-  const p = reqAdmin(req);
-  if (!p.platform) return forbidden(res);
-  const orgs = await prisma.org.findMany({
-    orderBy: { createdAt: "asc" },
-    select: {
-      id: true, name: true, subdomain: true, plan: true, billingMode: true, subscriptionStatus: true, suspended: true,
-      _count: { select: { brands: true, cards: true, leads: true } },
-    },
-  });
-  res.send(V.clientsConsole(orgs, p));
-});
-
-const VALID_MODES = ["free", "standard", "demo"];
-
-adminRouter.get("/clients/new", (req, res) => {
-  if (!reqAdmin(req).platform) return forbidden(res);
-  res.send(V.clientForm());
-});
-
-// ---------- platform settings (signup defaults) ----------
-adminRouter.get("/platform", async (req, res) => {
-  const p = reqAdmin(req);
-  if (!p.platform || !p.staffAdmin) return forbidden(res);
-  res.send(V.platformSettingsView(await getPlatformConfig(), req.query.saved === "1"));
-});
 
 // ---------- directory import wizard (Phase 13) ----------
 // Self-service: org owners connect their OWN Azure tenant on this page.
@@ -321,188 +292,54 @@ adminRouter.post("/sync/deactivate", async (req, res) => {
   res.send(V.syncView({ t, overview: await syncOverview(p.orgId), flash: `${deactivated} deactivated.` }));
 });
 
-// ---------- backups & per-client restore (platform owner/admin) ----------
+// Owners can create local snapshots here; optional S3 settings also copy them
+// offsite. The host script schedules full backups independently of the UI.
 adminRouter.get("/backups", async (req, res) => {
   const p = reqAdmin(req);
-  if (!p.platform || !p.staffAdmin) return forbidden(res);
-  const orgs = await prisma.org.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } });
-  res.send(
-    V.backupsView({
-      backups: listBackups().map((b) => ({ ...b, sizeHuman: humanSize(b.size) })),
-      orgs,
-      flash: req.query.ran
-        ? "Backup complete."
-        : req.query.restored
-        ? `Client restored (${String(req.query.restored)} rows).`
-        : null,
-      error: req.query.error ? String(req.query.error).slice(0, 300) : null,
-    })
-  );
+  if (!p.super) return forbidden(res);
+  const org = await prisma.org.findUnique({ where: { id: p.orgId }, select: { name: true } });
+  res.send(V.backupsView({
+    workspaceName: org?.name || "Workspace",
+    backups: listBackups().map((b) => ({ ...b, sizeHuman: humanSize(b.size) })),
+    offsiteConfigured: offsiteConfigured(),
+    flash: req.query.ran ? (req.query.offsite ? "Local and offsite backup complete." : "Local backup complete.") : req.query.restored ? "Workspace content restored." : null,
+    error: req.query.error ? String(req.query.error).slice(0, 200) : null,
+  }));
 });
 
 adminRouter.post("/backups/run", async (req, res) => {
   const p = reqAdmin(req);
-  if (!p.platform || !p.staffAdmin) return forbidden(res);
+  if (!p.super) return forbidden(res);
   try {
-    const out = await runManualBackup(uploadDir);
-    audit(req, p, "backup.manual", { summary: out.db });
-    res.redirect("/admin/backups?ran=1");
+    const result = await runManualBackup(uploadDir);
+    audit(req, p, "backup.manual", { summary: result.db });
+    res.redirect("/admin/backups?ran=1" + (result.offsite ? "&offsite=1" : ""));
   } catch (e: any) {
-    res.redirect("/admin/backups?error=" + encodeURIComponent(String(e?.message || e).slice(0, 200)));
+    res.redirect("/admin/backups?error=" + encodeURIComponent(String(e?.message || e).slice(0, 180)));
   }
 });
 
-adminRouter.post("/backups/restore-client", async (req, res) => {
+adminRouter.post("/backups/restore", async (req, res) => {
   const p = reqAdmin(req);
-  if (!p.platform || !p.staffAdmin) return forbidden(res);
-  const org = await prisma.org.findUnique({ where: { id: String(req.body?.orgId || "") }, select: { id: true, name: true } });
-  if (!org) return res.redirect("/admin/backups?error=" + encodeURIComponent("Client not found."));
-  if (String(req.body?.confirmName || "") !== org.name)
-    return res.redirect("/admin/backups?error=" + encodeURIComponent("The client name you typed does not match."));
+  if (!p.super) return forbidden(res);
+  const org = await prisma.org.findUnique({ where: { id: p.orgId }, select: { name: true } });
+  if (!org || String(req.body?.confirmName || "") !== org.name) {
+    return res.redirect("/admin/backups?error=" + encodeURIComponent("Workspace name did not match."));
+  }
   const dump = String(req.body?.dump || "");
   try {
-    const result = await withRestoreLock(() => restoreClientToBackup(org.id, dump));
-    audit(req, p, "backup.restore_client", { targetType: "Org", targetId: org.id, summary: `${org.name} <- ${dump} (${result.rows} rows)` });
-    res.redirect("/admin/backups?restored=" + result.rows);
+    const result = await withRestoreLock(() => restoreClientToBackup(p.orgId, dump));
+    audit(req, p, "backup.restore", { targetType: "Org", targetId: p.orgId, summary: `${dump} (${result.rows} rows)` });
+    res.redirect("/admin/backups?restored=1");
   } catch (e: any) {
-    audit(req, p, "backup.restore_failed", { targetType: "Org", targetId: org.id, summary: String(e?.message || e).slice(0, 150) });
-    res.redirect("/admin/backups?error=" + encodeURIComponent(String(e?.message || e).slice(0, 200)));
+    audit(req, p, "backup.restore_failed", { summary: String(e?.message || e).slice(0, 150) });
+    res.redirect("/admin/backups?error=" + encodeURIComponent(String(e?.message || e).slice(0, 180)));
   }
-});
-
-adminRouter.post("/platform", async (req, res) => {
-  const p = reqAdmin(req);
-  if (!p.platform || !p.staffAdmin) return forbidden(res);
-  const saved = await updatePlatformConfig({
-    signupPlan: String(req.body?.signupPlan || ""),
-    signupTrialDays: parseInt(String(req.body?.signupTrialDays || ""), 10),
-    signupAccessCode: String(req.body?.signupAccessCode ?? ""),
-  });
-  // Don't write the code itself into the audit log.
-  audit(req, p, "platform.settings", {
-    targetType: "PlatformConfig",
-    summary: JSON.stringify({ ...saved, signupAccessCode: saved.signupAccessCode ? "(set)" : "(off)" }),
-  });
-  res.redirect("/admin/platform?saved=1");
-});
-
-adminRouter.post("/clients", async (req, res) => {
-  if (!reqAdmin(req).platform) return forbidden(res);
-  const b = req.body;
-  const name = clean(b.name);
-  if (!name) return res.redirect("/admin/clients/new");
-  const mode = VALID_MODES.includes(b.billingMode) ? b.billingMode : "standard";
-  const demo =
-    mode === "demo"
-      ? {
-          trialEndsAt: new Date(Date.now() + (Number(b.demoDays) === 60 ? 60 : 30) * 24 * 60 * 60 * 1000),
-          subscriptionStatus: "trialing",
-        }
-      : {};
-  await prisma.org.create({
-    data: {
-      name,
-      vertical: isVertical(b.businessType) ? b.businessType : "general",
-      plan: isPlanKey(b.plan) ? b.plan : DEFAULT_PLAN,
-      billingMode: mode,
-      idCardsEnabled: b.idCards === "1",
-      seatLimit: parseSeatLimit(b.seatLimit),
-      // Staff-created clients skip signup email verification (staff vouches).
-      ownerVerifiedAt: new Date(),
-      ...demo,
-    },
-  });
-  res.redirect("/admin/clients");
-});
-
-adminRouter.get("/clients/:orgId/settings", async (req, res) => {
-  if (!reqAdmin(req).platform) return forbidden(res);
-  const org = await prisma.org.findUnique({ where: { id: req.params.orgId } });
-  if (!org) return res.status(404).send("Client not found");
-  res.send(V.clientForm(org));
-});
-
-adminRouter.post("/clients/:orgId/settings", async (req, res) => {
-  if (!reqAdmin(req).platform) return forbidden(res);
-  const b = req.body;
-  const data: any = { seatLimit: parseSeatLimit(b.seatLimit), idCardsEnabled: b.idCards === "1" };
-  if (clean(b.name)) data.name = clean(b.name);
-  if (isVertical(b.businessType)) data.vertical = b.businessType;
-  if (isPlanKey(b.plan)) data.plan = b.plan;
-  if (VALID_MODES.includes(b.billingMode)) {
-    data.billingMode = b.billingMode;
-    if (b.billingMode === "demo") {
-      data.trialEndsAt = new Date(Date.now() + (Number(b.demoDays) === 60 ? 60 : 30) * 24 * 60 * 60 * 1000);
-      data.subscriptionStatus = "trialing";
-    }
-  }
-  await prisma.org.update({ where: { id: req.params.orgId }, data });
-  res.redirect("/admin/clients");
-});
-
-// Suspend / unsuspend a client workspace (platform staff only). A suspended
-// org is fully dark: admin UI, self-service, API, and all public surfaces.
-adminRouter.post("/clients/:orgId/suspend", async (req, res) => {
-  const p = reqAdmin(req);
-  if (!p.platform) return forbidden(res);
-  const org = await prisma.org.findUnique({ where: { id: req.params.orgId }, select: { id: true, suspended: true, name: true } });
-  if (!org) return res.status(404).send("Client not found");
-  const suspended = !org.suspended;
-  await prisma.org.update({ where: { id: org.id }, data: { suspended } });
-  audit(req, p, suspended ? "client.suspend" : "client.unsuspend", {
-    targetType: "Org",
-    targetId: org.id,
-    summary: org.name,
-  });
-  res.redirect(`/admin/clients/${org.id}/settings`);
-});
-
-// Permanently delete a client: purge all tenant data, then remove the org's
-// admin accounts, audit trail, and the org row itself. Platform staff only,
-// gated on typing the client name exactly.
-adminRouter.post("/clients/:orgId/delete", async (req, res) => {
-  const p = reqAdmin(req);
-  if (!p.platform) return forbidden(res);
-  const org = await prisma.org.findUnique({ where: { id: req.params.orgId }, select: { id: true, name: true } });
-  if (!org) return res.status(404).send("Client not found");
-  if (String(req.body?.confirmName || "") !== org.name) {
-    return res.status(400).send(
-      page({
-        title: "Name mismatch",
-        body: `<main class="admin"><h2>Name didn't match</h2><p class="muted">To delete <strong>${esc(
-          org.name
-        )}</strong>, type its name exactly.</p><a class="btn secondary" href="/admin/clients/${esc(org.id)}/settings">Back</a></main>`,
-      })
-    );
-  }
-  // Audit first, attributed to the platform org, so the record outlives the client.
-  audit(req, p, "client.delete", { targetType: "Org", targetId: org.id, summary: org.name });
-  await purgeOrgData(org.id);
-  await prisma.auditLog.deleteMany({ where: { orgId: org.id } });
-  await prisma.adminUser.deleteMany({ where: { orgId: org.id } }); // scopes cascade
-  await prisma.org.delete({ where: { id: org.id } });
-  res.redirect("/admin/clients");
-});
-
-adminRouter.post("/clients/:orgId/enter", async (req, res) => {
-  const p = reqAdmin(req);
-  if (!p.platform) return forbidden(res);
-  const org = await prisma.org.findUnique({ where: { id: req.params.orgId }, select: { id: true } });
-  if (!org) return res.status(404).send("Client not found");
-  res.cookie("oc_actorg", org.id, cookieOptions(12 * 60 * 60 * 1000));
-  res.redirect("/admin");
-});
-
-adminRouter.get("/clients/exit", (_req, res) => {
-  res.clearCookie("oc_actorg", clearCookieOptions());
-  res.redirect("/admin");
 });
 
 adminRouter.get("/", async (req, res) => {
   const p = reqAdmin(req);
   const t = await currentTerminology(reqAdmin(req).orgId);
-  // OpenCard staff who haven't drilled into a client see the clients console.
-  if (isConsole(p)) return res.redirect("/admin/clients");
   const brandIds = await RBAC.accessibleBrandIds(p);
   const locFilter = p.global ? undefined : { id: { in: await RBAC.accessibleLocationIds(p) } };
   const brands = await prisma.brand.findMany({
@@ -516,18 +353,10 @@ adminRouter.get("/", async (req, res) => {
       },
     },
   });
-  // When a platform admin has drilled into a client, show whose workspace this is.
-  let actingClientName: string | undefined;
-  if (p.actingOrgId) {
-    const org = await prisma.org.findUnique({ where: { id: p.actingOrgId }, select: { name: true } });
-    actingClientName = org?.name;
-  }
-  // Unverified self-signup org: banner until the owner confirms their email.
   const own = await prisma.org.findUnique({
     where: { id: p.orgId },
-    select: { ownerVerifiedAt: true, onboardingDismissedAt: true },
+    select: { onboardingDismissedAt: true },
   });
-  const verifyState = own?.ownerVerifiedAt ? null : req.query.verify === "sent" ? ("sent" as const) : ("needed" as const);
 
   // First-run checklist: real progress from real data, gone once complete
   // (or dismissed). Only for admins who can actually do the steps.
@@ -552,7 +381,7 @@ adminRouter.get("/", async (req, res) => {
       onboarding = { steps, firstBrandId: brands[0]?.id || null, firstCard: card || null };
     }
   }
-  res.send(V.dashboard(brands as any, p, t, actingClientName, verifyState, onboarding));
+  res.send(V.dashboard(brands as any, p, t, onboarding));
 });
 
 adminRouter.post("/onboarding/dismiss", async (req, res) => {

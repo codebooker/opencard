@@ -2,7 +2,9 @@
 
 ## Executive Summary
 
-OpenCard is a TypeScript/Express and Prisma/Postgres application with a reasonably mature security baseline in several areas: strong startup checks for core secrets, hashed API keys and SCIM tokens, DB-backed admin sessions, CSRF origin checks for cookie-authenticated admin/self-service routes, security headers, rate limiting, Stripe webhook signature verification, and a planned least-privilege Postgres RLS role.
+> Historical review: this analysis predates OpenCard's single-business self-hosting transition. SaaS, billing, deployment, and security-state descriptions below may no longer match the current code. Use the current README, deployment guide, and source as authoritative.
+
+OpenCard was a TypeScript/Express and Prisma/Postgres application with a reasonably mature security baseline in several areas: strong startup checks for core secrets, hashed API keys and SCIM tokens, DB-backed admin sessions, CSRF origin checks for cookie-authenticated admin/self-service routes, security headers, rate limiting, Stripe webhook signature verification, and a planned least-privilege Postgres RLS role.
 
 The current security posture is **high risk** for production because I found one confirmed cross-tenant data disclosure path in webhook dispatch and several high-priority issues around destructive authorization, auth-token logging, signup behavior, and outbound request SSRF. I did not find committed real credentials or private keys in the repository; the secret scan hits were environment-variable references or sample code.
 
@@ -587,4 +589,3 @@ Commands run:
 - `npm run typecheck` - failed because local dependencies are not installed: `sh: tsc: command not found`.
 
 I did not run `npm ci` because the request limited filesystem changes to the two report files.
-

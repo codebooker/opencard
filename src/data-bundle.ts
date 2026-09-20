@@ -2,7 +2,7 @@ import { prisma } from "./db";
 import { stripKeys, stripRows } from "./dataexport";
 
 // Assemble a full data-portability bundle for one org (GDPR/CCPA export).
-// Secrets (tokens, Stripe/SCIM identifiers) are stripped before export.
+// Secrets and integration credentials are stripped before export.
 export async function buildOrgExport(orgId: string): Promise<any> {
   const [org, brands, locations, departments, cards, users, leads, assets, campaigns, domains, crm, auditCount] =
     await Promise.all([
@@ -21,7 +21,7 @@ export async function buildOrgExport(orgId: string): Promise<any> {
     ]);
   return {
     exportedAt: new Date().toISOString(),
-    org: stripKeys(org, ["scimTokenHash", "stripeCustomerId", "stripeSubscriptionId"]),
+    org: stripKeys(org, ["scimTokenHash"]),
     counts: {
       brands: brands.length,
       locations: locations.length,
@@ -45,29 +45,4 @@ export async function buildOrgExport(orgId: string): Promise<any> {
     domains,
     crmIntegrations: stripRows(crm, ["token"]),
   };
-}
-
-// Erase all operational/customer data for an org (right to erasure). Keeps the Org
-// shell + admin accounts. FK-safe order. Platform-only; heavily guarded upstream.
-export async function purgeOrgData(orgId: string): Promise<void> {
-  await prisma.leadEvent.deleteMany({ where: { orgId } });
-  await prisma.lead.deleteMany({ where: { orgId } });
-  await prisma.analyticsEvent.deleteMany({ where: { orgId } });
-  await prisma.crmSyncLog.deleteMany({ where: { orgId } });
-  await prisma.crmIntegration.deleteMany({ where: { orgId } });
-  await prisma.campaign.deleteMany({ where: { orgId } });
-  await prisma.tenantDomain.deleteMany({ where: { orgId } });
-  await prisma.webhookDelivery.deleteMany({ where: { orgId } });
-  await prisma.webhookEndpoint.deleteMany({ where: { orgId } });
-  await prisma.apiKey.deleteMany({ where: { orgId } });
-  await prisma.samlConfig.deleteMany({ where: { orgId } });
-  await prisma.directoryConfig.deleteMany({ where: { orgId } });
-  await prisma.asset.deleteMany({ where: { orgId } });
-  await prisma.event.deleteMany({ where: { orgId } }); // after assets (asset.eventId FK)
-  await prisma.card.deleteMany({ where: { orgId } });
-  await prisma.template.deleteMany({ where: { orgId } });
-  await prisma.department.deleteMany({ where: { orgId } });
-  await prisma.user.deleteMany({ where: { orgId } });
-  await prisma.location.deleteMany({ where: { orgId } });
-  await prisma.brand.deleteMany({ where: { orgId } });
 }

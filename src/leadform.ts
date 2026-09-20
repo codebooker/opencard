@@ -65,10 +65,13 @@ export function resolveConsentText(
 
 // Assemble a lead's data (all fields + attribution) from a submitted form body.
 export function assembleLead(body: Record<string, any>, userAgent: string | null | undefined) {
-  const str = (v: any, n: number) => (v ? String(v).slice(0, n) : null);
+  const str = (v: any, n: number) => {
+    const value = v == null ? "" : String(v).trim();
+    return value ? value.slice(0, n) : null;
+  };
   const utm = parseUtm(body);
   return {
-    name: String(body?.name || "").slice(0, 200),
+    name: String(body?.name || "").trim().slice(0, 200),
     email: str(body?.email, 200),
     phone: str(body?.phone, 60),
     company: str(body?.company, 200),
@@ -86,4 +89,13 @@ export function assembleLead(body: Record<string, any>, userAgent: string | null
     referrer: cleanReferrer(body?.referrer),
     device: deviceFromUa(userAgent),
   };
+}
+
+export function leadSubmissionError(body: Record<string, any>, fields: string[] = []): string | null {
+  const name = String(body?.name || "").trim();
+  if (!name) return "Name required";
+  const email = String(body?.email || "").trim();
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return "Enter a valid email address";
+  if (fields.includes("consent") && body?.consent !== "1") return "Consent is required";
+  return null;
 }

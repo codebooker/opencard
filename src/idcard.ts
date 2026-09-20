@@ -5,6 +5,7 @@ import path from "path";
 import { qrPng } from "./qr";
 import { uploadDir } from "./upload";
 import { config } from "./config";
+import { safeFetch } from "./ssrf";
 
 // Printable ID card (CR80): a credit-card-sized PDF of a person's card —
 // photo, logo, name, title, and a BLACK QR to their public card URL — sized
@@ -32,9 +33,10 @@ export type IdCardInput = {
   layout?: string | null;
 };
 
-// pdfkit embeds JPEG and PNG only. Uploads live on disk; external URLs are
-// fetched (https, small, with a timeout). Anything else — webp/gif/avif,
-// fetch errors, bad magic bytes — returns null and the layout falls back.
+// Uploads live on disk; external URLs are fetched through the DNS-pinned SSRF
+// guard. Every image is decoded with a pixel cap, resized, and re-encoded before
+// PDFKit sees it, preventing malicious/compressed input from reaching the PDF
+// parser directly. Any failure simply falls back to initials/no logo.
 async function loadImage(url: string | null | undefined): Promise<Buffer | null> {
   try {
     if (!url) return null;
@@ -43,23 +45,20 @@ async function loadImage(url: string | null | undefined): Promise<Buffer | null>
       const file = path.join(uploadDir, path.basename(url));
       if (fs.existsSync(file)) buf = fs.readFileSync(file);
     } else if (/^https:\/\//.test(url)) {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      const resp = await safeFetch(url, {
+        signal: AbortSignal.timeout(6000),
+        maxResponseBytes: 8 * 1024 * 1024,
+      });
       if (resp.ok) {
-        const ab = await resp.arrayBuffer();
-        if (ab.byteLength <= 8 * 1024 * 1024) buf = Buffer.from(ab);
+        buf = await resp.bytes();
       }
     }
     if (!buf || buf.length < 8) return null;
-    const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
-    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
-    if (isJpeg || isPng) return buf;
-    // webp/gif/avif uploads (allowed on cards) can't go into a PDF directly —
-    // transcode to PNG. Any failure just drops the image, never the badge.
-    try {
-      return await sharp(buf).png().toBuffer();
-    } catch {
-      return null;
-    }
+    return await sharp(buf, { limitInputPixels: 40_000_000, failOn: "warning" })
+      .rotate()
+      .resize({ width: 1200, height: 1200, fit: "inside", withoutEnlargement: true })
+      .png()
+      .toBuffer();
   } catch {
     return null;
   }

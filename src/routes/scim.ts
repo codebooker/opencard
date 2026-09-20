@@ -3,7 +3,7 @@ import { prisma, runWithOrg } from "../db";
 import { config } from "../config";
 import { uniqueSlug } from "../slug";
 import { resolveScimOrg } from "../scim-auth";
-import { orgHasFeature } from "../entitlements";
+import { isOrgLimitReached, withOrgLimit } from "../entitlements";
 import { emitEvent, cardPayload } from "../webhooks";
 
 // Minimal SCIM 2.0 Users endpoint for Azure AD / Entra automatic provisioning.
@@ -21,9 +21,8 @@ scimRouter.use(async (req: Request, res: Response, next: NextFunction) => {
   if (!orgId) {
     return res.status(401).json({ schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"], detail: "Unauthorized", status: "401" });
   }
-  if (!(await orgHasFeature(orgId, "scim"))) {
-    return res.status(403).json({ schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"], detail: "SCIM provisioning is not included in this plan.", status: "403" });
-  }
+  const org = await prisma.org.findUnique({ where: { id: orgId }, select: { id: true } });
+  if (!org) return res.status(401).json({ schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"], detail: "Unauthorized", status: "401" });
   (req as any).scimOrgId = orgId;
   next();
 });
@@ -155,35 +154,51 @@ scimRouter.post("/Users", async (req, res) => {
   const lastName = scim.name?.familyName || scim.displayName?.split(" ").slice(1).join(" ") || "";
   const slug = await uniqueSlug(firstName, lastName);
 
-  const user = await runWithOrg(orgId, (db) =>
-    db.user.create({
-      data: {
-        locationId,
-        orgId,
-        email,
-        displayName: scim.displayName || `${firstName} ${lastName}`.trim(),
-        externalId: scim.externalId || null,
-        provisionedBy: "scim",
-        active: scim.active !== false,
-        card: {
-          create: {
+  let user;
+  try {
+    user = await withOrgLimit(orgId, "cards", () =>
+      runWithOrg(orgId, (db) =>
+        db.user.create({
+          data: {
             locationId,
             orgId,
-            slug,
-            firstName,
-            lastName,
-            title: scim.title || null,
-            department: ent.department || null,
-            ownerEmail: email,
-            emails: [{ label: "Work", value: email }],
-            phones: phonesFromScim(scim),
+            email,
+            displayName: scim.displayName || `${firstName} ${lastName}`.trim(),
+            externalId: scim.externalId || null,
+            provisionedBy: "scim",
             active: scim.active !== false,
+            card: {
+              create: {
+                locationId,
+                orgId,
+                slug,
+                firstName,
+                lastName,
+                title: scim.title || null,
+                department: ent.department || null,
+                ownerEmail: email,
+                emails: [{ label: "Work", value: email }],
+                phones: phonesFromScim(scim),
+                active: scim.active !== false,
+              },
+            },
           },
-        },
-      },
-      include: { card: true },
-    })
-  );
+          include: { card: true },
+        })
+      )
+    );
+  } catch (e) {
+    if (!isOrgLimitReached(e)) throw e;
+    // A concurrent retry for the same SCIM identity may have created the user
+    // while this request waited for the capacity lock. Preserve SCIM idempotency.
+    const raced = await prisma.user.findFirst({ where: { email, orgId }, include: { card: true } });
+    if (raced) return res.status(200).json(scimUserResponse(raced, raced.card, req));
+    return res.status(409).json({
+      schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"],
+      detail: "The workspace has reached its user/card allowance.",
+      status: "409",
+    });
+  }
 
   if (user.card) emitEvent(user.card.orgId, "card.created", cardPayload(user.card));
   res.status(201).json(scimUserResponse(user, user.card, req));

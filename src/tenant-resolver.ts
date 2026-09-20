@@ -60,6 +60,16 @@ export async function isDomainApproved(host: string): Promise<boolean> {
 export async function orgIdForHost(host: string): Promise<string | null> {
   const parsed = parseHost(host, process.env.PLATFORM_DOMAIN || "");
   if (!parsed) return null;
+  // Branded login domains are scoped at brand/location level, but still carry
+  // the authoritative org id needed by employee SSO and public tenant routing.
+  // Only approved claims participate in routing; pending DNS claims do not.
+  if (parsed.kind === "custom") {
+    const branded = await prisma.tenantDomain.findFirst({
+      where: { host: parsed.host, approved: true },
+      select: { orgId: true },
+    });
+    if (branded) return branded.orgId;
+  }
   const where = parsed.kind === "custom" ? { customDomain: parsed.host } : { subdomain: parsed.label };
   const org = await prisma.org.findFirst({ where, select: { id: true } });
   return org?.id ?? null;

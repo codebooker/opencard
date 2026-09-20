@@ -12,12 +12,38 @@
 
 import dns from "dns/promises";
 import net from "net";
+import https from "https";
 
 export interface UrlCheck {
   ok: boolean;
   error?: string;
   url?: URL;
+  addresses?: { address: string; family: number }[];
 }
+
+export class OutboundRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OutboundRequestError";
+  }
+}
+
+export type SafeFetchOptions = {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  signal?: AbortSignal;
+  maxResponseBytes?: number;
+};
+
+export type SafeFetchResponse = {
+  status: number;
+  ok: boolean;
+  headers: Headers;
+  text(): Promise<string>;
+  bytes(): Promise<Buffer>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+};
 
 // IPv4/IPv6 ranges that must never be reachable from a tenant-configured URL.
 function isPrivateOrLocalAddress(ip: string): boolean {
@@ -85,7 +111,9 @@ export async function assertPublicUrl(raw: string): Promise<UrlCheck> {
   if (!base.ok || !base.url) return base;
   const host = base.url.hostname.replace(/^\[|\]$/g, "");
   if (net.isIP(host)) {
-    return isPrivateOrLocalAddress(host) ? { ok: false, error: "Blocked internal address." } : base;
+    return isPrivateOrLocalAddress(host)
+      ? { ok: false, error: "Blocked internal address." }
+      : { ...base, addresses: [{ address: host, family: net.isIP(host) }] };
   }
   try {
     const results = await dns.lookup(host, { all: true });
@@ -93,8 +121,82 @@ export async function assertPublicUrl(raw: string): Promise<UrlCheck> {
     if (results.some((r) => isPrivateOrLocalAddress(r.address))) {
       return { ok: false, error: "Host resolves to a private or local address." };
     }
-    return base;
+    return { ...base, addresses: results };
   } catch {
     return { ok: false, error: "Host did not resolve." };
   }
+}
+
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+
+// Fetch a tenant-configured HTTPS URL without giving the network stack a chance
+// to resolve a different address after validation. Redirects are rejected rather
+// than followed: a public host redirecting to metadata/localhost is a common SSRF
+// bypass, and webhook endpoints have no need for browser-style navigation.
+export async function safeFetch(raw: string, opts: SafeFetchOptions = {}): Promise<SafeFetchResponse> {
+  const checked = await assertPublicUrl(raw);
+  if (!checked.ok || !checked.url || !checked.addresses?.length) {
+    throw new OutboundRequestError(checked.error || "Outbound URL is not allowed.");
+  }
+  const target = checked.url;
+  const chosen = checked.addresses[0];
+  const maxBytes = Math.max(0, Math.min(opts.maxResponseBytes ?? 1_000_000, 8 * 1024 * 1024));
+
+  return new Promise<SafeFetchResponse>((resolve, reject) => {
+    const request = https.request(
+      target,
+      {
+        method: opts.method || "GET",
+        headers: opts.headers,
+        signal: opts.signal,
+        // Keep the original hostname for Host/SNI certificate verification while
+        // connecting only to the exact public IP returned by our checked lookup.
+        lookup: ((_hostname: string, _options: unknown, callback: Function) => {
+          callback(null, chosen.address, chosen.family);
+        }) as any,
+      },
+      (response) => {
+        const status = response.statusCode || 0;
+        if (REDIRECTS.has(status)) {
+          response.resume();
+          reject(new OutboundRequestError("Outbound redirects are not allowed."));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let total = 0;
+        response.on("data", (chunk: Buffer | string) => {
+          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          total += buf.length;
+          if (total > maxBytes) {
+            response.destroy(new OutboundRequestError("Outbound response exceeded the size limit."));
+            return;
+          }
+          chunks.push(buf);
+        });
+        response.on("error", reject);
+        response.on("end", () => {
+          const headers = new Headers();
+          for (const [name, value] of Object.entries(response.headers)) {
+            if (Array.isArray(value)) value.forEach((v) => headers.append(name, v));
+            else if (value !== undefined) headers.set(name, String(value));
+          }
+          const body = Buffer.concat(chunks);
+          resolve({
+            status,
+            ok: status >= 200 && status < 300,
+            headers,
+            text: async () => body.toString("utf8"),
+            bytes: async () => Buffer.from(body),
+            arrayBuffer: async () => {
+              const copy = Buffer.from(body);
+              return copy.buffer.slice(copy.byteOffset, copy.byteOffset + copy.byteLength) as ArrayBuffer;
+            },
+          });
+        });
+      }
+    );
+    request.on("error", reject);
+    if (opts.body !== undefined) request.write(opts.body);
+    request.end();
+  });
 }

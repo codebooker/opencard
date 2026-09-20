@@ -11,13 +11,16 @@ import { emailFromSamlProfile, getEnabledSamlForOrg } from "../saml";
 import { jitProvision } from "../jit";
 import { resolveOrgId, orgIdForHost, requestHost, loginBrandingForHost } from "../tenant-resolver";
 import { roleFlags, Role } from "../roles";
+import { orgHasFeature } from "../entitlements";
 import { effectiveSelfFields, asStringArray } from "../roletemplate";
 import { rooftopCtas, ctasFromJson, mergeCtas } from "../dealership";
 import { buildSignatureModel, renderSignatureHtml, renderSignatureText } from "../signature";
 import { signatureBlock } from "../views/signature-view";
 import {
-  signEmail,
-  verifyEmail,
+  signEmployeeIdentity,
+  signOidcContext,
+  verifyEmployeeIdentity,
+  verifyOidcContext,
   oidcEnabled,
   authorizeUrl,
   exchangeCode,
@@ -26,9 +29,10 @@ import * as V from "../views/selfedit";
 
 export const selfRouter = Router();
 const COOKIE = "oc_emp";
+const OIDC_ORG_COOKIE = "oc_oidc_org";
 
-function currentEmail(req: any): string | null {
-  return verifyEmail(req.cookies?.[COOKIE]);
+function currentIdentity(req: any) {
+  return verifyEmployeeIdentity(req.cookies?.[COOKIE]);
 }
 
 // Load the org (with SSO settings) that owns the current request's host.
@@ -40,11 +44,20 @@ async function orgForRequest(req: any) {
   });
 }
 
+async function enabledSaml(org: Awaited<ReturnType<typeof orgForRequest>>) {
+  if (!org || !(await orgHasFeature(org.id, "sso"))) return null;
+  return getEnabledSamlForOrg(org);
+}
+
+async function oidcAllowed(orgId: string): Promise<boolean> {
+  return (await orgHasFeature(orgId, "selfService")) || (await orgHasFeature(orgId, "sso"));
+}
+
 // A card owner's card, scoped to the given org so an IdP on one tenant can't
 // assert an email that matches a card in a different tenant.
 async function loadOwnCard(email: string, orgId: string) {
   return prisma.card.findFirst({
-    where: { ownerEmail: { equals: email, mode: "insensitive" }, active: true, orgId, org: { suspended: false, ownerVerifiedAt: { not: null } } },
+    where: { ownerEmail: { equals: email, mode: "insensitive" }, active: true, orgId },
     include: { location: { include: { brand: true } }, template: true, dept: true },
   });
 }
@@ -73,17 +86,18 @@ function cardSignatureBlock(card: any): string {
 
 // ---- sign in ----
 selfRouter.get("/login", async (req, res) => {
-  if (oidcEnabled()) {
-    const state = crypto.randomBytes(12).toString("hex");
-    const nonce = crypto.randomBytes(16).toString("hex");
-    res.cookie("oc_state", state, cookieOptions(10 * 60 * 1000));
-    res.cookie("oc_nonce", nonce, cookieOptions(10 * 60 * 1000));
-    return res.redirect(authorizeUrl(state, nonce));
-  }
   const branding = await loginBrandingForHost(requestHost(req));
   if (config.devLogin) return res.send(V.devLoginPage(branding));
   const org = await orgForRequest(req);
-  if (org && (await getEnabledSamlForOrg(org))) return res.send(V.samlLoginPage(branding));
+  // A workspace's explicit SAML configuration takes precedence over the
+  // deployment-wide Entra OIDC fallback.
+  if (org && (await enabledSaml(org))) return res.send(V.samlLoginPage(branding));
+  if (org && oidcEnabled() && (await oidcAllowed(org.id))) {
+    // OIDC callbacks are registered against APP_URL. Start there as well so the
+    // state/nonce cookies are sent back even when this login began on a custom
+    // domain, while preserving the initiating tenant in signed context.
+    return res.redirect(`${config.baseUrl}/me/oidc/start?org=${encodeURIComponent(org.id)}`);
+  }
   return res.send(
     V.notConfiguredPage(
       "Self-service sign-in isn't configured yet. Ask your admin to enable SAML SSO or Azure AD SSO.",
@@ -92,23 +106,59 @@ selfRouter.get("/login", async (req, res) => {
   );
 });
 
+selfRouter.get("/oidc/start", async (req, res) => {
+  if (!oidcEnabled()) return res.status(404).send("OIDC sign-in is not enabled.");
+  const orgId = String(req.query.org || "");
+  const org = orgId
+    ? await prisma.org.findFirst({
+        where: { id: orgId },
+        select: { id: true },
+      })
+    : null;
+  if (!org) return res.status(404).send("Workspace not found or unavailable.");
+
+  // Force the authorization cookies onto APP_URL. Without this redirect, a
+  // direct request to this route on a branded host would recreate the original
+  // cross-domain callback failure.
+  const appHost = new URL(config.baseUrl).hostname.toLowerCase();
+  if (requestHost(req) !== appHost) {
+    return res.redirect(`${config.baseUrl}/me/oidc/start?org=${encodeURIComponent(org.id)}`);
+  }
+
+  const state = crypto.randomBytes(24).toString("base64url");
+  const nonce = crypto.randomBytes(24).toString("base64url");
+  res.cookie("oc_state", state, cookieOptions(10 * 60 * 1000));
+  res.cookie("oc_nonce", nonce, cookieOptions(10 * 60 * 1000));
+  res.cookie(OIDC_ORG_COOKIE, signOidcContext(org.id), cookieOptions(10 * 60 * 1000));
+  return res.redirect(authorizeUrl(state, nonce));
+});
+
 selfRouter.get("/auth/callback", async (req, res) => {
   const code = String(req.query.code || "");
   const state = String(req.query.state || "");
-  if (!code || !state || state !== req.cookies?.oc_state) return res.status(400).send("Invalid sign-in state.");
+  const storedState = String(req.cookies?.oc_state || "");
   const nonce = String(req.cookies?.oc_nonce || "");
+  const orgId = verifyOidcContext(req.cookies?.[OIDC_ORG_COOKIE]);
   res.clearCookie("oc_state", clearCookieOptions());
   res.clearCookie("oc_nonce", clearCookieOptions());
-  if (!nonce) return res.status(400).send("Invalid sign-in state.");
+  res.clearCookie(OIDC_ORG_COOKIE, clearCookieOptions());
+  if (!code || !state || !storedState || state !== storedState || !nonce || !orgId) {
+    return res.status(400).send("Invalid sign-in state.");
+  }
+  const org = await prisma.org.findFirst({
+    where: { id: orgId },
+    select: { id: true },
+  });
+  if (!org || !(await oidcAllowed(org.id))) return res.status(403).send("Workspace not available for sign-in.");
   const email = await exchangeCode(code, nonce);
   if (!email) return res.status(401).send("Sign-in failed.");
-  res.cookie(COOKIE, signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
-  res.redirect(await postLoginDest(email, await resolveOrgId(req)));
+  res.cookie(COOKIE, signEmployeeIdentity(email, orgId), cookieOptions(12 * 60 * 60 * 1000));
+  res.redirect(await postLoginDest(email, orgId));
 });
 
 selfRouter.get("/saml/login", async (req, res) => {
   const org = await orgForRequest(req);
-  const enabled = org && (await getEnabledSamlForOrg(org));
+  const enabled = await enabledSaml(org);
   if (!org || !enabled) return res.status(404).send("SAML sign-in is not enabled for this workspace.");
   // RelayState carries the org id so the ACS can resolve the tenant even if the
   // IdP posts back to a shared host.
@@ -119,14 +169,18 @@ selfRouter.get("/saml/login", async (req, res) => {
 selfRouter.post("/saml/acs", async (req, res) => {
   const relay = String(req.body?.RelayState || "");
   // Prefer the org from the host the assertion arrived on; fall back to RelayState.
-  const orgId = (await orgIdForHost(requestHost(req))) || relay || null;
+  const hostOrgId = await orgIdForHost(requestHost(req));
+  if (hostOrgId && relay && hostOrgId !== relay) {
+    return res.status(400).send("SAML tenant mismatch.");
+  }
+  const orgId = hostOrgId || relay || null;
   const org = orgId
     ? await prisma.org.findUnique({
         where: { id: orgId },
         select: { id: true, subdomain: true, customDomain: true, samlConfig: true },
       })
     : null;
-  const enabled = org && (await getEnabledSamlForOrg(org));
+  const enabled = org && (await orgHasFeature(org.id, "sso")) && (await getEnabledSamlForOrg(org));
   if (!org || !enabled) return res.status(404).send("SAML sign-in is not enabled.");
   try {
     const result = await enabled.saml.validatePostResponseAsync({
@@ -141,7 +195,7 @@ selfRouter.post("/saml/acs", async (req, res) => {
     if (org.samlConfig?.jitEnabled) {
       await jitProvision(org.id, result.profile as unknown as Record<string, unknown>, email);
     }
-    res.cookie(COOKIE, signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
+    res.cookie(COOKIE, signEmployeeIdentity(email, org.id), cookieOptions(12 * 60 * 60 * 1000));
     res.redirect(await postLoginDest(email, org.id));
   } catch {
     res.status(401).send("SAML sign-in failed.");
@@ -153,7 +207,7 @@ selfRouter.post("/devlogin", async (req, res) => {
   const email = String(req.body?.email || "").toLowerCase().trim();
   if (!email) return res.redirect("/me/login");
   const orgId = await resolveOrgId(req);
-  res.cookie(COOKIE, signEmail(email), cookieOptions(12 * 60 * 60 * 1000));
+  res.cookie(COOKIE, signEmployeeIdentity(email, orgId), cookieOptions(12 * 60 * 60 * 1000));
   res.redirect(await postLoginDest(email, orgId));
 });
 
@@ -175,19 +229,19 @@ selfRouter.get("/logout", (_req, res) => {
 
 // ---- view / edit own card ----
 selfRouter.get("/", async (req, res) => {
-  const email = currentEmail(req);
-  if (!email) return res.redirect("/me/login");
-  const card = await loadOwnCard(email, await resolveOrgId(req));
-  if (!card) return res.send(V.noCardPage(email));
-  res.send(V.selfEditPage(card, new Set(allowedFields(card)), email, req.query.saved === "1", cardSignatureBlock(card)));
+  const identity = currentIdentity(req);
+  if (!identity) return res.redirect("/me/login");
+  const card = await loadOwnCard(identity.email, identity.orgId);
+  if (!card) return res.send(V.noCardPage(identity.email));
+  res.send(V.selfEditPage(card, new Set(allowedFields(card)), identity.email, req.query.saved === "1", cardSignatureBlock(card)));
 });
 
 const selfUploads = upload.fields([{ name: "photoFile", maxCount: 1 }]);
 
 selfRouter.post("/", selfUploads, async (req, res) => {
-  const email = currentEmail(req);
-  if (!email) return res.redirect("/me/login");
-  const card = await loadOwnCard(email, await resolveOrgId(req));
+  const identity = currentIdentity(req);
+  if (!identity) return res.redirect("/me/login");
+  const card = await loadOwnCard(identity.email, identity.orgId);
   if (!card) return res.status(404).send("No card");
 
   const allowed = new Set(allowedFields(card));

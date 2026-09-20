@@ -20,29 +20,29 @@ export function renderLeadForm(opts: {
   const has = (f: string) => opts.fields.has(f);
   const a = opts.attribution;
   return `<form method="POST" action="${esc(opts.action)}">
-    <input name="name" placeholder="Your name" required />
-    ${has("email") ? `<input name="email" type="email" placeholder="Email" />` : ""}
-    ${has("phone") ? `<input name="phone" placeholder="Phone" />` : ""}
-    ${has("company") ? `<input name="company" placeholder="Company" />` : ""}
+    <label for="lead-name">Your name</label><input id="lead-name" name="name" autocomplete="name" required />
+    ${has("email") ? `<label for="lead-email">Email</label><input id="lead-email" name="email" type="email" autocomplete="email" />` : ""}
+    ${has("phone") ? `<label for="lead-phone">Phone</label><input id="lead-phone" name="phone" type="tel" autocomplete="tel" />` : ""}
+    ${has("company") ? `<label for="lead-company">Company</label><input id="lead-company" name="company" autocomplete="organization" />` : ""}
     ${
       has("preferredContact")
-        ? `<select name="preferredContact"><option value="">Preferred contact…</option>${PREFERRED_CONTACTS.map(
+        ? `<label for="lead-preferred">Preferred contact method</label><select id="lead-preferred" name="preferredContact"><option value="">Choose a method…</option>${PREFERRED_CONTACTS.map(
             ([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`
           ).join("")}</select>`
         : ""
     }
-    ${has("vehicleInterest") ? `<input name="vehicleInterest" placeholder="Vehicle of interest (year/make/model)" />` : ""}
+    ${has("vehicleInterest") ? `<label for="lead-vehicle">Vehicle of interest</label><input id="lead-vehicle" name="vehicleInterest" placeholder="Year, make, and model" />` : ""}
     ${has("tradeIn") ? `<label class="chk-inline"><input type="checkbox" name="tradeIn" value="1" /> I have a trade-in</label>` : ""}
-    ${has("serviceNeed") ? `<input name="serviceNeed" placeholder="Service need (optional)" />` : ""}
+    ${has("serviceNeed") ? `<label for="lead-service">Service need <span>(optional)</span></label><input id="lead-service" name="serviceNeed" />` : ""}
     ${
       has("appointmentRequest")
         ? `<label class="chk-inline"><input type="checkbox" name="appointmentRequest" value="1" /> I'd like to book an appointment</label>`
         : ""
     }
-    ${has("note") ? `<textarea name="note" placeholder="Note (optional)"></textarea>` : ""}
+    ${has("note") ? `<label for="lead-note">Note <span>(optional)</span></label><textarea id="lead-note" name="note"></textarea>` : ""}
     ${
       has("consent")
-        ? `<label class="chk-inline"><input type="checkbox" name="consent" value="1" /> ${esc(opts.consentText)}</label>`
+        ? `<label class="chk-inline"><input type="checkbox" name="consent" value="1" required /> ${esc(opts.consentText)}</label>`
         : ""
     }
     <input type="hidden" name="campaign" value="${esc(a.campaign)}" />

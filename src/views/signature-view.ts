@@ -14,7 +14,7 @@ export function signatureBlock(html: string, text: string): string {
       <span id="sig-copied" class="muted" style="margin-left:8px"></span>
     </p>
     <details style="margin-top:8px"><summary class="muted">HTML source</summary>
-      <textarea readonly rows="8" style="width:100%;font:12px monospace;margin-top:6px">${esc(html)}</textarea>
+      <textarea readonly rows="8" aria-label="Email signature HTML source" style="width:100%;font:12px monospace;margin-top:6px">${esc(html)}</textarea>
     </details>
   </div>
   <script>

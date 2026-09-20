@@ -1,57 +1,27 @@
-// Database-aware entitlement checks built on the pure plan engine in ./plans.
-import { prisma } from "./db";
-import { DEFAULT_PLAN, Feature, LimitKey, hasFeature, withinLimit, withinSeatLimit } from "./plans";
-import { accessState, AccessState } from "./access";
+// Compatibility helpers for creation paths. Self-hosted OpenCard has no
+// subscriptions, feature tiers, or resource caps.
+export type Feature =
+  | "selfService" | "leadCapture" | "emailSignatures" | "csvExport"
+  | "api" | "webhooks" | "sso" | "scim" | "customDomains"
+  | "crmSync" | "advancedAnalytics" | "auditLogs";
+export type LimitKey = "brands" | "locations" | "cards" | "admins" | "apiKeys" | "customDomains";
 
-// Current access state (active / expired) for an org, from its billing fields.
-export async function orgAccessState(orgId: string): Promise<AccessState> {
-  const org = await prisma.org.findUnique({
-    where: { id: orgId },
-    select: { billingMode: true, subscriptionStatus: true, trialEndsAt: true },
-  });
-  return accessState({
-    billingMode: org?.billingMode ?? "standard",
-    subscriptionStatus: org?.subscriptionStatus ?? "canceled",
-    trialEndsAt: org?.trialEndsAt ?? null,
-  });
-}
+export async function orgHasFeature(_orgId: string, _feature: Feature): Promise<boolean> { return true; }
 
-export async function orgPlanKey(orgId: string): Promise<string> {
-  const org = await prisma.org.findUnique({ where: { id: orgId }, select: { plan: true } });
-  return org?.plan ?? DEFAULT_PLAN;
-}
+// All resources are uncapped in a self-hosted workspace.
+export async function canAdd(_orgId: string, _key: LimitKey): Promise<boolean> { return true; }
 
-export async function orgHasFeature(orgId: string, feature: Feature): Promise<boolean> {
-  return hasFeature(await orgPlanKey(orgId), feature);
-}
-
-// How many of each limited resource the org currently uses.
-const counters: Record<LimitKey, (orgId: string) => Promise<number>> = {
-  brands: (o) => prisma.brand.count({ where: { orgId: o } }),
-  locations: (o) => prisma.location.count({ where: { orgId: o } }),
-  cards: (o) => prisma.card.count({ where: { orgId: o } }),
-  admins: (o) => prisma.adminUser.count({ where: { orgId: o } }),
-  apiKeys: (o) => prisma.apiKey.count({ where: { orgId: o, revoked: false } }),
-  customDomains: async (o) => {
-    const org = await prisma.org.findUnique({ where: { id: o }, select: { customDomain: true } });
-    return org?.customDomain ? 1 : 0;
-  },
-};
-
-// True if the org may create one more of `key` under its current plan. For cards,
-// a per-client seat allowance (set by OpenCard staff) overrides the plan limit.
-export async function canAdd(orgId: string, key: LimitKey): Promise<boolean> {
-  const count = await counters[key](orgId);
-  if (key === "cards") {
-    const org = await prisma.org.findUnique({ where: { id: orgId }, select: { plan: true, seatLimit: true } });
-    return withinSeatLimit(org?.seatLimit, org?.plan || DEFAULT_PLAN, count);
+export class OrgLimitReachedError extends Error {
+  constructor(public readonly resource: LimitKey) {
+    super(`The workspace has reached its ${resource} limit.`);
+    this.name = "OrgLimitReachedError";
   }
-  const plan = await orgPlanKey(orgId);
-  return withinLimit(plan, key, count);
 }
 
-export async function orgUsage(orgId: string): Promise<Record<LimitKey, number>> {
-  const keys: LimitKey[] = ["brands", "locations", "cards", "admins", "apiKeys", "customDomains"];
-  const entries = await Promise.all(keys.map(async (k) => [k, await counters[k](orgId)] as const));
-  return Object.fromEntries(entries) as Record<LimitKey, number>;
+export function isOrgLimitReached(error: unknown): error is OrgLimitReachedError {
+  return error instanceof OrgLimitReachedError;
 }
+
+// Preserve the callback shape used by existing creation routes; it does not
+// count resources, take a capacity lock, or reject card creation.
+export async function withOrgLimit<T>(_orgId: string, _key: LimitKey, create: () => Promise<T>): Promise<T> { return create(); }

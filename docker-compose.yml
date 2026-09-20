@@ -4,12 +4,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: opencard
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-opencard}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       POSTGRES_DB: opencard
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U opencard"]
+      test: ["CMD-SHELL", "pg_isready -U opencard -d opencard"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -22,48 +22,71 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: "postgresql://opencard:${DB_PASSWORD:?Set DB_PASSWORD in .env}@db:5432/opencard?schema=public"
-      # Password for the least-privilege runtime role (opencard_app) used to
-      # enforce Postgres RLS. When unset, the app falls back to the owner
-      # connection and RLS is inert (app-level scoping still applies).
-      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Set APP_DB_PASSWORD in .env}
       POSTGRES_DB: opencard
-      BASE_URL: ${BASE_URL:-http://localhost:3000}
-      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in .env}
-      SCIM_TOKEN: ${SCIM_TOKEN:?Set SCIM_TOKEN in .env}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      CARD_URL: ${CARD_URL:-}
+      COMPANY_NAME: ${COMPANY_NAME:-My Company}
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      SOURCE_URL: ${SOURCE_URL:-https://github.com/codebooker/opencard}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       UPLOAD_DIR: /app/uploads
-      # Employee self-service SSO (Azure AD / Entra). Leave blank to disable SSO.
+      BACKUP_DIR: /app/backups
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+      SERVER_IPS: ${SERVER_IPS:-}
+      TENANTS_CNAME_TARGET: ${TENANTS_CNAME_TARGET:-}
+      SCIM_TOKEN: ${SCIM_TOKEN:-}
       AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
       AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
       AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
-      # Local testing only: "1" lets employees sign in by typing an email (no IdP).
       SELF_SERVICE_DEV_LOGIN: ${SELF_SERVICE_DEV_LOGIN:-0}
-      # "1" opens public self-service signup (/signup). Off by default in prod.
-      SIGNUPS_ENABLED: ${SIGNUPS_ENABLED:-0}
-      # "1" seeds demo dealer-group data. This is the local preview, so default on.
-      SEED_DEMO: ${SEED_DEMO:-1}
-      # Stripe billing (all optional — leave blank to run without card checkout).
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
-      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
-      STRIPE_PRICE_TEAM: ${STRIPE_PRICE_TEAM:-}
-      STRIPE_PRICE_DEALER_GROUP: ${STRIPE_PRICE_DEALER_GROUP:-}
-      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      USERWAY_ACCOUNT: ${USERWAY_ACCOUNT:-off}
+      WEBHOOK_DELIVERY_RETENTION_DAYS: ${WEBHOOK_DELIVERY_RETENTION_DAYS:-30}
+      SEED_DEMO: ${SEED_DEMO:-0}
       PORT: "3000"
     ports:
-      - "${PORT:-3000}:3000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}:3000"
     volumes:
       - uploads_data:/app/uploads
-    # Apply committed migrations, then seed (idempotent), then start.
-    # The `||` fallback baselines a database created before migrations were adopted
-    # (tables already exist): mark the initial migration applied, then continue.
-    command: >
-      sh -c "set -e;
-             npx prisma migrate deploy || { npx prisma migrate resolve --applied 0_init && npx prisma migrate deploy; };
-             node dist/db-bootstrap.js;
-             node dist/seed.js || true;
-             exec node dist/server.js"
+      - ./backups:/app/backups
+    command: ["sh", "-ec", "npx prisma migrate deploy && node dist/db-bootstrap.js && node dist/seed.js && exec node dist/server.js"]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # Optional HTTPS reverse proxy. Set APP_DOMAIN and APP_URL, then run
+  # docker compose --profile proxy up -d --build.
+  caddy:
+    profiles: ["proxy"]
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
 volumes:
   db_data:
   uploads_data:
+  caddy_data:
+  caddy_config:

@@ -49,8 +49,8 @@ import { buildSignatureModel, renderSignatureHtml, renderSignatureText, normaliz
 import { signatureBlock } from "../../views/signature-view";
 import { parseCampaignRoutingLines } from "../../routing";
 import { LEAD_STATUSES, canTransition } from "../../leadstatus";
-import { isConsole, isPlatformRole, PLATFORM_ROLES, assignableStaffRoles, canManageStaffTarget } from "../../roles";
-import { loginBrandingForHost, requestHost } from "../../tenant-resolver";
+import { isPlatformRole, PLATFORM_ROLES } from "../../roles";
+import { loginBrandingForHost, orgIdForHost, requestHost } from "../../tenant-resolver";
 import { normalizeHost } from "../../branding";
 import { parseFieldMapLines } from "../../crmsync";
 import { sendTestSync, retrySync } from "../../crmsync-dispatch";
@@ -59,11 +59,10 @@ import { resolveRange, conversionPct, sortLeaderboard, buildFunnel, topGroups, A
 import { computeOrgAnalytics, analyticsCsv, sendDigest } from "../../reports";
 import { toCsv } from "../../csv";
 import { recordAudit, reqIp } from "../../audit-log";
-import { buildOrgExport, purgeOrgData } from "../../data-bundle";
+import { buildOrgExport } from "../../data-bundle";
 import { exportFilename } from "../../dataexport";
 import { parseRetentionDays } from "../../retention";
-import { getPlatformConfig, updatePlatformConfig } from "../../platform-config";
-import { listBackups, runManualBackup, restoreClientToBackup, withRestoreLock, humanSize } from "../../backups";
+import { listBackups, runManualBackup, restoreClientToBackup, withRestoreLock, humanSize, offsiteConfigured } from "../../backups";
 import {
   credsForOrg,
   directoryConfigSummary,
@@ -133,24 +132,18 @@ import { qrDataUrl } from "../../qr";
 import { qrSvg, parseQrDesign, qrDesignFromForm } from "../../qr-style";
 import { currentTerminology } from "../../terminology";
 import { defaultOrgId, orgIdForBrand, orgIdForLocation } from "../../tenant";
-import { canAdd, orgHasFeature, orgPlanKey, orgUsage, orgAccessState } from "../../entitlements";
-import { requiredPlanFor, planFor, PLANS, PLAN_ORDER, isPlanKey, parseSeatLimit, DEFAULT_PLAN, Feature, LimitKey } from "../../plans";
+import { canAdd, isOrgLimitReached, orgHasFeature, withOrgLimit, Feature, LimitKey } from "../../entitlements";
 import { validateOutboundUrl } from "../../ssrf";
 import { seal } from "../../secretbox";
-import { accessSummary } from "../../access";
-import { stripe, stripeEnabled } from "../../stripe";
 import * as RBAC from "../../rbac";
 import * as V from "../../views/admin";
 
 // Plan-gate helpers: reject with a friendly upgrade message.
 function limitReached(res: any, what: string) {
-  return forbidden(res, `You've reached your plan's ${what} limit. Upgrade your plan to add more.`);
+  return forbidden(res, `Unable to add ${what}.`);
 }
 async function ensureFeature(res: any, orgId: string, feature: Feature, label: string): Promise<boolean> {
-  if (await orgHasFeature(orgId, feature)) return true;
-  const need = requiredPlanFor(feature);
-  forbidden(res, `${label} isn't included in your plan.${need ? ` It's available on the ${need.label} plan and above.` : ""}`);
-  return false;
+  return true;
 }
 
 // ---------- helpers ----------
@@ -173,10 +166,25 @@ function signatureConfig(b: any) {
   };
 }
 
+class TenantDomainConflictError extends Error {
+  constructor(host: string) {
+    super(`${host} is already registered to another login domain.`);
+    this.name = "TenantDomainConflictError";
+  }
+}
+
+class TenantDomainEntitlementError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TenantDomainEntitlementError";
+  }
+}
+
 // Register/update/clear a branded-login domain for a brand or rooftop, of a given
 // kind ("admin" or "user"). `scope` is exactly one of { brandId } or { locationId }.
-// Host is normalized; blank clears the domain for that scope+kind. Approved so
-// Caddy on-demand TLS may issue a cert.
+// Host is normalized; blank clears the domain for that scope+kind. New claims are
+// deliberately NOT approved for TLS until the DNS verification route confirms
+// that the customer controls the hostname.
 async function setTenantDomain(
   orgId: string,
   scope: { brandId?: string; locationId?: string },
@@ -184,14 +192,73 @@ async function setTenantDomain(
   rawHost: string
 ) {
   const host = normalizeHost(rawHost);
-  const base = scope.locationId ? { locationId: scope.locationId } : { brandId: scope.brandId, locationId: null };
-  await prisma.tenantDomain.deleteMany({ where: { ...base, kind } });
-  if (!host) return;
-  await prisma.tenantDomain.upsert({
-    where: { host },
-    update: { orgId, kind, brandId: scope.brandId ?? null, locationId: scope.locationId ?? null, approved: true },
-    create: { host, orgId, kind, brandId: scope.brandId ?? null, locationId: scope.locationId ?? null, approved: true },
+  const base = scope.locationId
+    ? { orgId, locationId: scope.locationId }
+    : { orgId, brandId: scope.brandId, locationId: null };
+  const current = await prisma.tenantDomain.findFirst({
+    where: { ...base, kind },
+    select: { id: true, host: true },
   });
+
+  // Clearing an old domain always remains available.
+  if (!host) {
+    if (current) {
+      await prisma.$transaction([
+        prisma.tenantDomain.delete({ where: { id: current.id } }),
+        prisma.org.updateMany({
+          where: { id: orgId, customDomain: current.host },
+          data: { customDomain: null },
+        }),
+      ]);
+    }
+    return;
+  }
+  // Ordinary brand/location edits post the existing domain value back. Preserve
+  // its verified/approved state instead of turning it into a fresh claim.
+  if (current?.host === host) return;
+
+  const claimed = await prisma.tenantDomain.findUnique({ where: { host }, select: { id: true } });
+  if (claimed && claimed.id !== current?.id) throw new TenantDomainConflictError(host);
+  const canonicalOwner = await prisma.org.findFirst({ where: { customDomain: host }, select: { id: true } });
+  if (canonicalOwner && canonicalOwner.id !== orgId) throw new TenantDomainConflictError(host);
+  try {
+    // The delete and create are atomic, so a unique-host race cannot silently
+    // remove the scope's previous working domain.
+    const save = () =>
+      prisma.$transaction([
+        prisma.tenantDomain.deleteMany({ where: { ...base, kind } }),
+        ...(current
+          ? [
+              prisma.org.updateMany({
+                where: { id: orgId, customDomain: current.host },
+                data: { customDomain: null },
+              }),
+            ]
+          : []),
+        prisma.tenantDomain.create({
+          data: {
+            host,
+            orgId,
+            kind,
+            brandId: scope.brandId ?? null,
+            locationId: scope.locationId ?? null,
+            approved: false,
+            verifyState: "pending",
+            verifiedAt: null,
+          },
+        }),
+      ]);
+    // Replacing the current scope's hostname does not increase usage. A new
+    // claim performs the capacity check while holding the shared org lock.
+    if (current) await save();
+    else await withOrgLimit(orgId, "customDomains", save);
+  } catch (e: any) {
+    if (isOrgLimitReached(e)) {
+      throw new TenantDomainEntitlementError("Could not register this custom domain.");
+    }
+    if (e?.code === "P2002") throw new TenantDomainConflictError(host);
+    throw e;
+  }
 }
 
 // Brand-wide signature campaign banner (text + optional link + optional window).
@@ -232,28 +299,28 @@ export async function leadScopeWhere(p: RBAC.AdminPrincipal) {
 }
 
 export {
-  ANALYTICS_RANGES, Address, CNAME_TARGET, CsvTarget, DEFAULT_PLAN, Feature, LEAD_STATUSES, LimitKey,
-  PLANS, PLAN_ORDER, PLATFORM_ROLES, PLATFORM_ROLES_ALL, Prisma, Router, SERVER_IPS, SESSION_COOKIE,
-  SESSION_TTL_MS, WEBHOOK_EVENTS, accessSummary, analyticsCsv, applyImport, asArray, asLockList, assetTypeLabel,
-  assignableStaffRoles, audit, authNoticePage, bucketDays, buildFunnel, buildIdCardPdf, buildOrgExport, buildSignatureModel,
-  campaignBanner, canAdd, canManageStaffTarget, canTransition, cardPayload, clean, clearCookieOptions, computeOrgAnalytics,
+  ANALYTICS_RANGES, Address, CNAME_TARGET, CsvTarget, Feature, LEAD_STATUSES, LimitKey,
+  PLATFORM_ROLES, PLATFORM_ROLES_ALL, Prisma, Router, SERVER_IPS, SESSION_COOKIE,
+  SESSION_TTL_MS, TenantDomainConflictError, TenantDomainEntitlementError, WEBHOOK_EVENTS, analyticsCsv, applyImport, asArray, asLockList, assetTypeLabel,
+  audit, authNoticePage, bucketDays, buildFunnel, buildIdCardPdf, buildOrgExport, buildSignatureModel,
+  campaignBanner, canAdd, canTransition, cardPayload, clean, clearCookieOptions, computeOrgAnalytics,
   config, consumeRecoveryCode, consumeToken, conversionPct, cookieOptions, createSession, credsForOrg, crypto,
   ctasFromJson, currentTerminology, defaultOrgId, deleteDirectoryConfig, directoryConfigSummary, dns, emitEvent, ensureFeature,
   esc, evaluateDomain, exportFilename, filterByDepartment, findSession, forbidden, forgotPage, fs,
-  generateApiKey, generateRecoveryCodes, generateScimToken, generateTotpSecret, getPlatformConfig, getSamlConfigForOrg, guessMapping, hashPassword,
-  hashRecoveryCodes, humanSize, invitePage, isConsole, isGaId, isGtmId, isPlanKey, isPlatformRole,
-  isVertical, issueToken, limitReached, listBackups, listDirectoryUsers, listSessions, loginBrandingForHost, loginPage,
+  generateApiKey, generateRecoveryCodes, generateScimToken, generateTotpSecret, getSamlConfigForOrg, guessMapping, hashPassword,
+  hashRecoveryCodes, humanSize, invitePage, isGaId, isGtmId, isPlatformRole,
+  isOrgLimitReached, isVertical, issueToken, limitReached, listBackups, listDirectoryUsers, listSessions, loginBrandingForHost, loginPage,
   mapCsvRow, mapGraphUser, mdToHtml, mergeCtas, mfaPage, multer, normalizeCampaignCode, normalizeHost,
-  normalizeTheme, offboardCardUpdate, onlySelected, orgAccessState, orgCanonicalHost, orgHasFeature, orgIdForBrand, orgIdForLocation,
-  orgPlanKey, orgUsage, page, parseAddress, parseCampaignRoutingLines, parseCsv, parseCtaLines, parseFieldMapLines,
-  parseLabeled, parseOemBrands, parseQrDesign, parseRetentionDays, parseSeatLimit, parseSocials, path, peekToken,
-  planCandidates, planFor, planImport, postChatWebhook, presetByKey, prisma, pruneOrgLeads, purgeOrgData,
+  normalizeTheme, offboardCardUpdate, offsiteConfigured, onlySelected, orgCanonicalHost, orgHasFeature, orgIdForBrand, orgIdForLocation,
+  orgIdForHost, page, parseAddress, parseCampaignRoutingLines, parseCsv, parseCtaLines, parseFieldMapLines,
+  parseLabeled, parseOemBrands, parseQrDesign, parseRetentionDays, parseSocials, path, peekToken,
+  planCandidates, planImport, postChatWebhook, presetByKey, prisma, pruneOrgLeads,
   qrDataUrl, qrDesignFromForm, qrSvg, recordAudit, recoveryCodeCount, redirectTargetUrl, renderSignatureHtml, renderSignatureText,
-  replacementCardData, replayDelivery, reqAdmin, reqIp, requestHost, requireAdmin, requiredPlanFor, resetPage,
+  replacementCardData, replayDelivery, reqAdmin, reqIp, requestHost, requireAdmin, resetPage,
   resolveDomainDns, resolveRange, restoreClientToBackup, retrySync, revokeAllSessions, revokeSession, rooftopCtas, runManualBackup,
   runWithOrg, samlAcsUrl, samlSpIssuer, sanitizeScopes, saveDirectoryConfig, seal, searchGroups, sendDigest,
   sendMail, sendTestEvent, sendTestSync, setTenantDomain, sha256hex, signEmail, signatureBlock, signatureConfig,
-  sortLeaderboard, stripe, stripeEnabled, testGraphCreds, toCsv, topGroups, totpUri, uniqueAssetSlug,
-  uniqueSlug, updatePlatformConfig, upload, uploadDir, uploadedUrl, validateOutboundUrl, verifyEmail, verifyPassword,
-  verifyTotp, withRestoreLock,
+  sortLeaderboard, testGraphCreds, toCsv, topGroups, totpUri, uniqueAssetSlug,
+  uniqueSlug, upload, uploadDir, uploadedUrl, validateOutboundUrl, verifyEmail, verifyPassword,
+  verifyTotp, withOrgLimit, withRestoreLock,
 };

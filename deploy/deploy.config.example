@@ -1,7 +1,0 @@
-# Copy this file to deploy.config (which is gitignored) and fill in your VM.
-# Both provision.command and deploy.command read it.
-
-VM_HOST="203.0.113.10"   # your Hetzner VM public IP (or hostname)
-VM_USER="root"           # SSH user on the VM
-APP_DIR="/opt/opencard"  # where the app lives on the VM
-SSH_KEY=""               # optional path to a private key, e.g. ~/.ssh/id_ed25519

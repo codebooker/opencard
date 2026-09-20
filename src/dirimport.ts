@@ -1,6 +1,7 @@
 import { prisma, runWithOrg } from "./db";
 import { uniqueSlug } from "./slug";
 import { emitEvent, cardPayload } from "./webhooks";
+import { isOrgLimitReached, withOrgLimit } from "./entitlements";
 import * as secretbox from "./secretbox";
 
 // Microsoft Graph directory import (Phase 13): bulk-backfill existing
@@ -250,34 +251,43 @@ export async function applyImport(orgId: string, rows: PlanRow[], source: "impor
       continue;
     }
     const slug = await uniqueSlug(row.firstName, row.lastName);
-    const user = await runWithOrg(orgId, (db) =>
-      db.user.create({
-        data: {
-          locationId: row.location!.id,
-          orgId,
-          email: row.email,
-          displayName: `${row.firstName} ${row.lastName}`.trim(),
-          provisionedBy: source,
-          active: true,
-          card: {
-            create: {
+    let user;
+    try {
+      user = await withOrgLimit(orgId, "cards", () =>
+        runWithOrg(orgId, (db) =>
+          db.user.create({
+            data: {
               locationId: row.location!.id,
               orgId,
-              slug,
-              firstName: row.firstName,
-              lastName: row.lastName,
-              title: row.title,
-              department: row.department,
-              ownerEmail: row.email,
-              emails: [{ label: "Work", value: row.email }],
-              phones: row.phones,
+              email: row.email,
+              displayName: `${row.firstName} ${row.lastName}`.trim(),
+              provisionedBy: source,
               active: true,
+              card: {
+                create: {
+                  locationId: row.location!.id,
+                  orgId,
+                  slug,
+                  firstName: row.firstName,
+                  lastName: row.lastName,
+                  title: row.title,
+                  department: row.department,
+                  ownerEmail: row.email,
+                  emails: [{ label: "Work", value: row.email }],
+                  phones: row.phones,
+                  active: true,
+                },
+              },
             },
-          },
-        },
-        include: { card: true },
-      })
-    );
+            include: { card: true },
+          })
+        )
+      );
+    } catch (e) {
+      if (!isOrgLimitReached(e)) throw e;
+      skipped++;
+      continue;
+    }
     if (user.card) emitEvent(user.card.orgId, "card.created", cardPayload(user.card));
     created++;
   }

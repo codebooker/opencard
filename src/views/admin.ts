@@ -1,8 +1,6 @@
 import { esc, page, OC_FAVICON } from "./html";
 import { Address } from "../types";
 import { AdminPrincipal, ROLE_LABELS } from "../rbac";
-import { showsBilling, canManageStaffTarget, Role } from "../roles";
-import { PLAN_ORDER, PLANS, PlanKey } from "../plans";
 import { parseQrDesign, qrVersion } from "../qr-style";
 import { API_SCOPES, SCOPE_LABELS } from "../api-scopes";
 import { GENERAL_TERMINOLOGY, Terminology, lower, VERTICALS } from "../terminology";
@@ -40,6 +38,7 @@ import { SIGNATURE_THEMES, SIGNATURE_ELEMENTS, asLockList, SignatureTheme } from
 import { CRM_SOURCE_FIELDS } from "../crmsync";
 import { auditLabel, formatAuditActor } from "../audit";
 import { eventStatus, EVENT_STATUS_LABELS } from "../event";
+import { CNAME_TARGET } from "../domainstatus";
 
 // Shared lead-form config block for the template + brand editors.
 function leadFormConfig(opts: {
@@ -79,9 +78,9 @@ function selfFieldChecks(allowed: string[], opts: { name: string; includeInherit
       } /> ${esc(l)}</label>`
   ).join("");
   const inherit = opts.includeInherit
-    ? `<label class="chk"><input type="checkbox" name="selfInherit" value="1" ${
+    ? `<label class="chk self-inherit"><input type="checkbox" name="selfInherit" value="1" ${
         opts.inherit ? "checked" : ""
-      } /> <strong>Inherit from brand</strong> (uncheck to set a custom policy for this card)</label>`
+      } /> <span><strong>Inherit from brand</strong> (uncheck to set a custom policy for this card)</span></label>`
     : "";
   return `<div class="self-fields">${inherit}${boxes}</div>`;
 }
@@ -121,6 +120,7 @@ function shell(title: string, body: string): string {
       ${body}
     </main>
     ${NAV_ACTIVE_SCRIPT}`,
+    noUserway: true,
   });
 }
 
@@ -133,323 +133,34 @@ type BrandWithLocations = {
   locations: LocationLite[];
 };
 
-// Platform settings (OpenCard staff): defaults applied to self-service signups.
-export function platformSettingsView(cfg: { signupPlan: string; signupTrialDays: number; signupAccessCode?: string }, saved = false): string {
-  const planOpts = PLAN_ORDER.map(
-    (k) => `<option value="${k}" ${cfg.signupPlan === k ? "selected" : ""}>${esc(PLANS[k].label)} — ${esc(PLANS[k].price)}</option>`
-  ).join("");
-  const body = `
-  <p class="crumb"><a href="/admin/clients">← Clients</a></p>
-  <div class="topbar">
-    <div style="flex-direction:column;align-items:flex-start;gap:2px">
-      <h2>Platform settings</h2>
-      <p class="muted" style="margin:0">Defaults for new accounts created through public signup. Changing these affects future signups only.</p>
-    </div>
-  </div>
-  ${saved ? `<p class="auth-banner" style="max-width:560px">✓ Saved. New signups will use these defaults.</p>` : ""}
-  <form class="editor" method="POST" action="/admin/platform" style="max-width:560px">
-    <label>Plan tier for new signups</label>
-    <select name="signupPlan">${planOpts}</select>
-    ${planGuide()}
-    <label>Trial length (days)</label>
-    <input name="signupTrialDays" type="number" min="1" max="365" value="${cfg.signupTrialDays}" required />
-    <p class="muted" style="margin:6px 0 0">1–365 days. Signups start in Standard billing as "trialing"; the workspace locks when the trial ends unless they subscribe (or you change their billing type).</p>
-    <label>Signup access code <span class="muted">(private beta gate)</span></label>
-    <input name="signupAccessCode" value="${esc(cfg.signupAccessCode || "")}" placeholder="Leave blank for open signup" autocomplete="off" />
-    <p class="muted" style="margin:6px 0 0">When set, public signup requires this code or phrase (case-insensitive) before a magic link is sent. Clear it to open signups to everyone.</p>
-    <div class="form-actions"><button class="btn" type="submit">Save settings</button>
-    <a class="btn secondary" href="/admin/clients">Cancel</a></div>
-  </form>`;
-  return shell("Platform settings", body);
-}
-
-// Backup & restore (OpenCard staff): list/trigger backups, per-client restore.
 export function backupsView(d: {
+  workspaceName: string;
   backups: { name: string; kind: string; manual: boolean; sizeHuman: string; mtime: Date }[];
-  orgs: { id: string; name: string }[];
+  offsiteConfigured: boolean;
   flash?: string | null;
   error?: string | null;
 }): string {
-  const rows = d.backups.length
-    ? d.backups
-        .map(
-          (b) => `<tr>
-      <td><code style="font-size:12px">${esc(b.name)}</code></td>
-      <td data-label="Kind">${b.kind === "db" ? "Database" : "Uploads"}${b.manual ? ` <span class="pill">manual</span>` : ""}</td>
-      <td data-label="Size" class="muted">${esc(b.sizeHuman)}</td>
-      <td data-label="Taken" class="muted">${esc(new Date(b.mtime).toISOString().slice(0, 16).replace("T", " "))} UTC</td>
-    </tr>`
-        )
-        .join("")
-    : `<tr><td colspan="4" class="muted">No backups found yet — the nightly job runs at 03:17 UTC.</td></tr>`;
-  const dbBackups = d.backups.filter((b) => b.kind === "db");
-  const body = `
-  <p class="crumb"><a href="/admin/clients">← Clients</a></p>
-  <div class="topbar">
-    <div style="flex-direction:column;align-items:flex-start;gap:2px">
-      <h2>Backups</h2>
-      <p class="muted" style="margin:0">Nightly at 03:17 UTC with offsite copies; manual backups stay on the server until retention sweeps them.</p>
-    </div>
-    <div><form method="POST" action="/admin/backups/run"><button class="btn" type="submit">Back up now</button></form></div>
-  </div>
-  ${d.flash ? `<p class="auth-banner" style="max-width:none">${esc(d.flash)}</p>` : ""}
-  ${d.error ? `<p class="auth-error" style="max-width:none">${esc(d.error)}</p>` : ""}
-  <table class="rsp">
-    <tr><th>File</th><th>Kind</th><th>Size</th><th>Taken</th></tr>
-    ${rows}
-  </table>
-
-  <section class="panel" style="margin-top:20px">
-    <h3>Restore a client to a backup</h3>
-    <p class="muted">Rewinds ONE client's content — brands, ${"rooftops/locations"}, cards, employees, leads, assets, campaigns, integrations — to the selected backup. Other clients are untouched. Not restored: the client's plan/billing, admin accounts, audit log, and uploaded images (photos deleted since the backup will show as missing). Anything the client changed after the backup is lost.</p>
-    <form class="editor" method="POST" action="/admin/backups/restore-client" onsubmit="return confirm('Rewind this client to the selected backup? Changes made after it will be lost. This cannot be undone.')">
-      <label>Client</label>
-      <select name="orgId" required>${d.orgs.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join("")}</select>
-      <label>Database backup</label>
-      <select name="dump" required>${dbBackups
-        .map((b) => `<option value="${esc(b.name)}">${esc(new Date(b.mtime).toISOString().slice(0, 16).replace("T", " "))} UTC — ${esc(b.name)}</option>`)
-        .join("")}</select>
-      <label>Type the client's name to confirm</label>
-      <input name="confirmName" autocomplete="off" required />
-      <div class="form-actions"><button class="btn danger" type="submit">Restore this client</button></div>
-    </form>
-  </section>
-
-  <section class="panel" style="border-style:dashed">
-    <h3>Full-instance restore (runbook)</h3>
-    <p class="muted">Restoring the ENTIRE database is deliberately not a button — it takes the platform down and replaces every tenant at once. From the VM:</p>
-    <pre style="background:var(--wash-2);border:1px solid var(--line-soft);border-radius:8px;padding:12px;font-size:12px;overflow-x:auto">cd /opt/opencard
-docker compose -f deploy/docker-compose.prod.yml stop web
-docker exec -i opencard-db-1 psql -U opencard -c "DROP DATABASE opencard WITH (FORCE)" postgres
-docker exec -i opencard-db-1 psql -U opencard -c "CREATE DATABASE opencard" postgres
-docker exec -i opencard-db-1 pg_restore -U opencard -d opencard --no-owner &lt; backups/db-YYYY-MM-DD_HHMM.dump
-docker compose -f deploy/docker-compose.prod.yml up -d</pre>
-  </section>`;
-  return shell("Backups", body);
+  const dumps = d.backups.filter((b) => b.kind === "db");
+  return shell("Backups", `
+    <p class="crumb"><a href="/admin">← Dashboard</a></p>
+    <div class="topbar"><h2>Backups</h2></div>
+    <p class="muted">Create a database-and-uploads snapshot of this installation. ${d.offsiteConfigured ? "An S3-compatible offsite destination is configured; new snapshots are also copied there." : "Snapshots stay local until you configure an S3-compatible destination in <code>.env</code>."} For scheduled backups, run <code>deploy/backup.sh</code> on the Docker host.</p>
+    ${d.flash ? `<p class="auth-banner">${esc(d.flash)}</p>` : ""}
+    ${d.error ? `<p class="auth-banner" style="color:#b91c1c">${esc(d.error)}</p>` : ""}
+    <form method="POST" action="/admin/backups/run"><button class="btn" type="submit">Create backup now</button></form>
+    <table class="rsp" style="margin-top:20px"><tr><th>File</th><th>Kind</th><th>Size</th><th>Created</th></tr>
+      ${d.backups.length ? d.backups.map((b) => `<tr><td><code>${esc(b.name)}</code></td><td>${b.kind === "db" ? "Database" : "Uploads"}</td><td>${esc(b.sizeHuman)}</td><td>${esc(b.mtime.toLocaleString())}</td></tr>`).join("") : `<tr><td colspan="4" class="muted">No local backups yet.</td></tr>`}
+    </table>
+    <section class="panel" style="margin-top:20px;max-width:680px"><h3>Restore workspace content</h3>
+      <p class="muted">This replaces cards, brands, locations, leads, assets, and integrations from a database snapshot. It does not restore admin accounts, audit history, or uploaded files. For full disaster recovery, restore both the database and uploads using the guide in <code>deploy/README.md</code>.</p>
+      <form class="backup-restore-form" method="POST" action="/admin/backups/restore" onsubmit="return confirm('Restore workspace content from this backup? Changes since that snapshot will be lost.')">
+        <div><label for="backup-dump">Database snapshot</label><select id="backup-dump" name="dump" required>${dumps.map((b) => `<option value="${esc(b.name)}">${esc(b.name)}</option>`).join("")}</select></div>
+        <div><label for="backup-confirm">Type ${esc(d.workspaceName)} to confirm</label><input id="backup-confirm" name="confirmName" required autocomplete="off" /></div>
+        <p><button class="btn danger" type="submit" ${dumps.length ? "" : "disabled"}>Restore content</button></p>
+      </form>
+    </section>`);
 }
 
-// The OpenCard staff console: every client workspace in the system. Platform
-// staff see this instead of a client dashboard (no plan/billing of their own).
-export function clientsConsole(orgs: any[], p: AdminPrincipal): string {
-  const modePill = (m: string) =>
-    `<span class="pill ${m === "demo" ? "off" : "on"}">${esc(m)}</span>`;
-  const rows = orgs.length
-    ? orgs
-        .map(
-          (o) => `<tr>
-      <td><strong>${esc(o.name)}</strong>${
-            o.subdomain ? `<br><span class="muted" style="font-size:11px">${esc(o.subdomain)}</span>` : ""
-          }</td>
-      <td data-label="Plan">${esc(o.plan)}</td>
-      <td data-label="Mode">${o.suspended ? `<span class="pill off">suspended</span>` : modePill(o.billingMode)}</td>
-      <td data-label="Status" class="muted">${esc(o.subscriptionStatus)}</td>
-      <td data-label="Usage" class="muted" style="font-size:12px">${o._count.brands} brands · ${o._count.cards} cards · ${o._count.leads} leads</td>
-      <td class="rsp-actions" style="white-space:nowrap"><a class="btn secondary" href="/admin/clients/${esc(o.id)}/settings">Edit</a>
-      <form method="POST" action="/admin/clients/${esc(o.id)}/enter" style="display:inline"><button class="btn secondary" type="submit">Manage</button></form></td>
-    </tr>`
-        )
-        .join("")
-    : `<tr><td colspan="6" class="muted">No client workspaces yet.</td></tr>`;
-  const body = `
-  <div class="topbar">
-    <div style="flex-direction:column;align-items:flex-start;gap:2px">
-      <h2>Clients</h2>
-      <p class="muted" style="margin:0">Signed in as ${esc(p.name)} · <strong>OpenCard staff</strong></p>
-    </div>
-    <div>${
-      p.staffAdmin
-        ? `<a class="btn secondary" href="/admin/staff">Staff</a> <a class="btn secondary" href="/admin/backups">Backups</a> <a class="btn secondary" href="/admin/platform">Settings</a> `
-        : ""
-    }<a class="btn secondary" href="/admin/security">Security</a> <a class="btn" href="/admin/clients/new">+ New client</a></div>
-  </div>
-  <p class="muted">Every workspace in the system. “Manage” administers a client's brands, cards, leads and SSO; “Edit” sets its plan and seat allowance.</p>
-  <table class="rsp">
-    <tr><th>Client</th><th>Plan</th><th>Mode</th><th>Status</th><th>Usage</th><th></th></tr>
-    ${rows}
-  </table>`;
-  return shell("Clients", body);
-}
-
-// OpenCard staff accounts (platform tiers). Owner/admin only.
-export function staffListView(staff: any[], p: AdminPrincipal): string {
-  const rows = staff.length
-    ? staff
-        .map((s) => {
-          const canEdit = canManageStaffTarget(p.role, s.role);
-          return `<tr>
-      <td><strong>${esc(s.name || s.email)}</strong><br><span class="muted" style="font-size:11px">${esc(s.email)}</span></td>
-      <td data-label="Role">${esc(ROLE_LABELS[s.role as Role] || s.role)}</td>
-      <td data-label="2FA">${s.mfaEnabled ? `<span class="pill on">MFA on</span>` : `<span class="pill off">no MFA</span>`}</td>
-      <td data-label="Status">${s.active ? `<span class="pill on">active</span>` : `<span class="pill off">disabled</span>`}</td>
-      <td class="rsp-actions">${canEdit ? `<a class="btn secondary" href="/admin/staff/${esc(s.id)}/edit">Edit</a>` : `<span class="muted">—</span>`}</td>
-    </tr>`;
-        })
-        .join("")
-    : `<tr><td colspan="5" class="muted">No staff accounts yet.</td></tr>`;
-  const body = `
-  <p class="crumb"><a href="/admin/clients">← Clients</a></p>
-  <div class="topbar"><h2>OpenCard staff</h2><a class="btn" href="/admin/staff/new">+ New staff</a></div>
-  <p class="muted"><strong>Owner</strong>: full control, incl. other owners. <strong>Admin</strong>: everything except managing owners. <strong>Staff</strong>: manage clients only (no staff/password admin).</p>
-  <table class="rsp">
-    <tr><th>Person</th><th>Role</th><th>2FA</th><th>Status</th><th></th></tr>
-    ${rows}
-  </table>`;
-  return shell("Staff", body);
-}
-
-export function staffForm(allowedRoles: string[], staff?: any): string {
-  const s = staff || {};
-  const action = staff ? `/admin/staff/${esc(s.id)}` : "/admin/staff";
-  const roleOpts = allowedRoles
-    .map((r) => `<option value="${esc(r)}" ${s.role === r ? "selected" : ""}>${esc(ROLE_LABELS[r as Role] || r)}</option>`)
-    .join("");
-  const body = `
-  <p class="crumb"><a href="/admin/staff">← Staff</a></p>
-  <div class="topbar">
-    <div style="flex-direction:column;align-items:flex-start;gap:2px">
-      <h2>${staff ? "Edit staff" : "New OpenCard staff"}</h2>
-      <p class="muted" style="margin:0">${staff ? `Platform account for ${esc(s.email)}.` : "Creates a platform account with access to client workspaces."}</p>
-    </div>
-  </div>
-  <form class="editor" method="POST" action="${action}" style="max-width:560px">
-    <div class="grid2">
-      <div><label>Email</label><input name="email" type="email" value="${esc(s.email)}" ${staff ? "readonly" : "required"} /></div>
-      <div><label>Name</label><input name="name" value="${esc(s.name)}" placeholder="Jane Doe" /></div>
-    </div>
-    <label>Role</label>
-    <select name="role">${roleOpts}</select>
-    <p class="muted" style="margin:6px 0 0">Owner: full control, incl. other owners. Admin: everything except managing owners. Staff: manage clients only.</p>
-    <label>Password ${staff ? `<span class="muted">(leave blank to keep)</span>` : ""}</label>
-    <input name="password" type="password" autocomplete="new-password" />
-    ${
-      staff
-        ? `<label class="chk" style="margin-top:12px"><input type="checkbox" name="active" value="1" ${
-            s.active ? "checked" : ""
-          } /> Active</label>
-      <label class="chk"><input type="checkbox" name="resetMfa" value="1" /> Reset two-factor (force re-enroll)</label>`
-        : ""
-    }
-    <div class="form-actions"><button class="btn" type="submit">${staff ? "Save changes" : "Create staff"}</button>
-    <a class="btn secondary" href="/admin/staff">Cancel</a></div>
-  </form>
-  ${
-    staff
-      ? `<div class="danger-zone" style="max-width:560px">
-    <h3>Delete this staff account</h3>
-    <p class="muted">Removes ${esc(s.email)}'s access immediately. This cannot be undone.</p>
-    <form method="POST" action="/admin/staff/${esc(s.id)}/delete" onsubmit="return confirm('Delete this staff account?')"><button class="btn danger" type="submit">Delete staff account</button></form>
-  </div>`
-      : ""
-  }`;
-  return shell(staff ? "Edit staff" : "New staff", body);
-}
-
-// One-line summary of what each plan tier includes (shown on the client form).
-const PLAN_BLURBS: Record<PlanKey, string> = {
-  individual: "One card for one person: QR code, vCard, lead capture.",
-  team: "Single business: self-service editing, email signatures, CSV export, API. Up to 250 cards.",
-  multi_location_brand: "Multi-brand, multi-location organizations: everything in Team plus SSO, SCIM provisioning, webhooks, CRM sync, custom domains, advanced analytics. Up to 5,000 cards.",
-  enterprise: "Everything, unlimited, plus audit logs. Custom pricing.",
-};
-
-function planGuide(): string {
-  return `<div class="scope-box" style="margin-top:8px">${PLAN_ORDER.map((k) => {
-    const p = PLANS[k];
-    return `<p style="margin:4px 0;font-size:13px"><strong>${esc(p.label)}</strong> <span class="muted">(${esc(p.price)})</span> — <span class="muted">${esc(PLAN_BLURBS[k])}</span></p>`;
-  }).join("")}</div>`;
-}
-
-// Create/edit a client (OpenCard staff): name, plan tier, billing type, seats.
-export function clientForm(org?: any): string {
-  const o = org || {};
-  const action = org ? `/admin/clients/${esc(o.id)}/settings` : "/admin/clients";
-  const planOpts = PLAN_ORDER.map(
-    (k) => `<option value="${k}" ${o.plan === k ? "selected" : ""}>${esc(PLANS[k].label)} — ${esc(PLANS[k].price)}</option>`
-  ).join("");
-  const modeOpts = [
-    ["free", "Free"],
-    ["standard", "Paid"],
-    ["demo", "Trial"],
-  ]
-    .map(([v, l]) => `<option value="${v}" ${o.billingMode === v ? "selected" : ""}>${l}</option>`)
-    .join("");
-  const seatVal = o.seatLimit == null ? "" : o.seatLimit < 0 ? "unlimited" : String(o.seatLimit);
-  const body = `
-  <p class="crumb"><a href="/admin/clients">← Clients</a></p>
-  <div class="topbar">
-    <div style="flex-direction:column;align-items:flex-start;gap:2px">
-      <h2>${org ? `Edit client — ${esc(o.name)}` : "New client"}</h2>
-      <p class="muted" style="margin:0">${org ? "Plan tier, billing type, and the seat allowance for this workspace." : "Creates a client workspace. The client's own admins manage everything inside it."}</p>
-    </div>
-  </div>
-  <form class="editor" method="POST" action="${action}" style="max-width:560px">
-    <label>Client name</label><input name="name" value="${esc(o.name)}" required placeholder="Acme Auto Group" />
-    <label>Business type</label>
-    <select name="businessType">${VERTICALS.map(
-      ([val, label]) =>
-        `<option value="${esc(val)}" ${(o.vertical || "general") === val ? "selected" : ""}>${esc(label)}</option>`
-    ).join("")}</select>
-    <p class="muted" style="margin:6px 0 0">Sets the workspace's wording (e.g. Rooftops vs Locations) and which lead-form fields are offered.${
-      org ? " Changing it relabels their admin UI." : ""
-    }</p>
-    <div class="grid2">
-      <div><label>Plan tier</label><select name="plan">${planOpts}</select>
-        <p class="muted" style="margin:6px 0 0">Controls the feature set.</p></div>
-      <div><label>Billing type</label><select name="billingMode" id="billing-mode">${modeOpts}</select>
-        <p class="muted" style="margin:6px 0 0">Trial workspaces lock after the trial ends.</p></div>
-    </div>
-    <div id="demo-days-wrap" style="display:none">
-      <label>Trial length</label>
-      <select name="demoDays"><option value="30">30 days</option><option value="60">60 days</option></select>
-      <p class="muted" style="margin:6px 0 0">${org ? "Saving with Trial selected restarts the trial clock from today." : "The trial starts when the workspace is created."}</p>
-    </div>
-    ${planGuide()}
-    <label class="chk" style="margin:12px 0"><input type="checkbox" name="idCards" value="1" ${
-      o.idCardsEnabled ? "checked" : ""
-    } /> <strong>ID card printing add-on</strong></label>
-    <p class="muted" style="margin:-6px 0 10px">Print-ready CR80 badge PDFs (front in the card design, patterned back) for Datacard/Fargo/Zebra printers. Off = no ID card buttons or downloads for this client.</p>
-    <label>User allowance</label>
-    <input name="seatLimit" value="${esc(seatVal)}" placeholder="e.g. 50, or unlimited" />
-    <p class="muted" style="margin:6px 0 0">Blank = the plan's default · <code>unlimited</code> = per-seat billing · or a fixed number of users.</p>
-    <div class="form-actions"><button class="btn" type="submit">${org ? "Save client" : "Create client"}</button>
-    <a class="btn secondary" href="/admin/clients">Cancel</a></div>
-  </form>
-  <script>(function(){
-    var m=document.getElementById('billing-mode'),w=document.getElementById('demo-days-wrap');
-    if(!m||!w) return;
-    function u(){ w.style.display = m.value==='demo' ? '' : 'none'; }
-    m.addEventListener('change',u); u();
-  })();</script>
-  ${
-    org
-      ? `<div class="danger-zone" style="max-width:560px">
-    <h3>${o.suspended ? "Workspace is suspended" : "Suspend this client"}</h3>
-    <p class="muted">${
-      o.suspended
-        ? "Everything is dark: their admins see a suspension notice, self-service and the API are blocked, and public cards, QR codes and campaign links stop resolving. Unsuspend to restore everything as it was."
-        : "Immediately takes the workspace dark — admin access, self-service, the API, and all public cards, QR codes and campaign links. No data is deleted; unsuspend restores everything."
-    }</p>
-    <form method="POST" action="/admin/clients/${esc(o.id)}/suspend" onsubmit="return confirm('${
-      o.suspended ? "Unsuspend" : "Suspend"
-    } ${esc(o.name)}?')">
-      <button class="btn ${o.suspended ? "" : "danger"}" type="submit">${o.suspended ? "Unsuspend client" : "Suspend client"}</button>
-    </form>
-    <h3 style="margin-top:20px">Delete this client</h3>
-    <p class="muted">Permanently deletes <strong>${esc(o.name)}</strong>: every brand, rooftop, card, lead, asset, campaign, integration, admin account and audit entry. This cannot be undone — consider suspending instead.</p>
-    <form method="POST" action="/admin/clients/${esc(o.id)}/delete" onsubmit="return confirm('Permanently delete ${esc(
-      o.name
-    )} and ALL of its data? This cannot be undone.')">
-      <label>Type the client name to confirm: <strong>${esc(o.name)}</strong></label>
-      <input name="confirmName" autocomplete="off" placeholder="${esc(o.name)}" />
-      <button class="btn danger" type="submit">Delete client permanently</button>
-    </form>
-  </div>`
-      : ""
-  }`;
-  return shell(org ? "Edit client" : "New client", body);
-}
-
-// First-run checklist state, computed from real data in the dashboard route.
 export type OnboardingState = {
   steps: { brand: boolean; location: boolean; card: boolean; shared: boolean; lead: boolean };
   firstBrandId: string | null;
@@ -460,38 +171,26 @@ export function dashboard(
   brands: BrandWithLocations[],
   p: AdminPrincipal,
   t: Terminology = GENERAL_TERMINOLOGY,
-  actingClientName?: string,
-  verifyState: "needed" | "sent" | null = null,
   onboarding: OnboardingState | null = null
 ): string {
   const canManage = (brandId: string) =>
     p.global || (p.role === "brand_admin" && p.brandIds.includes(brandId));
-  const topActions = `
-    ${showsBilling(p) ? `<a class="btn secondary" href="/admin/billing">Plan</a>` : ""}
-    <a class="btn secondary" href="/admin/security">Security</a>
-    <a class="btn secondary" href="/admin/domains">Domains</a>
-    ${p.super ? `<a class="btn secondary" href="/admin/admins">Admins</a>` : ""}
-    ${p.super ? `<a class="btn secondary" href="/admin/integrations">Integrations</a>` : ""}
-    ${p.super ? `<a class="btn secondary" href="/admin/import">Import</a>` : ""}
-    ${p.super ? `<a class="btn secondary" href="/admin/marketing">Marketing</a>` : ""}
-    ${p.super ? `<a class="btn secondary" href="/admin/audit">Audit</a>` : ""}
-    ${p.global ? `<a class="btn secondary" href="/admin/events">Events</a>` : ""}
-    ${p.global ? `<a class="btn secondary" href="/admin/data">Data</a>` : ""}
-    ${p.global ? `<a class="btn" href="/admin/brands/new">+ New ${lower(t.brandSingular)}</a>` : ""}`;
-  const banner = actingClientName
-    ? `<div class="stat" style="border:1px solid #2563eb;background:#eff6ff;margin-bottom:12px">Managing client <strong>${esc(
-        actingClientName
-      )}</strong> · <a href="/admin/clients/exit">← back to all clients</a></div>`
-    : "";
-  const verifyBanner =
-    verifyState === "sent"
-      ? `<div class="stat" style="border:1px solid #16a34a;background:#f0fdf4;margin-bottom:12px">Verification email sent — check your inbox.</div>`
-      : verifyState === "needed"
-      ? `<div class="stat" style="border:1px solid #d97706;background:#fffbeb;margin-bottom:12px">
-      <strong>Verify your email to go live.</strong> Your ${esc(lower(t.cardPlural))} and lead capture stay private until you confirm the address you signed up with.
-      <form method="POST" action="/admin/verify/resend" style="display:inline;margin-left:8px"><button class="btn secondary" type="submit" style="padding:4px 10px;font-size:13px">Resend verification email</button></form>
-    </div>`
-      : "";
+  const workspaceTools = `
+    <nav class="dashboard-tools" aria-label="Workspace tools">
+      ${p.super || p.global ? `<div><h3>People &amp; content</h3>
+        ${p.super ? `<a href="/admin/admins">Admins</a><a href="/admin/import">Import</a><a href="/admin/marketing">Marketing</a>` : ""}
+        ${p.global ? `<a href="/admin/data">Data</a>` : ""}
+      </div>` : ""}
+      <div><h3>Connections</h3>
+        <a href="/admin/domains">Domains</a>
+        ${p.super ? `<a href="/admin/integrations">Integrations</a>` : ""}
+        ${p.global ? `<a href="/admin/events">Events</a>` : ""}
+      </div>
+      <div><h3>Operations</h3>
+        <a href="/admin/security">Security</a>
+        ${p.super ? `<a href="/admin/audit">Audit</a><a href="/admin/backups">Backups</a>` : ""}
+      </div>
+    </nav>`;
   const ob = onboarding;
   const obStep = (done: boolean, label: string, href: string | null, hint: string) => `
     <li style="display:flex;align-items:baseline;gap:10px;padding:6px 0">
@@ -521,16 +220,15 @@ export function dashboard(
       })()
     : "";
   const body = `
-  ${banner}
-  ${verifyBanner}
   ${obPanel}
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>${esc(t.brandPlural)} &amp; ${esc(lower(t.locationPlural))}</h2>
       <p class="muted" style="margin:0">Signed in as ${esc(p.name)} · <strong>${esc(ROLE_LABELS[p.role])}</strong></p>
     </div>
-    <div>${topActions}</div>
+    ${p.global ? `<a class="btn" href="/admin/brands/new">+ New ${lower(t.brandSingular)}</a>` : ""}
   </div>
+  ${workspaceTools}
   ${
     brands.length === 0
       ? `<p class="muted">No ${esc(lower(t.brandPlural))} in your scope yet.</p>`
@@ -556,17 +254,17 @@ export function dashboard(
           }
         </div>
       </div>
-      <table style="margin-top:10px">
+      <table class="rsp" style="margin-top:10px">
         <tr><th>${esc(t.locationSingular)}</th><th>Code</th><th>${esc(t.cardPlural)}</th><th></th></tr>
         ${
           b.locations.length
             ? b.locations
                 .map(
                   (l) => `<tr>
-            <td>${esc(l.name)}</td>
-            <td class="muted">${esc(l.code || "—")}</td>
-            <td>${l._count?.cards ?? 0}</td>
-            <td>
+            <td data-label="${esc(t.locationSingular)}">${esc(l.name)}</td>
+            <td data-label="Code" class="muted">${esc(l.code || "—")}</td>
+            <td data-label="${esc(t.cardPlural)}">${l._count?.cards ?? 0}</td>
+            <td class="rsp-actions">
               <a href="/admin/cards?locationId=${esc(l.id)}">${esc(t.cardPlural)}</a> ·
               <a href="/admin/locations/${esc(l.id)}/edit">Edit</a>
             </td></tr>`
@@ -597,7 +295,7 @@ export function brandForm(
   brand?: any,
   stats?: { locations: number; cards: number },
   t: Terminology = GENERAL_TERMINOLOGY
-, idCardsEnabled = false): string {
+): string {
   const b = brand || {};
   const action = brand ? `/admin/brands/${brand.id}` : "/admin/brands";
   const brandDomains = (b.domains as any[]) || [];
@@ -629,14 +327,12 @@ export function brandForm(
     })}
 
     ${
-      idCardsEnabled
-        ? `<h3>ID card back design</h3>
+      `<h3>ID card back design</h3>
     <p class="muted">The back of printed ID badges for this brand (fronts always use the person's card design).</p>
     <div class="self-fields">
       <label class="chk"><input type="radio" name="idCardBack" value="cubes" ${(b.idCardBack || "cubes") !== "triangles" ? "checked" : ""} /> Cubes — two-tone isometric lattice in the brand color</label>
       <label class="chk"><input type="radio" name="idCardBack" value="triangles" ${b.idCardBack === "triangles" ? "checked" : ""} /> Triangles — brand-color base with a subtle mosaic texture</label>
     </div>`
-        : `<p class="muted" style="margin-top:14px">Printable ID badges (front + designed back) are an OpenCard add-on — contact us to enable them for this workspace.</p>`
     }
     <label class="chk" style="margin-top:12px"><input type="checkbox" name="showQr" value="1" ${
       b.showQr === false ? "" : "checked"
@@ -676,7 +372,7 @@ export function brandForm(
     </div>
 
     <h3 style="margin-top:16px">Branded login domains</h3>
-    <p class="muted">Point hostnames at OpenCard (CNAME to <code>tenants.opencard.id</code>) for login pages with this brand's logo &amp; colors. Use separate hosts for the employee and admin portals — visiting each lands on the right sign-in. Rooftops can override. Leave blank for none.</p>
+    <p class="muted">Point branded login hostnames at <code>${esc(CNAME_TARGET)}</code> with a CNAME record. Use separate hosts for employee and admin sign-in if needed. Leave blank for none.</p>
     <div class="grid2">
       <div><label>Employee login domain</label><input name="userDomain" value="${esc(userDomain)}" placeholder="cards.yourbrand.com" /></div>
       <div><label>Admin login domain</label><input name="adminDomain" value="${esc(adminDomain)}" placeholder="cardadmin.yourbrand.com" /></div>
@@ -725,11 +421,11 @@ export function eventsView(data: { events: any[]; locations: { id: string; name:
     ? data.events
         .map(
           (ev) => `<tr>
-        <td><a href="/admin/events/${esc(ev.id)}">${esc(ev.name)}</a></td>
-        <td>${pill(ev)}</td>
-        <td class="muted">${ev.location?.name ? esc(ev.location.name) : "—"}</td>
-        <td class="muted">${day(ev.startsAt)}${ev.endsAt ? ` → ${day(ev.endsAt)}` : ""}</td>
-        <td>${ev._count?.assets ?? 0} QR</td>
+        <td data-label="Event"><a href="/admin/events/${esc(ev.id)}">${esc(ev.name)}</a></td>
+        <td data-label="Status">${pill(ev)}</td>
+        <td data-label="${esc(t.locationSingular)}" class="muted">${ev.location?.name ? esc(ev.location.name) : "—"}</td>
+        <td data-label="Dates" class="muted">${day(ev.startsAt)}${ev.endsAt ? ` → ${day(ev.endsAt)}` : ""}</td>
+        <td data-label="QR">${ev._count?.assets ?? 0} QR</td>
       </tr>`
         )
         .join("")
@@ -739,7 +435,7 @@ export function eventsView(data: { events: any[]; locations: { id: string; name:
   <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar"><h2>Events</h2></div>
   <p class="muted">${esc(packFor(t.vertical).eventsExamples)}: create an event, add QR codes that capture leads, and track its performance. Event QR codes only work while the event is live.</p>
-  <table>
+  <table class="rsp">
     <tr><th>Event</th><th>Status</th><th>${esc(t.locationSingular)}</th><th>Dates</th><th>QR</th></tr>
     ${rows}
   </table>
@@ -767,10 +463,10 @@ export function eventDetailView(data: { ev: any; scans: number; leads: number; b
     ? ev.assets
         .map(
           (a: any) => `<tr>
-        <td>${esc(a.name)}</td>
-        <td><a href="${esc(data.baseUrl)}/a/${esc(a.slug)}" target="_blank"><code>/a/${esc(a.slug)}</code></a></td>
-        <td><a href="${esc(data.baseUrl)}/a/${esc(a.slug)}/qr.png" target="_blank">QR</a></td>
-        <td>${a.scanCount}</td>
+        <td data-label="Name">${esc(a.name)}</td>
+        <td data-label="Link"><a href="${esc(data.baseUrl)}/a/${esc(a.slug)}" target="_blank"><code>/a/${esc(a.slug)}</code></a></td>
+        <td data-label="QR"><a href="${esc(data.baseUrl)}/a/${esc(a.slug)}/qr.png" target="_blank">QR</a></td>
+        <td data-label="Scans">${a.scanCount}</td>
       </tr>`
         )
         .join("")
@@ -789,7 +485,7 @@ export function eventDetailView(data: { ev: any; scans: number; leads: number; b
   </div>
 
   <h3 style="margin-top:24px">QR codes</h3>
-  <table><tr><th>Name</th><th>Link</th><th>QR</th><th>Scans</th></tr>${assetRows}</table>
+  <table class="rsp"><tr><th>Name</th><th>Link</th><th>QR</th><th>Scans</th></tr>${assetRows}</table>
   <form class="editor" method="POST" action="/admin/events/${esc(ev.id)}/assets" style="max-width:560px;margin-top:10px">
     <label>Add a QR code — name</label>
     <input name="name" placeholder="Entrance banner" required />
@@ -818,16 +514,12 @@ export function eventDetailView(data: { ev: any; scans: number; leads: number; b
 
 // Data & privacy hub (Phase 9.2/9.3): export + erasure + retention controls.
 export function dataPrivacyView(d: {
-  orgName: string;
-  canPurge: boolean;
-  done: boolean;
   retentionDays?: number | null;
   pruned?: number | null;
 }): string {
   const body = `
   <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar"><h2>Data &amp; privacy</h2></div>
-  ${d.done ? `<p class="auth-banner" style="max-width:none">Data purge complete.</p>` : ""}
   ${d.pruned != null ? `<p class="auth-banner" style="max-width:none">Retention prune complete — ${d.pruned} lead(s) removed.</p>` : ""}
 
   <h3>Data retention</h3>
@@ -841,23 +533,11 @@ export function dataPrivacyView(d: {
 
   <h3 style="margin-top:24px">Export</h3>`;
   const rest = `
-  <p class="muted">Download a full JSON copy of this account's data (brands, rooftops, cards, employees, leads, assets, campaigns) — for data-portability / GDPR access requests. Secrets (tokens, Stripe IDs) are excluded.</p>
+  <p class="muted">Download a JSON copy of this workspace's data (brands, locations, cards, employees, leads, assets, campaigns) for portability or privacy requests. Stored credentials and tokens are excluded.</p>
   <p><a class="btn" href="/admin/data/export.json">⬇ Download data (JSON)</a></p>
   <h3 style="margin-top:24px">Erase a lead</h3>
   <p class="muted">To honor a customer's right to erasure, open the lead from <a href="/admin/leads">Leads</a> and use <strong>Erase lead</strong>. Every erasure is recorded in the <a href="/admin/audit">audit log</a>.</p>
-  ${
-    d.canPurge
-      ? `<div class="danger-zone">
-    <h3>Danger zone — erase ALL data for ${esc(d.orgName)}</h3>
-    <p class="muted">Permanently deletes every brand, rooftop, card, employee, lead, asset, campaign, and integration for this client. The account shell and admin logins remain. This cannot be undone.</p>
-    <form method="POST" action="/admin/data/purge" onsubmit="return confirm('Permanently erase ALL data for ${esc(d.orgName)}? This cannot be undone.')">
-      <label>Type the client name to confirm: <strong>${esc(d.orgName)}</strong></label>
-      <input name="confirmName" autocomplete="off" placeholder="${esc(d.orgName)}" />
-      <button class="btn danger" type="submit">Erase all data</button>
-    </form>
-  </div>`
-      : ""
-  }`;
+  `;
   return shell("Data & privacy", body + rest);
 }
 
@@ -868,11 +548,11 @@ export function auditView(logs: any[], action: string | null = null): string {
         .map((l) => {
           const when = new Date(l.createdAt).toISOString().slice(0, 16).replace("T", " ");
           return `<tr>
-        <td class="muted" style="white-space:nowrap">${esc(when)}</td>
-        <td>${esc(formatAuditActor(l.actorEmail, l.actorRole))}</td>
-        <td>${esc(auditLabel(l.action))} <span class="muted" style="font-size:11px">${esc(l.action)}</span></td>
-        <td class="muted" style="max-width:280px;overflow:hidden;text-overflow:ellipsis">${esc(l.summary || l.targetType || "")}</td>
-        <td class="muted" style="font-size:12px">${esc(l.ip || "")}</td>
+        <td data-label="When (UTC)" class="muted" style="white-space:nowrap">${esc(when)}</td>
+        <td data-label="Actor">${esc(formatAuditActor(l.actorEmail, l.actorRole))}</td>
+        <td data-label="Action">${esc(auditLabel(l.action))} <span class="muted" style="font-size:11px">${esc(l.action)}</span></td>
+        <td data-label="Details" class="muted" style="max-width:280px;overflow:hidden;text-overflow:ellipsis">${esc(l.summary || l.targetType || "")}</td>
+        <td data-label="IP" class="muted" style="font-size:12px">${esc(l.ip || "")}</td>
       </tr>`;
         })
         .join("")
@@ -880,10 +560,10 @@ export function auditView(logs: any[], action: string | null = null): string {
   const body = `
   <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar"><h2>Audit log</h2></div>
-  <p class="muted">Security &amp; compliance trail of admin, sign-in, integration, SSO/SCIM, billing, and domain changes. Newest first (last 250).${
+  <p class="muted">Security &amp; operations trail of admin, sign-in, integration, SSO/SCIM, and domain changes. Newest first (last 250).${
     action ? ` Filtered to <code>${esc(action)}</code> · <a href="/admin/audit">clear</a>` : ""
   }</p>
-  <table>
+  <table class="rsp">
     <tr><th>When (UTC)</th><th>Actor</th><th>Action</th><th>Details</th><th>IP</th></tr>
     ${rows}
   </table>`;
@@ -902,12 +582,12 @@ export function marketingView(data: { org: any; campaigns: any[]; baseUrl: strin
             .filter(Boolean)
             .join(" · ");
           return `<tr>
-        <td><a href="${shortUrl}" target="_blank"><code>/k/${esc(c.code)}</code></a></td>
-        <td>${esc(c.name)}</td>
-        <td class="muted" style="max-width:240px;overflow:hidden;text-overflow:ellipsis"><code>${esc(c.landingUrl)}</code></td>
-        <td class="muted" style="font-size:12px">${esc(utm || "—")}</td>
-        <td>${c.clicks}</td>
-        <td><form method="POST" action="/admin/marketing/campaigns/${esc(c.id)}/delete" onsubmit="return confirm('Delete this campaign link?')"><button class="btn danger" type="submit">Delete</button></form></td>
+        <td data-label="Short link"><a href="${shortUrl}" target="_blank"><code>/k/${esc(c.code)}</code></a></td>
+        <td data-label="Name">${esc(c.name)}</td>
+        <td data-label="Landing" class="muted" style="max-width:240px;overflow:hidden;text-overflow:ellipsis"><code>${esc(c.landingUrl)}</code></td>
+        <td data-label="UTM" class="muted" style="font-size:12px">${esc(utm || "—")}</td>
+        <td data-label="Clicks">${c.clicks}</td>
+        <td class="rsp-actions"><form method="POST" action="/admin/marketing/campaigns/${esc(c.id)}/delete" onsubmit="return confirm('Delete this campaign link?')"><button class="btn danger" type="submit">Delete</button></form></td>
       </tr>`;
         })
         .join("")
@@ -937,7 +617,7 @@ export function marketingView(data: { org: any; campaigns: any[]; baseUrl: strin
   <section class="panel">
   <h3>Campaign links</h3>
   <p class="muted">Short, trackable links that redirect to a landing page with UTM parameters attached — great for print QR codes, ads, and events.</p>
-  <table>
+  <table class="rsp">
     <tr><th>Short link</th><th>Name</th><th>Landing</th><th>UTM</th><th>Clicks</th><th></th></tr>
     ${rows}
   </table>
@@ -988,7 +668,6 @@ export function domainsView(data: { domains: any[]; brands: any[]; target: strin
         <tr><td style="width:120px">Type</td><td><code>CNAME</code></td></tr>
         <tr><td>Name / Host</td><td><code>${esc(d.host)}</code></td></tr>
         <tr><td>Value / Target</td><td><code>${esc(target)}</code></td></tr>
-        <tr><td>Proxy (Cloudflare)</td><td><strong>DNS only</strong> — grey cloud, not proxied</td></tr>
       </tbody></table></div>`;
         })
         .join("")
@@ -1004,10 +683,7 @@ export function domainsView(data: { domains: any[]; brands: any[]; target: strin
   const body = `
   <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar"><h2>Custom domains</h2></div>
-  <p class="muted">Give your sign-in pages your own web address (e.g. <code>cards.yourco.com</code>). Add the domain, create the one DNS record shown, then click <strong>Verify</strong> — the secure certificate is set up automatically once DNS points to us.</p>
-  <p style="border-left:4px solid #d97706;background:#fffbeb;color:#7c2d12;padding:10px 12px;border-radius:6px;font-size:14px;max-width:none">
-    <strong>Using Cloudflare for your DNS?</strong> Set this record to <strong>DNS only</strong> (grey cloud) — <em>not</em> Proxied (orange cloud). A proxied record blocks our automatic certificate and the page will show an SSL error (525). You can switch it back to proxied only if you install your own Cloudflare Origin Certificate.
-  </p>
+  <p class="muted">Give sign-in pages your own hostnames (for example <code>cards.yourco.com</code>). Create the DNS record shown below and verify it. Automatic HTTPS requires the optional Caddy proxy to be running and ports 80/443 reachable.</p>
   ${data.flash ? `<p class="auth-banner" style="max-width:none">${esc(data.flash)}</p>` : ""}
   ${rows}
   <h3 style="margin-top:18px">Add a domain</h3>
@@ -1205,7 +881,7 @@ export function locationForm(
     ${
       l.id
         ? `<h3>Branded login domains (this ${esc(lower(t.locationSingular))})</h3>
-    <p class="muted">Overrides the brand's domains for this rooftop — its own hostnames, logo &amp; colors (CNAME to <code>tenants.opencard.id</code>). Leave blank to use the brand's.</p>
+    <p class="muted">Overrides the brand's login hostnames, logo and colors (CNAME to <code>${esc(CNAME_TARGET)}</code>). Leave blank to use the brand's.</p>
     <div class="grid2">
       <div><label>Employee login domain</label><input name="userDomain" value="${esc(locUserDomain)}" placeholder="cards.thisrooftop.com" /></div>
       <div><label>Admin login domain</label><input name="adminDomain" value="${esc(locAdminDomain)}" placeholder="cardadmin.thisrooftop.com" /></div>
@@ -1346,18 +1022,15 @@ export function assetsView(data: {
 // Org-wide QR Codes hub: every trackable QR in one place, with a create form.
 // Backed by the same Asset model as the per-location Assets view.
 export function qrCodesView(data: {
-  assets: any[]; // include: location { name }, org { name }
+  assets: any[]; // include: location { name }
   locations: { id: string; name: string; brandName: string }[];
   cardBaseUrl: string;
   created?: string | null; // slug of a just-created code (success banner)
   locationLabel?: string;
-  platformConsole?: boolean; // platform staff, NOT drilled into a client
-  actingClientName?: string; // platform staff drilled into this client
 }): string {
   const base = (data.cardBaseUrl || "").replace(/\/+$/, "");
   const locLabel = data.locationLabel || "Location";
   const createdAsset = data.created ? data.assets.find((a) => a.slug === data.created) : null;
-  const showClientCol = !!data.platformConsole;
 
   const rows = data.assets.length
     ? data.assets
@@ -1371,7 +1044,6 @@ export function qrCodesView(data: {
                 : "Landing page with lead form";
           return `<tr>
       <td>${esc(a.name)}</td>
-      ${showClientCol ? `<td data-label="Client" class="muted">${esc(a.org?.name || "")}</td>` : ""}
       <td data-label="Destination" class="muted">${dest}</td>
       <td data-label="${esc(locLabel)}" class="muted">${esc(a.location?.name || "")}</td>
       <td data-label="Scans">${a.scanCount}</td>
@@ -1384,25 +1056,13 @@ export function qrCodesView(data: {
       </td></tr>`;
         })
         .join("")
-    : `<tr><td colspan="${showClientCol ? 7 : 6}" class="muted">No QR codes yet${data.platformConsole ? "." : " — create your first one below."}</td></tr>`;
+    : `<tr><td colspan="6" class="muted">No QR codes yet — create your first one below.</td></tr>`;
 
   const locOpts = data.locations
     .map((l) => `<option value="${esc(l.id)}">${esc(l.brandName)} — ${esc(l.name)}</option>`)
     .join("");
 
-  // Platform staff drilled into a client: same context banner as the dashboard.
-  const clientBanner = data.actingClientName
-    ? `<div class="stat" style="border:1px solid #2563eb;background:#eff6ff;margin-bottom:12px">Managing client <strong>${esc(
-        data.actingClientName
-      )}</strong> · <a href="/admin/clients/exit">← back to all clients</a></div>`
-    : "";
-
-  const createSection = data.platformConsole
-    ? `<div class="stat" style="border:1px solid #d97706;background:#fffbeb;margin:12px 0">
-      You're on the <strong>platform console</strong>, viewing every client's QR codes. To create or edit one,
-      open the client's workspace first (<a href="/admin">Dashboard</a> → choose the client → Manage) so the code
-      is filed under the right account.</div>`
-    : `<h3 style="margin-top:18px">Create a QR code</h3>
+  const createSection = `<h3 style="margin-top:18px">Create a QR code</h3>
   <form class="editor" method="POST" action="/admin/qr" style="max-width:640px">
     <div class="grid2">
       <div><label>Name</label><input name="name" placeholder="e.g. Showroom window — summer promo" required /></div>
@@ -1424,7 +1084,6 @@ export function qrCodesView(data: {
   </form>`;
 
   const body = `
-  ${clientBanner}
   <div class="topbar"><h2>QR Codes</h2></div>
   <p class="muted">Trackable QR codes that send people wherever you want. Every scan is counted and located (city-level) in <a href="/admin/analytics">Analytics</a> — then the visitor is redirected instantly, or shown a lead-capture page if you choose "Landing page".</p>
   ${
@@ -1435,7 +1094,7 @@ export function qrCodesView(data: {
   ${createSection}
   <h3 style="margin-top:26px">All QR codes</h3>
   <table class="rsp">
-    <tr><th>Name</th>${showClientCol ? "<th>Client</th>" : ""}<th>Destination</th><th>${esc(locLabel)}</th><th>Scans</th><th>Status</th><th></th></tr>
+    <tr><th>Name</th><th>Destination</th><th>${esc(locLabel)}</th><th>Scans</th><th>Status</th><th></th></tr>
     ${rows}
   </table>
   <p class="muted" style="margin-top:10px">The QR image uses your brand's design (set under Edit brand → QR code design). You can change a code's destination any time without reprinting — the printed QR always points at your OpenCard link.</p>`;
@@ -1590,7 +1249,7 @@ export function cardForm(opts: {
         <div><label>Primary color override</label><input name="primaryColor" value="${esc(c.primaryColor)}" placeholder="#1f6f43" /></div>
       </div>
       <label>Logo override</label><input type="file" name="logoFile" accept="image/*" />
-      <input name="logoUrl" value="${esc(c.logoUrl)}" placeholder="…or logo URL" style="margin-top:6px" />
+      <label>…or logo override URL</label><input name="logoUrl" value="${esc(c.logoUrl)}" placeholder="https://.../logo.png" style="margin-top:6px" />
       <label>QR code on this card</label>
       <select name="showQr">
         <option value="">Inherit brand setting</option>
@@ -1647,6 +1306,7 @@ export function turnoverForm(opts: { card: any; rooftop: any; otherCards: any[];
   <form class="editor" method="POST" action="/admin/cards/${esc(c.id)}/turnover" style="max-width:640px">
     <h3>Redirect the old card</h3>
     <p class="muted">Where to send anyone scanning the printed NFC/QR card afterwards.</p>
+    <label>Redirect destination</label>
     <select name="redirect">
       <option value="none">Don't redirect (show "not found")</option>
       ${opts.rooftop?.website ? `<option value="rooftop">Rooftop website (${esc(opts.rooftop.website)})</option>` : ""}
@@ -1654,6 +1314,7 @@ export function turnoverForm(opts: { card: any; rooftop: any; otherCards: any[];
     </select>
 
     <h3 style="margin-top:16px">Leads (${opts.leadCount})</h3>
+    <label>Lead handling</label>
     <select name="transferLeads">
       <option value="keep">Keep leads on this card</option>
       ${leadTargetOpts ? `<optgroup label="Transfer to">${leadTargetOpts}</optgroup>` : ""}
@@ -1694,24 +1355,20 @@ export function recoveryCodesView(codes: string[], lede: string): string {
 type SessionRow = { id: string; current: boolean; lastSeenAt: Date; createdAt: Date; ip: string | null; userAgent: string | null };
 
 // Security (two-factor) settings, in the standard admin layout. `workspace`
-// says whose account this is (an org name, or "OpenCard staff") so the page
-// reads differently for client admins vs platform staff.
+// The workspace name helps distinguish an admin account from a cardholder.
 export function securityView(opts: {
   email: string | null;
   on: boolean;
   note?: string;
   workspace?: string | null;
-  platform?: boolean;
   recoveryCount?: number;
   sessions?: SessionRow[];
 }): string {
-  const who = opts.platform
-    ? `your <strong>OpenCard staff</strong> account`
-    : opts.workspace
+  const who = opts.workspace
     ? `your admin account in <strong>${esc(opts.workspace)}</strong>`
     : `your admin account`;
   const inner = !opts.email
-    ? `<p class="muted">You're signed in with the break-glass token, which has no stored account. Two-factor applies to email/password admin accounts.</p>`
+    ? `<p class="muted">This session is not attached to a stored admin account. Sign out and use a named account before changing security settings.</p>`
     : opts.on
     ? `<p>Two-factor authentication is <strong>on</strong> for ${esc(opts.email)}.</p>
        <form method="POST" action="/admin/security/mfa/disable" style="margin-top:8px"><button class="btn danger" type="submit">Turn off two-factor</button></form>`
@@ -1745,15 +1402,15 @@ export function securityView(opts: {
   ${
     opts.sessions && opts.sessions.length
       ? `<h3 style="margin-top:24px">Active sessions</h3>
-  <table style="max-width:720px">
+  <table class="rsp" style="max-width:720px">
     <tr><th>Session</th><th>Last active</th><th>IP</th><th></th></tr>
     ${opts.sessions
       .map(
         (s) => `<tr>
-      <td>${s.current ? `<span class="pill on">this session</span>` : `<span class="muted" style="font-size:12px">${esc((s.userAgent || "unknown device").slice(0, 60))}</span>`}</td>
-      <td class="muted">${esc(new Date(s.lastSeenAt).toISOString().slice(0, 16).replace("T", " "))}</td>
-      <td class="muted">${esc(s.ip || "—")}</td>
-      <td>${
+      <td data-label="Session">${s.current ? `<span class="pill on">this session</span>` : `<span class="muted" style="font-size:12px">${esc((s.userAgent || "unknown device").slice(0, 60))}</span>`}</td>
+      <td data-label="Last active" class="muted">${esc(new Date(s.lastSeenAt).toISOString().slice(0, 16).replace("T", " "))}</td>
+      <td data-label="IP" class="muted">${esc(s.ip || "—")}</td>
+      <td class="rsp-actions">${
         s.current
           ? ""
           : `<form method="POST" action="/admin/security/sessions/${esc(s.id)}/revoke"><button class="btn danger" type="submit">Sign out</button></form>`
@@ -1821,7 +1478,7 @@ export function templatesGallery(
   const copyControl = (t: any) =>
     otherBrands.length
       ? ` &nbsp;·&nbsp; <form method="POST" action="/admin/templates/${esc(t.id)}/copy" style="display:inline">
-        <select name="brandId" style="padding:3px 6px;font-size:12px">${otherBrands
+        <select name="brandId" aria-label="Copy template to brand" style="padding:3px 6px;font-size:12px">${otherBrands
           .map((b) => `<option value="${esc(b.id)}">${esc(b.name)}</option>`)
           .join("")}</select>
         <button class="btn secondary" type="submit" style="padding:3px 9px">Copy to</button></form>`
@@ -1966,53 +1623,6 @@ export function templateForm(
   </form>
   ${designScripts()}`;
   return shell("Template", body);
-}
-
-// Plan & usage: the client's own view of their plan, limits and usage. The
-// hand-override controls render only for OpenCard staff and are labeled as such.
-export function billingView(d: {
-  plan: { key: string; label: string; price: string; features: string[] };
-  modeLabel: string;
-  statusLine: string;
-  statusOk: boolean;
-  usageRows: string; // pre-rendered <tr>s
-  paySection: string;
-  staffSetter: string | null; // pre-rendered staff-only form, or null
-}): string {
-  const feats = d.plan.features.length
-    ? d.plan.features.map((f) => `<span class="pill">${esc(f)}</span>`).join(" ")
-    : `<span class="muted">Basic features only</span>`;
-  const body = `
-  <p class="crumb"><a href="/admin">← Dashboard</a></p>
-  <div class="topbar">
-    <div style="flex-direction:column;align-items:flex-start;gap:2px">
-      <h2>Plan &amp; usage</h2>
-      <p class="muted" style="margin:0">What your workspace's plan includes and how much of it you're using.</p>
-    </div>
-  </div>
-  <div class="cards-grid" style="margin-bottom:18px;max-width:720px">
-    <div class="stat"><div class="n" style="font-size:22px">${esc(d.plan.label)}</div><div class="muted">${esc(d.plan.price)} · ${esc(d.modeLabel)}</div></div>
-    <div class="stat"><div style="font-weight:700;color:${d.statusOk ? "var(--ok-ink)" : "var(--bad-ink)"}">${esc(d.statusLine)}</div><div class="muted">Subscription status</div></div>
-  </div>
-  <section class="panel" style="max-width:720px">
-    <h3>Usage against plan limits</h3>
-    <table class="usage"><tbody>${d.usageRows}</tbody></table>
-    <p style="margin-top:14px">Included: ${feats}</p>
-  </section>
-  <section class="panel" style="max-width:720px">
-    <h3>Change plan</h3>
-    ${d.paySection}
-  </section>
-  ${
-    d.staffSetter
-      ? `<section class="panel" style="max-width:720px;border-style:dashed">
-    <h3>OpenCard staff controls</h3>
-    <p class="muted">Only platform staff see this. Hand-assign a plan or billing mode (comp accounts, demos, manual overrides) — clients themselves can't change these.</p>
-    ${d.staffSetter}
-  </section>`
-      : ""
-  }`;
-  return shell("Plan & usage", body);
 }
 
 // Directory import wizard (Phase 13): backfill employees from Azure AD.
@@ -2166,16 +1776,17 @@ export function importView(d: {
   <p class="crumb"><a href="/admin">← Dashboard</a></p>
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
-      <h2>Import from Azure AD</h2>
-      <p class="muted" style="margin:0">Backfill your existing team into ${esc(lower(t.cardPlural))} — SCIM keeps future hires in sync automatically. No Azure? <a href="/admin/import/csv">Import from a spreadsheet</a> instead.</p>
+      <h2>Import people</h2>
+      <p class="muted" style="margin:0">Add existing people from Microsoft Entra ID or a CSV file. SCIM can keep future hires in sync if you configure it.</p>
     </div>
+    <a class="btn secondary" href="/admin/import/csv">Import a CSV file</a>
   </div>
   ${d.result ? `<p class="auth-banner" style="max-width:none">Import complete: ${d.result.created} created, ${d.result.skipped} skipped.</p>` : ""}
   ${d.testResult ? `<p class="auth-banner" style="max-width:none">${esc(d.testResult)}</p>` : ""}
   ${d.error ? `<p class="auth-error" style="max-width:none">${esc(d.error)}</p>` : ""}
   ${connectedLine}
   ${d.configured && !d.showSettings ? picker + planTable : settingsForm}`;
-  return shell("Import from Azure AD", body);
+  return shell("Import people", body);
 }
 
 // CSV employee import (Phase 14): upload -> map columns -> preview -> pick who
@@ -2201,6 +1812,7 @@ export function importCsvView(d: {
     <h3>Upload a spreadsheet</h3>
     <p class="muted">A CSV export from Excel, Google Sheets or your HR system — one row per person, with a header row. Needs at least an email column; name, title, department, phones and ${esc(lower(t.locationSingular))} are picked up when present. Nothing is created until you confirm the preview.</p>
     <form class="editor" method="POST" action="/admin/import/csv/preview" enctype="multipart/form-data" style="max-width:560px">
+      <label>CSV file</label>
       <input type="file" name="csvFile" accept=".csv,text/csv" required />
       <div class="actions" style="margin-top:12px"><button class="btn" type="submit">Upload &amp; preview</button></div>
     </form>
@@ -2288,8 +1900,9 @@ export function importCsvView(d: {
   <div class="topbar">
     <div style="flex-direction:column;align-items:flex-start;gap:2px">
       <h2>Import from a spreadsheet</h2>
-      <p class="muted" style="margin:0">Backfill your team from a CSV — no directory required. Have Azure AD? The <a href="/admin/import">Azure import</a> maps everything automatically.</p>
+      <p class="muted" style="margin:0">Add existing people from a CSV file; no directory connection is required.</p>
     </div>
+    <a class="btn secondary" href="/admin/import">Use Microsoft Entra ID</a>
   </div>
   ${d.result ? `<p class="auth-banner" style="max-width:none">Import complete: ${d.result.created} created, ${d.result.skipped} skipped.</p>` : ""}
   ${d.error ? `<p class="auth-error" style="max-width:none">${esc(d.error)}</p>` : ""}
@@ -2529,6 +2142,7 @@ export function integrationsView(data: {
   samlHost: string | null;
   subdomain: string | null;
   customDomain: string | null;
+  verifiedCustomDomains: string[];
   platformDomain: string;
   scimBaseUrl: string;
   scimTokenSet: boolean;
@@ -2547,12 +2161,12 @@ export function integrationsView(data: {
     ? data.keys
         .map(
           (k) => `<tr>
-        <td>${esc(k.name)}</td>
-        <td class="muted"><code>${esc(k.prefix)}…</code></td>
-        <td style="max-width:220px">${keyScopes(k)}</td>
-        <td class="muted">${k.lastUsedAt ? `${esc(new Date(k.lastUsedAt).toISOString().slice(0, 16).replace("T", " "))}${k.lastUsedPath ? `<br><span style="font-size:11px">${esc(k.lastUsedPath)}</span>` : ""}` : "never"}</td>
-        <td>${k.revoked ? `<span class="pill off">revoked</span>` : `<span class="pill on">active</span>`}</td>
-        <td>${
+        <td data-label="Name">${esc(k.name)}</td>
+        <td data-label="Key" class="muted"><code>${esc(k.prefix)}…</code></td>
+        <td data-label="Scopes" style="max-width:220px">${keyScopes(k)}</td>
+        <td data-label="Last used" class="muted">${k.lastUsedAt ? `${esc(new Date(k.lastUsedAt).toISOString().slice(0, 16).replace("T", " "))}${k.lastUsedPath ? `<br><span style="font-size:11px">${esc(k.lastUsedPath)}</span>` : ""}` : "never"}</td>
+        <td data-label="Status">${k.revoked ? `<span class="pill off">revoked</span>` : `<span class="pill on">active</span>`}</td>
+        <td class="rsp-actions">${
           k.revoked
             ? ""
             : `<form method="POST" action="/admin/api-keys/${esc(k.id)}/revoke" onsubmit="return confirm('Revoke this key? Apps using it will stop working.')"><button class="btn danger" type="submit">Revoke</button></form>`
@@ -2567,18 +2181,18 @@ export function integrationsView(data: {
           const last = e.deliveries && e.deliveries[0];
           const events = Array.isArray(e.events) ? e.events : [];
           return `<tr>
-        <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis"><code>${esc(e.url)}</code></td>
-        <td class="muted">${esc(events.join(", "))}</td>
-        <td>${e.active ? `<span class="pill on">active</span>` : `<span class="pill off">off</span>`}</td>
-        <td class="muted">${
+        <td data-label="URL" style="max-width:260px;overflow:hidden;text-overflow:ellipsis"><code>${esc(e.url)}</code></td>
+        <td data-label="Events" class="muted">${esc(events.join(", "))}</td>
+        <td data-label="Status">${e.active ? `<span class="pill on">active</span>` : `<span class="pill off">off</span>`}</td>
+        <td data-label="Last delivery" class="muted">${
           last
             ? `${last.success ? "✓" : "✗"} ${last.statusCode || ""} ${esc(
                 new Date(last.createdAt).toISOString().slice(11, 16)
               )}`
             : "—"
         }</td>
-        <td class="muted" style="font-size:11px">shown once at creation</td>
-        <td style="white-space:nowrap"><a class="btn secondary" href="/admin/webhooks/${esc(e.id)}">Inspect</a>
+        <td data-label="Secret" class="muted" style="font-size:11px">shown once at creation</td>
+        <td class="rsp-actions" style="white-space:nowrap"><a class="btn secondary" href="/admin/webhooks/${esc(e.id)}">Inspect</a>
         <form method="POST" action="/admin/webhooks/${esc(e.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this webhook?')"><button class="btn danger" type="submit">Delete</button></form></td>
       </tr>`;
         })
@@ -2715,7 +2329,7 @@ export function integrationsView(data: {
   <section class="panel">
   <h3>REST API</h3>
   <p class="muted">Base URL: <code>${esc(data.baseUrl)}/api/v1</code>. Authenticate with <code>Authorization: Bearer &lt;key&gt;</code>.</p>
-  <table>
+  <table class="rsp">
     <tr><th>Name</th><th>Key</th><th>Scopes</th><th>Last used</th><th>Status</th><th></th></tr>
     ${keyRows}
   </table>
@@ -2790,8 +2404,24 @@ export function integrationsView(data: {
         : ""
     }</label>
     <input name="subdomain" value="${esc(data.subdomain || "")}" placeholder="acme" />
-    <label style="margin-top:10px">Custom domain <span class="muted">(optional; overrides subdomain)</span></label>
-    <input name="customDomain" value="${esc(data.customDomain || "")}" placeholder="cards.acmecorp.com" />
+    <label style="margin-top:10px">Verified custom domain <span class="muted">(optional; overrides subdomain)</span></label>
+    <select name="customDomain">
+      <option value="">Use the workspace subdomain</option>
+      ${[
+        ...new Set([
+          ...(data.customDomain ? [data.customDomain] : []),
+          ...(data.verifiedCustomDomains || []),
+        ]),
+      ]
+        .map(
+          (host) =>
+            `<option value="${esc(host)}" ${host === data.customDomain ? "selected" : ""}>${esc(host)}${
+              data.verifiedCustomDomains.includes(host) ? "" : " (verification required)"
+            }</option>`
+        )
+        .join("")}
+    </select>
+    <p class="muted" style="margin:4px 0 0">Add and verify employee sign-in hostnames under <a href="/admin/domains">Domains</a> first. This prevents SAML reply URLs and TLS certificates from being assigned to unverified domains.</p>
     <hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb" />
     <label class="chk"><input type="checkbox" name="enabled" value="1" ${
       saml.enabled ? "checked" : ""
@@ -2847,7 +2477,7 @@ export function integrationsView(data: {
     </div>`
       : ""
   }
-  <table>
+  <table class="rsp">
     <tr><th>URL</th><th>Events</th><th>Status</th><th>Last delivery</th><th>Secret</th><th></th></tr>
     ${epRows}
   </table>
@@ -2898,12 +2528,12 @@ export function webhookDetailView(data: {
           const when = new Date(d.createdAt).toISOString().slice(0, 19).replace("T", " ");
           const respHeaders = d.responseHeaders ? JSON.stringify(d.responseHeaders, null, 2) : "";
           return `<tr>
-        <td class="muted" style="white-space:nowrap">${esc(when)}</td>
-        <td><code>${esc(d.event)}</code></td>
-        <td>#${d.attempt ?? 1}</td>
-        <td>${statusPill(d)}</td>
-        <td class="muted">${d.durationMs != null ? d.durationMs + " ms" : "—"}</td>
-        <td><details><summary class="muted">inspect</summary>
+        <td data-label="Time (UTC)" class="muted" style="white-space:nowrap">${esc(when)}</td>
+        <td data-label="Event"><code>${esc(d.event)}</code></td>
+        <td data-label="Attempt">#${d.attempt ?? 1}</td>
+        <td data-label="Status">${statusPill(d)}</td>
+        <td data-label="Duration" class="muted">${d.durationMs != null ? d.durationMs + " ms" : "—"}</td>
+        <td data-label="Details"><details><summary class="muted">inspect</summary>
           <div style="padding:8px 0;max-width:640px">
             <p style="margin:4px 0"><strong>Request</strong> — signature <code style="font-size:11px;word-break:break-all">${
               d.signature ? esc(d.signature.slice(0, 16)) + "…(redacted)" : "—"
@@ -2946,7 +2576,7 @@ export function webhookDetailView(data: {
     data.filter === "failed" ? 'style="font-weight:700"' : ""
   }>Failures</a>
   </div>
-  <table style="margin-top:14px">
+  <table class="rsp" style="margin-top:14px">
     <tr><th>Time (UTC)</th><th>Event</th><th>Attempt</th><th>Status</th><th>Duration</th><th>Details</th></tr>
     ${rows}
   </table>`;
@@ -2994,9 +2624,9 @@ export function analyticsView(stats: {
   const kvTable = (title: string, rows: { key: string; count: number }[] | undefined, col: string) =>
     rows
       ? `<h3 style="margin-top:24px">${esc(title)}</h3>
-  <table><tr><th>${esc(col)}</th><th>Leads</th></tr>${
+  <table class="rsp"><tr><th>${esc(col)}</th><th>Leads</th></tr>${
         rows.length
-          ? rows.map((r) => `<tr><td>${esc(r.key)}</td><td>${r.count}</td></tr>`).join("")
+          ? rows.map((r) => `<tr><td data-label="${esc(col)}">${esc(r.key)}</td><td data-label="Leads">${r.count}</td></tr>`).join("")
           : `<tr><td colspan="2" class="muted">None in this range.</td></tr>`
       }</table>`
       : "";
@@ -3022,9 +2652,9 @@ export function analyticsView(stats: {
   const geoSection = stats.topLocations
     ? `<h3 style="margin-top:24px">Top scan locations</h3>
   <p class="muted" style="font-size:12.5px;margin:2px 0 8px">Rough, city-level locations from IP lookup on card views, QR scans, and campaign clicks. Private/unresolvable networks are omitted.</p>
-  <table><tr><th>Location</th><th>Interactions</th></tr>${
+  <table class="rsp"><tr><th>Location</th><th>Interactions</th></tr>${
         stats.topLocations.length
-          ? stats.topLocations.map((r) => `<tr><td>${esc(r.key)}</td><td>${r.count}</td></tr>`).join("")
+          ? stats.topLocations.map((r) => `<tr><td data-label="Location">${esc(r.key)}</td><td data-label="Interactions">${r.count}</td></tr>`).join("")
           : `<tr><td colspan="2" class="muted">No located interactions in this range yet.</td></tr>`
       }</table>`
     : "";
@@ -3045,11 +2675,11 @@ export function analyticsView(stats: {
   const locLabel = stats.locationLabel || "Location";
   const leaderboardSection = stats.leaderboard
     ? `<h3 style="margin-top:24px">${esc(locLabel)} leaderboard</h3>
-  <table>
+  <table class="rsp">
     <tr><th>${esc(locLabel)}</th><th>Views</th><th>Leads</th><th>Conv.</th></tr>
     ${
       stats.leaderboard.length
-        ? stats.leaderboard.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.views}</td><td>${r.leads}</td><td>${r.conv}%</td></tr>`).join("")
+        ? stats.leaderboard.map((r) => `<tr><td data-label="${esc(locLabel)}">${esc(r.name)}</td><td data-label="Views">${r.views}</td><td data-label="Leads">${r.leads}</td><td data-label="Conversion">${r.conv}%</td></tr>`).join("")
         : `<tr><td colspan="4" class="muted">No ${esc(lower(locLabel))} activity in this range.</td></tr>`
     }
   </table>`
@@ -3079,14 +2709,14 @@ export function analyticsView(stats: {
   ${reportsSection}
 
   <h3 style="margin-top:24px">Top cards by views</h3>
-  <table>
+  <table class="rsp">
     <tr><th>Card</th><th>Views</th><th></th></tr>
     ${
       stats.topCards.length
         ? stats.topCards
             .map(
               (c) =>
-                `<tr><td>${esc(c.name)}</td><td>${c.views}</td><td><a href="/c/${esc(
+                `<tr><td data-label="Card">${esc(c.name)}</td><td data-label="Views">${c.views}</td><td data-label="Link"><a href="/c/${esc(
                   c.slug
                 )}" target="_blank">/c/${esc(c.slug)}</a></td></tr>`
             )
@@ -3180,7 +2810,7 @@ export function leadDetailView(data: { lead: any; events: any[] }): string {
               : e.type === "assign"
               ? `Assigned to <strong>${esc(e.toValue || "(unassigned)")}</strong>`
               : `Note: ${esc(e.note || "")}`;
-          return `<tr><td class="muted" style="white-space:nowrap">${when(e.createdAt)}</td><td>${desc}</td><td class="muted">${esc(
+          return `<tr><td data-label="When" class="muted" style="white-space:nowrap">${when(e.createdAt)}</td><td data-label="Event">${desc}</td><td data-label="By" class="muted">${esc(
             e.actor || ""
           )}</td></tr>`;
         })
@@ -3242,7 +2872,7 @@ export function leadDetailView(data: { lead: any; events: any[] }): string {
   </form>
 
   <h3 style="margin-top:20px">History</h3>
-  <table><tr><th>When</th><th>Event</th><th>By</th></tr>${eventRows}</table>
+  <table class="rsp"><tr><th>When</th><th>Event</th><th>By</th></tr>${eventRows}</table>
 
   <div class="danger-zone" style="margin-top:20px;max-width:820px">
     <h3>Erase this lead</h3>

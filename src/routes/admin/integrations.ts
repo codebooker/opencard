@@ -2,9 +2,9 @@
 import {
   Router, Address, WEBHOOK_EVENTS, asArray, audit, canAdd, clean, config,
   crypto, ensureFeature, esc, forbidden, fs, generateApiKey, generateScimToken, getSamlConfigForOrg,
-  isGaId, isGtmId, limitReached, mdToHtml, normalizeCampaignCode, orgCanonicalHost, page, parseFieldMapLines,
+  isGaId, isGtmId, isOrgLimitReached, limitReached, mdToHtml, normalizeCampaignCode, orgCanonicalHost, page, parseFieldMapLines,
   path, postChatWebhook, prisma, replayDelivery, reqAdmin, retrySync, samlAcsUrl, samlSpIssuer,
-  sanitizeScopes, seal, sendTestEvent, sendTestSync, validateOutboundUrl,
+  sanitizeScopes, seal, sendTestEvent, sendTestSync, validateOutboundUrl, withOrgLimit,
 } from "./context";
 import { RBAC } from "./context";
 import { V } from "./context";
@@ -16,7 +16,7 @@ export function registerIntegrationRoutes(router: Router) {
 // API keys and webhooks are per-org; only platform owners see across orgs.
 async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: string | null = null, newScimToken: string | null = null, newWebhookSecret: string | null = null) {
   const orgFilter = RBAC.seesAllOrgs(p) ? {} : { orgId: p.orgId };
-  const [keys, endpoints, saml, org, crmIntegrations, crmLocations] = await Promise.all([
+  const [keys, endpoints, saml, org, verifiedCustomDomains, crmIntegrations, crmLocations] = await Promise.all([
     prisma.apiKey.findMany({ where: orgFilter, orderBy: { createdAt: "desc" } }),
     prisma.webhookEndpoint.findMany({
       where: orgFilter,
@@ -27,6 +27,11 @@ async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: stri
     prisma.org.findUnique({
       where: { id: p.orgId },
       select: { scimTokenHash: true, subdomain: true, customDomain: true, leadWebhookUrl: true },
+    }),
+    prisma.tenantDomain.findMany({
+      where: { orgId: p.orgId, kind: "user", approved: true },
+      select: { host: true },
+      orderBy: { host: "asc" },
     }),
     prisma.crmIntegration.findMany({
       where: orgFilter,
@@ -49,6 +54,7 @@ async function renderIntegrations(res: any, p: RBAC.AdminPrincipal, newKey: stri
       samlHost,
       subdomain: org?.subdomain ?? null,
       customDomain: org?.customDomain ?? null,
+      verifiedCustomDomains: verifiedCustomDomains.map((d) => d.host),
       platformDomain: process.env.PLATFORM_DOMAIN || "",
       scimBaseUrl: `${config.baseUrl}/scim/v2`,
       scimTokenSet: !!org?.scimTokenHash,
@@ -255,11 +261,17 @@ adminRouter.post("/api-keys", async (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canManageIntegrations(p)) return forbidden(res);
   if (!(await ensureFeature(res, p.orgId, "api", "API access"))) return;
-  if (!(await canAdd(p.orgId, "apiKeys"))) return limitReached(res, "API key");
   const name = clean(req.body?.name) || "API key";
   const scopes = sanitizeScopes(asArray(req.body?.scopes));
   const { raw, hash, prefix } = generateApiKey();
-  await prisma.apiKey.create({ data: { name, keyHash: hash, prefix, orgId: p.orgId, scopes } });
+  try {
+    await withOrgLimit(p.orgId, "apiKeys", () =>
+      prisma.apiKey.create({ data: { name, keyHash: hash, prefix, orgId: p.orgId, scopes } })
+    );
+  } catch (e) {
+    if (isOrgLimitReached(e)) return limitReached(res, "API key");
+    throw e;
+  }
   audit(req, p, "apikey.create", { targetType: "ApiKey", summary: name });
   // Render directly (not a redirect) so the raw key never lands in a URL/log.
   await renderIntegrations(res, p, raw);
@@ -378,8 +390,30 @@ adminRouter.post("/saml-config", async (req, res) => {
   const customDomain =
     (clean(req.body?.customDomain) || "").toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "") || null;
 
+  const currentAddress = await prisma.org.findUnique({
+    where: { id: p.orgId },
+    select: { customDomain: true },
+  });
+  if (customDomain && customDomain !== currentAddress?.customDomain) {
+    if (!(await ensureFeature(res, p.orgId, "customDomains", "Custom domains"))) return;
+    const brandedOwner = await prisma.tenantDomain.findUnique({
+      where: { host: customDomain },
+      select: { orgId: true, kind: true, approved: true },
+    });
+    if (brandedOwner && brandedOwner.orgId !== p.orgId) {
+      return res.status(409).send("That custom domain is already registered to another workspace.");
+    }
+    if (!brandedOwner || brandedOwner.kind !== "user" || !brandedOwner.approved) {
+      return res
+        .status(400)
+        .send("Verify this hostname as an Employee sign-in domain under Admin → Domains before using it for SAML.");
+    }
+  }
+
   try {
     // Address is org-level; scoped to this admin's org.
+    // A newly selected customDomain is already an approved TenantDomain owned
+    // by this org, so selecting it does not add another distinct domain seat.
     await prisma.org.update({ where: { id: p.orgId }, data: { subdomain, customDomain } });
   } catch (e: any) {
     if (e?.code === "P2002") {

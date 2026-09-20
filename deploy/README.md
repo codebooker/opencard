@@ -1,86 +1,47 @@
-# Deploying OpenCard
+# Self-host OpenCard with Docker Compose
 
-Production runs three containers behind Caddy: **db** (Postgres), **web** (the app),
-and **caddy** (TLS reverse proxy), plus **portainer** for container management.
-Cloudflare sits in front for DNS and edge TLS.
+This stack runs one company workspace: PostgreSQL, the OpenCard app, and an optional Caddy HTTPS proxy. There is no public signup, subscription service, or card limit.
 
-- `opencard.id` (+ `*.opencard.id`) → the app + admin (and per-tenant subdomains)
-- `tapshare.cards` → public card pages
+## First boot
 
-Everything is driven from your Mac by two double-click scripts, because the app
-can't reach the VM directly. Your Mac connects to the VM over SSH.
+1. Install Docker Engine/Desktop with Compose v2 and clone this repository.
+2. Copy `.env.example` to `.env`. Set **three different random values** for `DB_PASSWORD`, `APP_DB_PASSWORD`, and `SESSION_SECRET` (for example, run `openssl rand -hex 32` three times). Set `COMPANY_NAME`.
+3. Run `docker compose up -d --build`. The container applies committed migrations, provisions the least-privilege database role, creates the one workspace, and starts the app. Check `docker compose ps` and `docker compose logs web`.
+4. Create your first owner account with `docker compose exec web node dist/scripts/make-admin.js you@example.com "Your Name"`. The command prints a one-time password. Sign in at `http://localhost:3000/admin` and change it.
+5. Create a brand, location, and card. Configure employee sign-in under Integrations if you want people to edit their own cards.
 
-## One-time setup
+The web port binds to `127.0.0.1` by default. To serve users on your network, put a reverse proxy in front of it or deliberately change `BIND_ADDRESS`. Do not expose an HTTP login to the public internet.
 
-1. **Point your SSH key at the VM.** Make sure you can `ssh root@<vm-ip>` from your
-   Mac (Hetzner adds your key at creation, or set one up).
-2. **Create your deploy config.** Copy `deploy/deploy.config.example` to
-   `deploy/deploy.config` and fill in `VM_HOST`, `VM_USER`, and (optionally)
-   `SSH_KEY`. This file is gitignored.
-3. **Provision the VM.** Double-click `provision.command`. It syncs the project,
-   installs Docker + Portainer, opens the firewall (22/80/443), and generates
-   `deploy/.env` on the VM with fresh random secrets. **Save the admin token it
-   prints** — that's your break-glass platform login.
-4. **TLS: create a Cloudflare Origin Certificate.** In Cloudflare → SSL/TLS →
-   Origin Server → Create Certificate. Cover these hostnames:
-   `opencard.id, *.opencard.id, tapshare.cards, *.tapshare.cards`. Save the
-   certificate to `deploy/certs/origin.pem` and the private key to
-   `deploy/certs/origin.key` **on the VM** (`/opt/opencard/deploy/certs/`).
-   Set the Cloudflare SSL/TLS mode to **Full (strict)**.
-5. **DNS.** In Cloudflare, add A records for `opencard.id`, `tapshare.cards`, and
-   the wildcards (`*.opencard.id`, `*.tapshare.cards`) → your VM's IP, all
-   **proxied** (orange cloud).
+## HTTPS with included Caddy
 
-## Deploy / update
+Point a hostname you control (for example `cards.example.com`) at the server. Set `APP_DOMAIN=cards.example.com`, `APP_URL=https://cards.example.com`, and `TRUST_PROXY_HOPS=1` in `.env`. Open ports 80 and 443, then run:
 
-Double-click `deploy.command`. It syncs the latest code, builds, applies database
-migrations, provisions the RLS role, and (re)starts the containers. Run it any
-time you want to ship changes.
+```sh
+docker compose --profile proxy up -d --build
+```
 
-## After it's up
+Caddy manages certificates. Card links use `APP_URL` unless you set `CARD_URL` for a separate card-serving host. Additional branded login domains are configured in Admin → Domains and must resolve to the same server. Set `TENANTS_CNAME_TARGET` if the default `APP_URL` hostname is not the right CNAME target; set `SERVER_IPS` to any public A-record IPs you also want the verifier to accept.
 
-- App/admin: `https://opencard.id/admin` — sign in with the break-glass token
-  (or create your owner account at `https://opencard.id/signup`).
-- Public cards: `https://tapshare.cards/c/<slug>`.
-- **Portainer** is bound to localhost only. Reach it with an SSH tunnel:
-  `ssh -L 9443:localhost:9443 root@<vm-ip>` then open `https://localhost:9443`.
+If you already operate a proxy, leave the Caddy profile off, proxy to `127.0.0.1:3000`, set `APP_URL` to the actual HTTPS origin, and set `TRUST_PROXY_HOPS` to the exact number of trusted proxy hops.
 
-## Turning on Stripe (when ready)
+## Backups and offsite copies
 
-Edit `deploy/.env` on the VM: set `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`,
-`STRIPE_WEBHOOK_SECRET`, and the `STRIPE_PRICE_*` ids, then run `deploy.command`
-again. Add a Stripe webhook endpoint pointing at
-`https://opencard.id/stripe/webhook`.
+The database lives in the `db_data` Docker volume; uploaded images live in `uploads_data`. Neither is part of Git. Manual snapshots and workspace-content restores are available to owners under Admin → Backups. The snapshot files are stored in the gitignored `./backups` directory. To have a manual snapshot copied offsite when an owner clicks **Create backup now**, set `S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optionally `S3_ENDPOINT`/`S3_REGION` in `.env`, then recreate the web container. The Backups page shows whether an offsite destination is configured; it never displays credentials.
 
-## Notes
+For a **complete** recoverable backup (database plus uploads), run `bash deploy/backup.sh` on the Docker host. Schedule that command with your host's cron or systemd timer. The script keeps seven days of local copies by default (`KEEP_LOCAL_DAYS` in `deploy/backup.env`).
 
-- `deploy/.env` and `deploy/certs/` live only on the VM and are never synced over
-  or committed. Rotate the secrets there if they're ever exposed.
-- `SEED_DEMO=0` in production, so no demo data is created — just a clean bootstrap
-  org so the platform can start. Real customers self-sign-up.
-- Data lives in Docker volumes (`db_data`, `uploads_data`). Back these up.
+To copy each run offsite, install `rclone` on the host, copy `deploy/backup.env.example` to gitignored `deploy/backup.env`, and fill in `S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and (for Wasabi, R2, or another S3-compatible provider) `S3_ENDPOINT`. `S3_REGION` is optional. The script uploads to `db/` and `uploads/` in the named bucket; it never deletes remote objects. Test a complete restore before relying on the backup.
 
-## Branded login on client custom domains
+For disaster recovery, start with a fresh PostgreSQL/Uploads volume and the matching application version. Restore the `db-*.dump` with `pg_restore` and extract the matching `uploads-*.tar.gz` into the uploads volume **before** starting the app; then let migrations run. Do not restore a dump over a live database or delete existing volumes without first making another backup. Keep a secure copy of the original `SESSION_SECRET`: it is also used to decrypt integration credentials.
 
-Clients can have a login page carrying their own logo + colors on their own
-hostname (e.g. `cards.mullinaxford.com`), brand-wide or per rooftop.
+## Upgrading from an older OpenCard database
 
-**How it works**
+The single-workspace migration refuses to run if more than one organization exists. It does not delete or merge client data. Export each company separately and plan a deliberate migration before upgrading that database. Single-company databases retain their cards and users; legacy platform admin roles are converted to local owners. Take a database and uploads backup before upgrading.
 
-1. In the admin, set the **Branded login domain** on a brand (brand-wide) or a
-   rooftop (override). This registers the host in `TenantDomain` (approved).
-2. The client adds a **CNAME**: `cards.mullinaxford.com → tenants.opencard.id`
-   (an A/AAAA record `tenants.opencard.id` must point at the production VM).
-3. On first HTTPS request, Caddy obtains a Let's Encrypt cert on demand, but only
-   after the app's `/tls/authorize?domain=` ask endpoint approves the host.
-4. The app reads the `Host` header, matches the `TenantDomain`, and renders the
-   branded `/admin/login` and `/me/login` (rooftop overrides brand).
+## Operational notes
 
-**Production requirements (not the current Cloudflare-fronted test box)**
-
-- Ports **80 and 443 must be reachable from the public internet** for the ACME
-  HTTP/TLS-ALPN challenge. The test box's firewall allows Cloudflare IPs only, so
-  on-demand TLS stays inert there; open 80/443 on the production VM.
-- Client domains must resolve **directly to the VM** (not proxied through the
-  client's own CDN), or ACME can't validate. If a client insists on fronting with
-  their own CDN, they terminate TLS and forward the `Host` header to us instead.
+- `SEED_DEMO=0` is the default. Set it to `1` only for a disposable demo instance.
+- `SELF_SERVICE_DEV_LOGIN=1` enables email-only cardholder impersonation when `SEED_DEMO=1`. Use both only on an isolated disposable install; never on a reachable production host.
+- SMTP is optional, but password-reset and invitation emails need working SMTP settings.
+- `SOURCE_URL` should point to the actual source of a modified instance, consistent with the AGPL-3.0 license.
+- Keep `.env`, `deploy/backup.env`, dumps, and uploads out of public repositories.

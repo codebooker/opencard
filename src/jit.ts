@@ -1,6 +1,7 @@
 import { prisma, runWithOrg } from "./db";
 import { uniqueSlug } from "./slug";
 import { emitEvent, cardPayload } from "./webhooks";
+import { withOrgLimit } from "./entitlements";
 
 // SAML JIT provisioning (Phase 13): when an org opts in, the first SSO
 // sign-in creates the person's User + Card from assertion attributes —
@@ -92,33 +93,35 @@ export async function jitProvision(
 
     const c = mapSamlProfile(profile, email);
     const slug = await uniqueSlug(c.firstName, c.lastName);
-    const user = await runWithOrg(orgId, (db) =>
-      db.user.create({
-        data: {
-          locationId: location.id,
-          orgId,
-          email: c.email,
-          displayName: `${c.firstName} ${c.lastName}`.trim(),
-          provisionedBy: "jit",
-          active: true,
-          card: {
-            create: {
-              locationId: location.id,
-              orgId,
-              slug,
-              firstName: c.firstName,
-              lastName: c.lastName,
-              title: c.title,
-              department: c.department,
-              ownerEmail: c.email,
-              emails: [{ label: "Work", value: c.email }],
-              phones: [],
-              active: true,
+    const user = await withOrgLimit(orgId, "cards", () =>
+      runWithOrg(orgId, (db) =>
+        db.user.create({
+          data: {
+            locationId: location.id,
+            orgId,
+            email: c.email,
+            displayName: `${c.firstName} ${c.lastName}`.trim(),
+            provisionedBy: "jit",
+            active: true,
+            card: {
+              create: {
+                locationId: location.id,
+                orgId,
+                slug,
+                firstName: c.firstName,
+                lastName: c.lastName,
+                title: c.title,
+                department: c.department,
+                ownerEmail: c.email,
+                emails: [{ label: "Work", value: c.email }],
+                phones: [],
+                active: true,
+              },
             },
           },
-        },
-        include: { card: true },
-      })
+          include: { card: true },
+        })
+      )
     );
     if (user.card) emitEvent(user.card.orgId, "card.created", cardPayload(user.card));
     return "created";

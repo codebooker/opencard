@@ -62,6 +62,15 @@ class ApiError extends Error {
   }
 }
 
+async function createWithinCapacity<T>(
+  _res: any,
+  _orgId: string,
+  _resource: "brands" | "locations" | "cards",
+  create: () => Promise<T>
+): Promise<{ ok: true; value: T } | { ok: false }> {
+  return { ok: true, value: await create() };
+}
+
 function brandJson(b: any) {
   return {
     id: b.id,
@@ -110,18 +119,21 @@ apiRouter.post("/brands", requireScope("brands:write"), async (req, res) => {
   const b = req.body || {};
   if (!b.name) return res.status(422).json({ error: "name_required" });
   const org = apiOrgId(req);
-  const brand = await runWithOrg(org, (db) =>
-    db.brand.create({
-      data: {
-        orgId: org,
-        name: String(b.name),
-        logoUrl: str(b.logoUrl),
-        primaryColor: b.primaryColor || "#1f6f43",
-        layout: b.layout || "classic",
-      },
-    })
+  const created = await createWithinCapacity(res, org, "brands", () =>
+    runWithOrg(org, (db) =>
+      db.brand.create({
+        data: {
+          orgId: org,
+          name: String(b.name),
+          logoUrl: str(b.logoUrl),
+          primaryColor: b.primaryColor || "#1f6f43",
+          layout: b.layout || "classic",
+        },
+      })
+    )
   );
-  res.status(201).json({ data: brandJson(brand) });
+  if (!created.ok) return;
+  res.status(201).json({ data: brandJson(created.value) });
 });
 
 // ---- stores (locations) ----
@@ -142,23 +154,27 @@ apiRouter.post("/stores", requireScope("stores:write"), async (req, res) => {
   const b = req.body || {};
   if (!b.brandId || !b.name) return res.status(422).json({ error: "brandId_and_name_required" });
   const org = apiOrgId(req);
-  const store = await runWithOrg(org, async (db) => {
-    // The brand must belong to the caller's org (RLS also blocks cross-tenant rows).
-    const brand = await db.brand.findFirst({ where: { id: String(b.brandId), orgId: org } });
-    if (!brand) return null;
-    return db.location.create({
-      data: {
-        brandId: brand.id,
-        orgId: brand.orgId,
-        name: String(b.name),
-        code: str(b.code),
-        logoUrl: str(b.logoUrl),
-        primaryColor: str(b.primaryColor),
-        layout: str(b.layout),
-        address: b.address ?? undefined,
-      },
-    });
-  });
+  const created = await createWithinCapacity(res, org, "locations", () =>
+    runWithOrg(org, async (db) => {
+      // The brand must belong to the caller's org (RLS also blocks cross-tenant rows).
+      const brand = await db.brand.findFirst({ where: { id: String(b.brandId), orgId: org } });
+      if (!brand) return null;
+      return db.location.create({
+        data: {
+          brandId: brand.id,
+          orgId: brand.orgId,
+          name: String(b.name),
+          code: str(b.code),
+          logoUrl: str(b.logoUrl),
+          primaryColor: str(b.primaryColor),
+          layout: str(b.layout),
+          address: b.address ?? undefined,
+        },
+      });
+    })
+  );
+  if (!created.ok) return;
+  const store = created.value;
   if (!store) return res.status(422).json({ error: "brand_not_found" });
   res.status(201).json({ data: storeJson(store) });
 });
@@ -190,14 +206,18 @@ apiRouter.post("/cards", requireScope("cards:write"), async (req, res) => {
   const slug = await uniqueSlug(String(b.firstName), String(b.lastName));
   let card;
   try {
-    card = await runWithOrg(org, async (db) => {
-      const loc = await db.location.findFirst({ where: { id: String(b.locationId), orgId: org } });
-      if (!loc) return null;
-      const templateId = await resolveApiTemplateId(db, org, loc.brandId, b.templateId);
-      const data: any = { locationId: loc.id, orgId: loc.orgId, slug, ...cardWriteData(b, { create: true }) };
-      if (templateId !== undefined) data.templateId = templateId;
-      return db.card.create({ data });
-    });
+    const created = await createWithinCapacity(res, org, "cards", () =>
+      runWithOrg(org, async (db) => {
+        const loc = await db.location.findFirst({ where: { id: String(b.locationId), orgId: org } });
+        if (!loc) return null;
+        const templateId = await resolveApiTemplateId(db, org, loc.brandId, b.templateId);
+        const data: any = { locationId: loc.id, orgId: loc.orgId, slug, ...cardWriteData(b, { create: true }) };
+        if (templateId !== undefined) data.templateId = templateId;
+        return db.card.create({ data });
+      })
+    );
+    if (!created.ok) return;
+    card = created.value;
   } catch (e) {
     if (e instanceof ApiError) return res.status(e.status).json({ error: e.code });
     throw e;

@@ -28,8 +28,8 @@ export async function requireApi(req: Request, res: Response, next: NextFunction
 
   const key = await prisma.apiKey.findUnique({ where: { keyHash: sha256(token) } });
   if (!key || key.revoked) return res.status(401).json({ error: "invalid_api_key" });
-  const keyOrg = await prisma.org.findUnique({ where: { id: key.orgId }, select: { suspended: true } });
-  if (keyOrg?.suspended) return res.status(403).json({ error: "org_suspended" });
+  const keyOrg = await prisma.org.findUnique({ where: { id: key.orgId }, select: { id: true } });
+  if (!keyOrg) return res.status(401).json({ error: "invalid_api_key" });
 
   (req as any).apiOrgId = key.orgId;
   (req as any).apiScopes = sanitizeScopes(key.scopes);

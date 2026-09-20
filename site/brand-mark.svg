@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="56 90 460 340" role="img" aria-label="OpenCard mark">
+  <defs>
+    <linearGradient id="front" x1="120" y1="370" x2="470" y2="170" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1F5BEA"/><stop offset=".55" stop-color="#18AEE0"/><stop offset="1" stop-color="#25D1B3"/>
+    </linearGradient>
+    <linearGradient id="back" x1="250" y1="175" x2="500" y2="335" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#19C7D0"/><stop offset="1" stop-color="#27D1B0"/>
+    </linearGradient>
+  </defs>
+  <rect x="72" y="150" width="34" height="34" rx="6" fill="#1F5BEA"/>
+  <rect x="116" y="106" width="31" height="31" rx="6" fill="#2386E0"/>
+  <rect x="173" y="136" width="42" height="42" rx="8" fill="#16B6D7"/>
+  <rect x="245" y="154" width="238" height="164" rx="28" fill="none" stroke="url(#back)" stroke-width="22"/>
+  <rect x="206" y="181" width="238" height="164" rx="28" fill="none" stroke="#20C3C7" stroke-width="22"/>
+  <rect x="150" y="214" width="320" height="190" rx="34" fill="url(#front)"/>
+  <circle cx="230" cy="284" r="29" fill="#fff"/>
+  <path d="M176 352c2-34 25-52 54-52s52 18 54 52Z" fill="#fff"/>
+  <rect x="314" y="267" width="127" height="19" rx="9.5" fill="#fff"/>
+  <rect x="314" y="315" width="127" height="19" rx="9.5" fill="#fff"/>
+</svg>

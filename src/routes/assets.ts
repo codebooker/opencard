@@ -9,7 +9,7 @@ import { resolveAssetDestination } from "../assets";
 import { renderAssetLanding } from "../views/asset";
 import { page, esc } from "../views/html";
 import { parseUtm } from "../attribution";
-import { assembleLead } from "../leadform";
+import { assembleLead, defaultLeadFieldsFor, leadSubmissionError, resolveLeadFields } from "../leadform";
 import { emitEvent, leadPayload } from "../webhooks";
 import { notifyLead } from "../notify";
 import { syncLeadToCrm } from "../crmsync-dispatch";
@@ -25,8 +25,7 @@ const notFound = (res: any, msg = "Not found.") =>
 
 async function loadAsset(slug: string, orgId: string | null) {
   return prisma.asset.findFirst({
-    // org.suspended gates every public surface for a suspended client.
-    where: { slug, active: true, org: { suspended: false, ownerVerifiedAt: { not: null } }, ...(orgId ? { orgId } : {}) },
+    where: { slug, active: true, ...(orgId ? { orgId } : {}) },
     include: {
       location: { include: { brand: true } },
       destinationCard: { select: { slug: true, active: true } },
@@ -88,7 +87,9 @@ assetsRouter.post("/:slug/connect", async (req, res) => {
   const asset = await loadAsset(req.params.slug, await hostOrg(req));
   if (!asset) return notFound(res);
   const b = req.body || {};
-  if (!b.name) return res.status(400).send("Name required");
+  const leadFields = resolveLeadFields(null, asset.location.brand.leadFields, defaultLeadFieldsFor(asset.org.vertical));
+  const validationError = leadSubmissionError(b, leadFields);
+  if (validationError) return res.status(400).send(validationError);
   const data = assembleLead(b, req.headers["user-agent"] as string);
   const lead = await runWithOrg(asset.orgId, async (db) => {
     const recent = await db.lead.findMany({

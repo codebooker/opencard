@@ -1,22 +1,18 @@
 import crypto from "crypto";
 import { prisma } from "../db";
 import { hashPassword } from "../security";
+import { defaultOrgId } from "../tenant";
 
-// Shell-only admin bootstrap / recovery. Replaces the removed ADMIN_TOKEN
-// break-glass: creating or resetting a platform admin now requires access to
-// the box (SSH), not a static internet-reachable token.
+// Shell-only admin bootstrap / recovery for the single local workspace.
 //
 //   node dist/scripts/make-admin.js <email> [name] [role]
 //
 // - Creates the account if new, or resets its password + reactivates it if it
 //   exists. Prints a one-time random password to log in with (change it after).
 // - Clears MFA on a reset so a lost authenticator can't lock you out here.
-// - Default role: platform_owner.
+// - Default role: org_owner.
 
 const VALID_ROLES = new Set([
-  "platform_owner",
-  "platform_admin",
-  "platform_staff",
   "org_owner",
   "org_admin",
   "brand_admin",
@@ -30,8 +26,10 @@ async function main() {
     console.error("Usage: node dist/scripts/make-admin.js <email> [name] [role]");
     process.exit(1);
   }
-  const role = roleArg && VALID_ROLES.has(roleArg) ? roleArg : "platform_owner";
+  if (roleArg && !VALID_ROLES.has(roleArg)) throw new Error(`Unsupported role: ${roleArg}`);
+  const role = roleArg || "org_owner";
   const name = nameArg || email.split("@")[0];
+  const orgId = await defaultOrgId();
 
   // Readable but strong one-time password.
   const tempPassword = crypto.randomBytes(12).toString("base64url");
@@ -41,12 +39,12 @@ async function main() {
   if (existing) {
     await prisma.adminUser.update({
       where: { email },
-      data: { passwordHash, active: true, role, mfaEnabled: false, mfaSecret: null },
+      data: { passwordHash, active: true, role, orgId, mfaEnabled: false, mfaSecret: null },
     });
     console.log(`Reset existing account ${email} (role ${role}, MFA cleared).`);
   } else {
     await prisma.adminUser.create({
-      data: { email, name, role, passwordHash, active: true, emailVerifiedAt: new Date() },
+      data: { email, name, role, orgId, passwordHash, active: true, emailVerifiedAt: new Date() },
     });
     console.log(`Created account ${email} (role ${role}).`);
   }

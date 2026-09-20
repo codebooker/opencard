@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#234f39">
+  <meta name="description" content="Try an OpenCard digital business card: view a sample profile, scan its QR code, and save it to your contacts.">
+  <title>Jordan Davis — OpenCard demo</title>
+  <link rel="canonical" href="https://opencard.id/demo/">
+  <meta property="og:title" content="Jordan Davis — OpenCard demo">
+  <meta property="og:description" content="A sample digital business card made with OpenCard.">
+  <meta property="og:url" content="https://opencard.id/demo/">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/demo/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#card">Skip to card</a>
+  <header class="demo-header">
+    <a href="/" aria-label="OpenCard project home">← OpenCard</a>
+    <span>Sample card</span>
+    <a href="https://github.com/codebooker/opencard">Get OpenCard ↗</a>
+  </header>
+
+  <main id="card" class="card layout-wave">
+    <header class="hero-wave">
+      <img class="hero-photo" src="/demo/jordan-davis.webp" alt="Portrait used for the Jordan Davis sample card" width="800" height="1000" decoding="async">
+      <svg class="wave" viewBox="0 0 500 90" preserveAspectRatio="none" aria-hidden="true">
+        <path class="wave-fill" d="M0,66 H232 C283,65.3 306,19.3 363,18 H500 L500,90 L0,90 Z"></path>
+        <path class="wave-line" d="M0,66 H232 C283,65.3 306,19.3 363,18 H500" fill="none"></path>
+      </svg>
+    </header>
+    <div class="wave-logo-wrap" aria-label="Northline Studio">NORTHLINE <span>STUDIO</span></div>
+    <section class="identity" aria-labelledby="person-name">
+      <h1 id="person-name">Jordan Davis</h1>
+      <p class="role">Creative Director</p>
+      <p class="company">Northline Studio</p>
+    </section>
+    <p class="intro">Thoughtful brands for people and places. Let’s make something useful together.</p>
+    <div class="contact-list" aria-label="Contact details">
+      <a class="contact-row" href="mailto:jordan@northline.example"><span class="contact-icon" aria-hidden="true">✉</span><span><strong>jordan@northline.example</strong><small>Email · sample address</small></span><span aria-hidden="true">↗</span></a>
+      <a class="contact-row" href="https://github.com/codebooker/opencard"><span class="contact-icon" aria-hidden="true">⌁</span><span><strong>OpenCard on GitHub</strong><small>Website · live link</small></span><span aria-hidden="true">↗</span></a>
+    </div>
+    <a class="save-button" href="/demo/jordan-davis.vcf" download="jordan-davis.vcf">+ Add to Contacts <span aria-hidden="true">↓</span></a>
+    <section class="qr-section" aria-label="Share this card">
+      <img src="/demo/qr.svg" alt="QR code for opencard.id/demo/" width="160" height="160">
+      <p>Scan to open this card</p>
+    </section>
+    <footer class="card-footer">Northline Studio · Example card</footer>
+  </main>
+  <aside class="demo-note">This is a static sample for the project website. The contact is fictional; live installations have editable cards, lead forms, analytics, and your own branding. <a href="https://github.com/codebooker/opencard#readme">See how OpenCard works ↗</a></aside>
+  <footer class="source-footer"><a href="https://github.com/codebooker/opencard">OpenCard source code</a> · AGPL-3.0</footer>
+</body>
+</html>

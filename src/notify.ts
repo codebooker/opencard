@@ -2,7 +2,7 @@ import nodemailer, { Transporter } from "nodemailer";
 import { config, mailEnabled } from "./config";
 import { resolveRecipients, buildLeadEmail } from "./routing";
 import { prisma } from "./db";
-import { assertPublicUrl } from "./ssrf";
+import { safeFetch } from "./ssrf";
 
 // Lead notifications: resolve recipients via routing, then email them (or log the
 // intended delivery when SMTP isn't configured). Never throws into the caller.
@@ -59,14 +59,12 @@ export async function sendMail(to: string[], subject: string, text: string): Pro
 // page's "Send test" button.
 export async function postChatWebhook(url: string, text: string): Promise<{ ok: boolean; status?: number; error?: string }> {
   try {
-    // SSRF guard: tenant-configured chat hook resolved + range-checked at send time.
-    const safe = await assertPublicUrl(url);
-    if (!safe.ok) return { ok: false, error: safe.error || "Webhook URL not allowed." };
-    const resp = await fetch(url, {
+    const resp = await safeFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
       signal: AbortSignal.timeout(6000),
+      maxResponseBytes: 64_000,
     });
     return resp.ok ? { ok: true, status: resp.status } : { ok: false, status: resp.status, error: `HTTP ${resp.status}` };
   } catch (e: any) {

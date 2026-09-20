@@ -1,73 +1,21 @@
-# OpenCard reverse proxy.
-#
-# TLS uses a Cloudflare Origin Certificate (see deploy/README.md) placed at
-# deploy/certs/origin.pem + origin.key, covering:
-#   opencard.id, *.opencard.id, tapshare.cards, *.tapshare.cards
-# Set Cloudflare SSL/TLS mode to "Full (strict)". Caddy serves those certs and
-# does NOT run ACME (Cloudflare terminates TLS at its edge).
-#
-# The real Host header is preserved so the app can resolve the tenant from the
-# subdomain (e.g. acme.opencard.id).
-
+# Optional, generic HTTPS proxy for a single self-hosted OpenCard instance.
+# APP_DOMAIN is the hostname from APP_URL. Caddy manages public certificates.
 {
-	# On-demand TLS for client custom domains (branded login). Before issuing a
-	# Let's Encrypt cert for a hostname, Caddy asks the app, which only approves
-	# hostnames a client registered (TenantDomain.approved). This prevents random
-	# hosts pointed at us from triggering unbounded cert issuance.
 	on_demand_tls {
-		ask http://web_a:3000/tls/authorize
+		ask http://web:3000/tls/authorize
 	}
 }
 
-# Two app instances; deploys restart them one at a time (see deploy.yml).
-# Active health checks take a restarting instance out of rotation, and
-# lb_try_duration retries an in-flight request against the other instance if a
-# connection fails — so a rolling restart drops zero requests.
-(proxy) {
-	encode gzip
-	header -Server
-	reverse_proxy web_a:3000 web_b:3000 {
-		lb_policy first
-		lb_try_duration 8s
-		lb_try_interval 250ms
-		fail_duration 5s
-		health_uri /healthz
-		health_interval 3s
-		health_timeout 3s
-	}
+{$APP_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:3000
 }
 
-# App + admin, and per-tenant subdomains (opencard.id origin cert).
-opencard.id, www.opencard.id {
-	tls /certs/opencard.pem /certs/opencard.key
-	import proxy
-}
-*.opencard.id {
-	tls /certs/opencard.pem /certs/opencard.key
-	import proxy
-}
-
-# Public card-sharing pages (tapshare.cards origin cert).
-tapshare.cards, www.tapshare.cards {
-	tls /certs/tapshare.pem /certs/tapshare.key
-	import proxy
-}
-*.tapshare.cards {
-	tls /certs/tapshare.pem /certs/tapshare.key
-	import proxy
-}
-
-# Client custom domains for branded login (e.g. cards.mullinaxford.com), CNAME'd
-# to us. Any host not matched above falls here; Caddy obtains a Let's Encrypt cert
-# on demand, gated by the ask endpoint in the global block.
-#
-# PRODUCTION ONLY: this needs ports 80/443 reachable from the public internet for
-# the ACME challenge. The current box is firewalled to Cloudflare IPs only, so
-# this block stays inert here — client custom domains take effect on the
-# production VM once the firewall is opened and DNS points at it.
+# Additional login hosts registered and approved in Admin > Domains.
 https:// {
 	tls {
 		on_demand
 	}
-	import proxy
+	encode zstd gzip
+	reverse_proxy web:3000
 }

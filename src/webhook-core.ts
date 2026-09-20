@@ -2,7 +2,7 @@ import crypto from "crypto";
 
 // Pure webhook helpers — no db/config, so they're unit-testable in isolation.
 
-// HMAC-SHA256 signature over the raw request body, prefixed like GitHub/Stripe.
+// HMAC-SHA256 signature over the raw request body, prefixed like GitHub.
 export function signBody(secret: string, body: string): string {
   return "sha256=" + crypto.createHmac("sha256", secret).update(body).digest("hex");
 }

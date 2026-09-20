@@ -2,7 +2,9 @@
 
 ## Executive Summary
 
-OpenCard is a server-rendered Node.js/TypeScript application for digital business cards, lead capture, dealership/rooftop QR assets, admin management, directory provisioning, SSO, CRM/webhook integrations, billing, and data export/retention. It is moving from a self-hosted internal tool toward a multi-tenant SaaS shape.
+> Historical review: this analysis predates OpenCard's single-business self-hosting transition. SaaS, billing, deployment, and security-state descriptions below may no longer match the current code. Use the current README, deployment guide, and source as authoritative.
+
+OpenCard was a server-rendered Node.js/TypeScript application for digital business cards, lead capture, dealership/rooftop QR assets, admin management, directory provisioning, SSO, CRM/webhook integrations, billing, and data export/retention. It was moving from a self-hosted internal tool toward a multi-tenant SaaS shape.
 
 The project is compact and understandable, with many targeted unit tests and a simple operational model. The main maturity gaps are around multi-tenant security hardening, route-level authorization consistency, outbound integration safety, documentation drift, and operational polish for production SaaS use.
 
@@ -208,4 +210,3 @@ Missing or recommended tests:
 - Harden Docker runtime with a non-root user and stricter writable paths.
 - Improve operational runbooks for backup restore, secret rotation, incident response, and dependency upgrades.
 - Review major dependency upgrades: Prisma 7, Express 5, Stripe 22, Dotenv 17.
-

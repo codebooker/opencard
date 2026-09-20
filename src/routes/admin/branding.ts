@@ -1,10 +1,11 @@
 // Admin route group: branding (split from admin.ts, CQ-05).
 import {
   Router, CNAME_TARGET, Prisma, SERVER_IPS, asArray, assetTypeLabel, audit, campaignBanner,
-  canAdd, clean, config, currentTerminology, evaluateDomain, forbidden, limitReached, normalizeHost,
+  canAdd, clean, config, currentTerminology, evaluateDomain, forbidden, isOrgLimitReached, limitReached, normalizeHost,
   orgIdForBrand, page, parseAddress, parseCampaignRoutingLines, parseCtaLines, parseOemBrands, parseQrDesign, path,
   presetByKey, prisma, qrDesignFromForm, qrSvg, reqAdmin, resolveDomainDns, setTenantDomain, signatureConfig,
-  uniqueAssetSlug, upload, uploadedUrl,
+  TenantDomainConflictError, TenantDomainEntitlementError,
+  uniqueAssetSlug, upload, uploadedUrl, withOrgLimit,
 } from "./context";
 import { RBAC } from "./context";
 import { V } from "./context";
@@ -12,11 +13,16 @@ import { V } from "./context";
 export function registerBrandingRoutes(router: Router) {
   const adminRouter = router;
 
+function tenantDomainError(res: any, e: unknown) {
+  if (e instanceof TenantDomainConflictError) return res.status(409).send(e.message);
+  if (e instanceof TenantDomainEntitlementError) return res.status(403).send(e.message);
+  throw e;
+}
+
 // ---------- brands ----------
 adminRouter.get("/brands/new", async (req, res) => {
   if (!RBAC.canCreateBrand(reqAdmin(req))) return forbidden(res);
-  const orgNew = await prisma.org.findUnique({ where: { id: reqAdmin(req).orgId }, select: { idCardsEnabled: true } });
-  res.send(V.brandForm(undefined, undefined, await currentTerminology(reqAdmin(req).orgId), !!orgNew?.idCardsEnabled));
+  res.send(V.brandForm(undefined, undefined, await currentTerminology(reqAdmin(req).orgId)));
 });
 adminRouter.get("/brands/:id/edit", async (req, res) => {
   if (!await RBAC.canManageBrandScoped(reqAdmin(req),req.params.id)) return forbidden(res);
@@ -30,8 +36,7 @@ adminRouter.get("/brands/:id/edit", async (req, res) => {
     locations: brand.locations.length,
     cards: brand.locations.reduce((sum, l) => sum + l._count.cards, 0),
   };
-  const brandOrg = await prisma.org.findUnique({ where: { id: brand.orgId }, select: { idCardsEnabled: true } });
-  res.send(V.brandForm(brand, stats, t, !!brandOrg?.idCardsEnabled));
+  res.send(V.brandForm(brand, stats, t));
 });
 // Live preview for the QR designer (admin-authed; params validated by
 // parseQrDesign, hostile values fall back to safe defaults).
@@ -55,28 +60,34 @@ adminRouter.get("/qr-preview", async (req, res) => {
 adminRouter.post("/brands", upload.single("logoFile"), async (req, res) => {
   const p = reqAdmin(req);
   if (!RBAC.canCreateBrand(p)) return forbidden(res);
-  if (!(await canAdd(p.orgId, "brands"))) return limitReached(res, "brand");
   const b = req.body;
   const newLogoUrl = uploadedUrl(req, "logoFile") || clean(b.logoUrl);
-  await prisma.brand.create({
-    data: {
-      orgId: p.orgId,
-      name: b.name,
-      logoUrl: newLogoUrl,
-      idCardBack: b.idCardBack === "triangles" ? "triangles" : "cubes",
-      primaryColor: b.primaryColor || "#1f6f43",
-      textColor: b.textColor || "#111827",
-      bgColor: b.bgColor || "#ffffff",
-      font: b.font || "system",
-      layout: b.layout || "classic",
-      showQr: !!b.showQr,
-      qrDesign: qrDesignFromForm(b, newLogoUrl),
-      selfEditFields: asArray(b.selfEditFields),
-      leadFields: b.leadDefault ? Prisma.DbNull : asArray(b.leadFields),
-      leadConsentText: b.leadDefault ? null : clean(b.leadConsentText),
-      ...campaignBanner(b),
-    },
-  });
+  try {
+    await withOrgLimit(p.orgId, "brands", () =>
+      prisma.brand.create({
+        data: {
+          orgId: p.orgId,
+          name: b.name,
+          logoUrl: newLogoUrl,
+          idCardBack: b.idCardBack === "triangles" ? "triangles" : "cubes",
+          primaryColor: b.primaryColor || "#1f6f43",
+          textColor: b.textColor || "#111827",
+          bgColor: b.bgColor || "#ffffff",
+          font: b.font || "system",
+          layout: b.layout || "classic",
+          showQr: !!b.showQr,
+          qrDesign: qrDesignFromForm(b, newLogoUrl),
+          selfEditFields: asArray(b.selfEditFields),
+          leadFields: b.leadDefault ? Prisma.DbNull : asArray(b.leadFields),
+          leadConsentText: b.leadDefault ? null : clean(b.leadConsentText),
+          ...campaignBanner(b),
+        },
+      })
+    );
+  } catch (e) {
+    if (isOrgLimitReached(e)) return limitReached(res, "brand");
+    throw e;
+  }
   res.redirect("/admin");
 });
 adminRouter.post("/brands/:id", upload.single("logoFile"), async (req, res) => {
@@ -103,8 +114,12 @@ adminRouter.post("/brands/:id", upload.single("logoFile"), async (req, res) => {
       ...campaignBanner(b),
     },
   });
-  await setTenantDomain(brand.orgId, { brandId: brand.id }, "admin", b.adminDomain);
-  await setTenantDomain(brand.orgId, { brandId: brand.id }, "user", b.userDomain);
+  try {
+    await setTenantDomain(brand.orgId, { brandId: brand.id }, "admin", b.adminDomain);
+    await setTenantDomain(brand.orgId, { brandId: brand.id }, "user", b.userDomain);
+  } catch (e) {
+    return tenantDomainError(res, e);
+  }
   res.redirect("/admin");
 });
 
@@ -289,20 +304,26 @@ adminRouter.post("/locations", upload.single("logoFile"), async (req, res) => {
   const p = reqAdmin(req);
   const b = req.body;
   if (!(await RBAC.canManageBrandScoped(p, b.brandId))) return forbidden(res);
-  if (!(await canAdd(p.orgId, "locations"))) return limitReached(res, "location");
-  await prisma.location.create({
-    data: {
-      brandId: b.brandId,
-      orgId: await orgIdForBrand(b.brandId),
-      name: b.name,
-      code: clean(b.code),
-      logoUrl: uploadedUrl(req, "logoFile") || clean(b.logoUrl),
-      primaryColor: clean(b.primaryColor),
-      layout: clean(b.layout),
-      address: parseAddress(b) || undefined,
-      ...rooftopProfile(b),
-    },
-  });
+  try {
+    await withOrgLimit(p.orgId, "locations", async () =>
+      prisma.location.create({
+        data: {
+          brandId: b.brandId,
+          orgId: await orgIdForBrand(b.brandId),
+          name: b.name,
+          code: clean(b.code),
+          logoUrl: uploadedUrl(req, "logoFile") || clean(b.logoUrl),
+          primaryColor: clean(b.primaryColor),
+          layout: clean(b.layout),
+          address: parseAddress(b) || undefined,
+          ...rooftopProfile(b),
+        },
+      })
+    );
+  } catch (e) {
+    if (isOrgLimitReached(e)) return limitReached(res, "location");
+    throw e;
+  }
   res.redirect("/admin");
 });
 adminRouter.post("/locations/:id", upload.single("logoFile"), async (req, res) => {
@@ -323,8 +344,12 @@ adminRouter.post("/locations/:id", upload.single("logoFile"), async (req, res) =
       ...signatureConfig(b),
     },
   });
-  await setTenantDomain(loc.orgId, { locationId: loc.id }, "admin", b.adminDomain);
-  await setTenantDomain(loc.orgId, { locationId: loc.id }, "user", b.userDomain);
+  try {
+    await setTenantDomain(loc.orgId, { locationId: loc.id }, "admin", b.adminDomain);
+    await setTenantDomain(loc.orgId, { locationId: loc.id }, "user", b.userDomain);
+  } catch (e) {
+    return tenantDomainError(res, e);
+  }
   res.redirect("/admin");
 });
 
@@ -381,7 +406,11 @@ adminRouter.post("/domains", async (req, res) => {
     scope = { brandId: brand.id };
   }
   if (!(await RBAC.canManageBrandScoped(p, brandForPerm))) return forbidden(res);
-  await setTenantDomain(orgId, scope, kind as "admin" | "user", host);
+  try {
+    await setTenantDomain(orgId, scope, kind as "admin" | "user", host);
+  } catch (e) {
+    return tenantDomainError(res, e);
+  }
   audit(req, p, "domain.add", { targetType: "TenantDomain", summary: `${host} (${kind})` });
   res.redirect("/admin/domains?added=1");
 });
@@ -396,10 +425,26 @@ adminRouter.post("/domains/:id/verify", async (req, res) => {
   const brandId = domainBrandId(d);
   if (!brandId || !(await RBAC.canManageBrandScoped(p, brandId))) return forbidden(res);
   const verdict = evaluateDomain(await resolveDomainDns(d.host), { cnameTarget: CNAME_TARGET, ips: SERVER_IPS });
-  await prisma.tenantDomain.update({
-    where: { id: d.id },
-    data: { verifyState: verdict.ok ? "verified" : "pending", verifiedAt: new Date() },
-  });
+  await prisma.$transaction([
+    prisma.tenantDomain.update({
+      where: { id: d.id },
+      data: {
+        approved: verdict.ok,
+        verifyState: verdict.ok ? "verified" : "pending",
+        verifiedAt: verdict.ok ? new Date() : null,
+      },
+    }),
+    // If DNS no longer proves control, stop treating this host as the
+    // workspace's canonical SAML address as well.
+    ...(verdict.ok
+      ? []
+      : [
+          prisma.org.updateMany({
+            where: { id: d.orgId, customDomain: d.host },
+            data: { customDomain: null },
+          }),
+        ]),
+  ]);
   res.redirect(`/admin/domains?checked=${encodeURIComponent(d.host)}&msg=${encodeURIComponent(verdict.reason)}`);
 });
 
@@ -409,7 +454,13 @@ adminRouter.post("/domains/:id/delete", async (req, res) => {
   if (!d) return res.redirect("/admin/domains");
   const brandId = domainBrandId(d);
   if (!brandId || !(await RBAC.canManageBrandScoped(p, brandId))) return forbidden(res);
-  await prisma.tenantDomain.delete({ where: { id: d.id } });
+  await prisma.$transaction([
+    prisma.tenantDomain.delete({ where: { id: d.id } }),
+    prisma.org.updateMany({
+      where: { id: d.orgId, customDomain: d.host },
+      data: { customDomain: null },
+    }),
+  ]);
   audit(req, p, "domain.remove", { targetType: "TenantDomain", targetId: d.id, summary: d.host });
   res.redirect("/admin/domains");
 });
@@ -484,31 +535,20 @@ function assetDataFromBody(b: any) {
 // can see and create new ones without digging into a location's Assets page.
 adminRouter.get("/qr", async (req, res) => {
   const p = reqAdmin(req);
-  // Platform console (not drilled into a client): tenants must not blend into
-  // one create form. Show a cross-client overview and point staff at the
-  // client drill-in flow for creation.
-  const platformConsole = RBAC.seesAllOrgs(p);
   const locIds = await RBAC.accessibleLocationIds(p);
   const [assets, locations, t] = await Promise.all([
     prisma.asset.findMany({
       where: { locationId: { in: locIds } },
-      include: { location: { select: { name: true } }, org: { select: { name: true } } },
+      include: { location: { select: { name: true } } },
       orderBy: { createdAt: "desc" },
     }),
-    platformConsole
-      ? Promise.resolve([])
-      : prisma.location.findMany({
-          where: { id: { in: locIds } },
-          select: { id: true, name: true, brand: { select: { name: true } } },
-          orderBy: { name: "asc" },
-        }),
-    currentTerminology(p.actingOrgId || p.orgId),
+    prisma.location.findMany({
+      where: { id: { in: locIds } },
+      select: { id: true, name: true, brand: { select: { name: true } } },
+      orderBy: { name: "asc" },
+    }),
+    currentTerminology(p.orgId),
   ]);
-  let actingClientName: string | undefined;
-  if (p.actingOrgId) {
-    const org = await prisma.org.findUnique({ where: { id: p.actingOrgId }, select: { name: true } });
-    actingClientName = org?.name;
-  }
   res.send(
     V.qrCodesView({
       assets,
@@ -516,17 +556,12 @@ adminRouter.get("/qr", async (req, res) => {
       cardBaseUrl: config.cardUrl,
       created: req.query.created ? String(req.query.created) : null,
       locationLabel: t.locationSingular,
-      platformConsole,
-      actingClientName,
     })
   );
 });
 
 adminRouter.post("/qr", async (req, res) => {
   const p = reqAdmin(req);
-  // Creation is per-tenant: platform staff must drill into a client first so a
-  // new code can't be filed under the wrong org.
-  if (RBAC.seesAllOrgs(p)) return forbidden(res, "Open a client workspace first, then create their QR codes.");
   const locIds = await RBAC.accessibleLocationIds(p);
   const locationId = clean(req.body?.locationId);
   if (!locationId || !locIds.includes(locationId)) return forbidden(res);
